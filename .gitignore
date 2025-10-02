@@ -1,0 +1,36 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Logs & caches
+logs/
+*.log
+*.tmp
+*.cache/
+.cache/
+*.jsonl
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Run artifacts
+run/
+runtime/
+tmp/
+captures/
+renders/
+
+# Large local assets/models
+models/
+weights/
+checkpoints/
+assets/
