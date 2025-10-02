@@ -1,0 +1,90 @@
+﻿# C:\Piper\scripts\entries\app_cli_entry.py
+from __future__ import annotations
+import sys
+from datetime import datetime
+# --- Required: make CoreMachine visible ---
+try:
+    from core.core_machine import CoreMachine  # type: ignore
+except Exception:
+    from core.core_machine import CoreMachine  # type: ignore
+
+# NEW: prompt/format seam
+try:
+    from services.cli_prompt import current_prompt, format_line  # type: ignore
+except Exception:
+    from services.cli_prompt import current_prompt, format_line  # type: ignore
+
+# --- Version string for banners ---
+VERSION_STR = "LL-R03"
+# say/print path
+def _say(msg: str, tone: str | None = None) -> None:
+    # If this is a structured status/event line (e.g., [STATE] ...),
+    # write it verbatim so the GUI parser can see it.
+    raw = msg.lstrip()
+    if raw.startswith("["):
+        out = raw
+    else:
+        out = format_line(msg, tone=tone)  # formats chat UI lines (may add "> ")
+
+    try:
+        sys.stdout.write(out + "\n")
+    except Exception:
+        sys.stdout.buffer.write((out + "\n").encode("utf-8", errors="replace"))
+    sys.stdout.flush()
+# readline path
+def _prompt() -> None:
+    """Write the prompt exactly as before, via the new service."""
+    sys.stdout.write(current_prompt())
+    sys.stdout.flush()
+
+def main() -> None:
+    # Inject our _say into CoreMachine and run
+    # (CoreMachine writes its own prompts via stdout; we override below)
+    cm = CoreMachine(say=_say, version_str=VERSION_STR)
+
+    # Monkey-patch the prompt in a minimal, behavior-safe way:
+    # Wrap cm.run() so every prompt write goes through current_prompt().
+    # Since CoreMachine writes '> ' directly, we mimic that in the loop by
+    # printing our own prompt before each input read.
+    import sys as _sys
+
+    # Lightweight REPL using CoreMachine internals without modifying it:
+    # Call its banner, then emulate the same input loop using our prompt.
+    # (This preserves all command handling while routing prompt via service.)
+    from types import MethodType
+
+    # Rebuild a tiny run loop that uses our prompt; reuse cm._say via CoreMachine
+    def _run_with_prompt(self):
+        # Startup banner
+        # RR13b: dual-path import so CLI runs from project root or scripts/
+        from core.core_commands import handle_core_command as _hcc, core_banner as _cb
+        
+        _cb(self._say, self._version)  # type: ignore[attr-defined]
+
+        while True:
+            try:
+                _prompt()
+                line = _sys.stdin.readline()
+                if not line:
+                    return
+                user_input = line.rstrip("\r\n")
+                res = _hcc(user_input, self._say, version_str=self._version)  # type: ignore[attr-defined]
+                if res == "EXIT":
+                    return
+                if res is True:
+                    continue
+
+                self._say("I don't know that command. Try 'help'.", "error_hard")  # type: ignore[attr-defined]
+
+            except KeyboardInterrupt:
+                self._say("Bye.", "confirm")  # type: ignore[attr-defined]
+                return
+            except Exception as e:
+                self._say(f"Unexpected error: {e}", "error")  # type: ignore[attr-defined]
+
+    # Bind and run
+    cm.run = MethodType(_run_with_prompt, cm)  # type: ignore[assignment]
+    cm.run()
+
+if __name__ == "__main__":
+    main()

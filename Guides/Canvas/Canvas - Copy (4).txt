@@ -1,0 +1,253 @@
+# Piper - Living Context
+
+# 🔝 Always-Read Section
+
+## Rules
+
+* **Canvas First** → Before every reply, re-read this top section (down to end of Usage).
+* User is the architect; ChatGPT is the railmaster/developer. Provide plain-English, step-by-step guidance and drive the rails without asking “what next?”.
+* If any instruction conflicts, **this section overrides chat history**.
+* Maintain state across replies (Rails, Known Issues, KGB, Architecture, Call Graph).
+* ChatGPT updates Canvas only for rails progress, KGB title, and callgraph.
+
+### Development Flow
+
+* Stay on rails; off-rail requests = PARKED.
+* One change → smoke test → KGB tag. Tiny scope: plan → patch → smoke → tag → next.
+* Tag format: `KGB-YYYY-MM-DD_<RAIL><step>_<slug>`
+* Prefer undo/backup; keep changes atomic and auditable. If a step fails twice → REVERT to last KGB snapshot and PARK it.
+* **Railmaster auto‑unparks:** I decide when to unpark parked items and where they belong. I do **not** ask which to do first; I will unpark or re‑park and record it in Rails/Parked with rationale.
+* No piling changes or “fix-the-fix” loops.
+* Layout constants live in `ui/layout_constants.py`. All geometry/theme numbers must come from there.
+* Edits: full-script if ≤200 lines, full-function if >200 lines. Warn if file >300 lines or function >50 lines.
+* Prefer components (ui/components/\*) and thin entries (<150 lines).
+
+### Response Discipline
+
+Every response must follow the Step Response Template structure and any updates applied to the Canvas so the user can confirm.
+
+### Step Response Template
+
+```
+Canvas: confirm if Always Read part read and any other section
+Chapter: <name> | Ring: <Core/Services/UI> | Scope: ✅/🟨/🛑
+Plan: ie one tiny change only
+Patch: (full file or full function; exact locations if needed)
+Smoke (≤3 lines): run → expect → pass condition
+KGB: tag on pass / revert+park on fail
+Parking: list any out-of-scope or failing items carried forward
+Compliance: rings clean; invariants honored; SAFE_MODE; no drift
+Examined: scripts that were fully read in Drive/Dropbox mirrors top-to-bottom
+Idiotproofed: user edits in scripts confirmed by re-open/re-read
+Guardrail: append one-liner — "If this correction does not fix the issue, [revert/maintain]."
+```
+
+### Mirrored Files Rule
+
+* Mirrors are the only Truth = .txt mirrors (Drive + Dropbox).
+* **Always Check**: never ask user to check, never assume, never say "if it exist"
+* **If both mirrors fail rule** → only say: `> Need Drive/Dropbox access to continue.`
+
+## Folder Layout & Architecture (scripts only)
+
+```
+common/
+  config.py        # app config helpers (shared)
+  logging.py       # project log helpers (⚠ shadow risk vs stdlib; rename → common/log_utils.py)
+  types.py         # simple datatypes
+  utils.py         # small shared utilities
+
+core/
+  bg_poller.py     # background tick/poll loop helpers
+  bridge.py        # glue between core events and UI/log
+  core_app.py      # top-level core bootstrap
+  core_commands.py # command handling (CLI/Dev tools)
+  core_machine.py  # state machine (SLEEPING→…→SPEAKING)
+  event_queue.py   # queued events
+  events.py        # event definitions
+  flags.py         # runtime feature/DEV flags
+  poll_helpers.py  # polling helpers
+  router.py        # routes events to handlers
+  startup.py       # init order, env
+  state_defs.py    # state enums/labels
+  timers.py        # timing utilities
+  transition_plan.py # transition map/guard rails
+
+entries/
+  _app_gui_entry_impl.py # GUI glue: imports dpg_app/panes; schedules refresh (target ≤150 lines)
+  app_cli_entry.py       # CLI entrypoint
+  app_gui_entry.py       # thin shim → _app_gui_entry_impl.run()
+  app_wake_entry.py      # wake-only demo/entry
+
+services/
+  adapters/mock_asr_wake.py   # test double (wake+ASR)
+  asr/vosk_adapter.py         # ASR adapter (modular)
+  memory/                     # memory svc placeholder
+  persona/                    # persona svc placeholder
+  tts/speak_once.py           # single-shot TTS
+  tts/tts_manager.py          # TTS manager stub/interface
+  wake/porcupine_adapter.py   # wake-word adapter (modular)
+  base.py                     # service base helpers
+  cli_prompt.py               # current_prompt(), format_line()
+  persona_adapter.py          # persona bridge
+  asr_vosk.py                 # ⚠ legacy shim → move to services/old/
+  wake_porcupine.py           # ⚠ legacy shim → move to services/old/
+
+ui/
+  components/
+    chat_pane.py        # chat render area (DPG)
+    controls_pane.py    # dev controls (flag-gated)
+    logs_pane.py        # live log tail
+    status_pane.py      # small indicators
+  helpers/
+    avatar_fix.py       # avatar sizing/crop helpers (pending tune)
+    chatlog_writer.py   # (GUI) chat logging
+    dev_adapters.py     # dev-only bridges
+    dev_controls_mount.py # wire dev controls
+    gui_ingest.py       # parse tail lines → UI state cues
+    gui_loop.py         # GUI main loop helpers
+    header_bridge.py    # fallback hb_label writer (shim)
+    header_utils.py     # header utilities
+    init_core.py        # init orchestration helpers
+    layout_utils.py     # layout helpers
+    refresh_core.py     # push-only refresh helpers
+    scroll_utils.py     # autoscroll logic (pending tune)
+    sink_utils.py       # sinks for tailed lines
+    state_dot.py        # state→color mapping utils
+    tag_utils.py        # tag parsing
+    theme_utils.py      # theme helpers
+    viewport_utils.py   # viewport sizing/pos
+  pane_parts/
+    avatar_pane.py      # avatar region
+    chat_pane.py        # chat region (pane_parts variant)
+    header_bar.py       # SINGLE AUTHORITY: set_state_dot(), heartbeat label
+    logs_pane.py        # logs region
+  dpg_app.py            # DearPyGui bootstrap + viewport
+  heartbeat.py          # hb text source
+  layout_constants.py   # ALL geometry/theme numbers
+  panes.py              # compose components/pane_parts (no header logic)
+  state_header.py       # state label helpers (reads from log/model)
+  tailer.py             # file tailer for core.log
+  theme.py              # theme palette
+  _panes_impl.py, dev_tools.py, ipc_child.py
+
+scripts/tools/b04_splitter.py   # splitter; __all__ pruned of set_hb_text
+```
+
+### KGB
+
+*Latest realized snapshot tag:* `KGB-2025-09-09_RR04_step6_resmoke`
+
+### *Drives* \piper guides
+
+Key Files.txt = File role map (GUI orchestration, state dot, hb text, layout const, scroll, avatar).
+
+Anchor.txt = Project rails/constitution (rules, chapters, invariants, runbook).
+
+CLI+GUI Trailing & Testing Guide.txt = 2-terminal run instructions + trailing mechanics + smoke/fix.
+
+State Color Coding Guide.txt = State→color map + dwell + code snippet + smoke test.
+
+## Call Graph
+
+```
+entries.app_gui_entry:run()
+ → entries._app_gui_entry_impl:run()
+   → ui.dpg_app:run(viewport, flags)
+     → ui.panes:init_ui()
+       → pane_parts.header_bar:init()
+       → pane_parts.chat_pane:init()
+       → pane_parts.logs_pane:init()
+       → components.controls_pane:init()   [if DEV flag]
+     → ui.panes:refresh_ui(state_text)
+       → (push-only) helpers.refresh_core:*        # NO header/state parsing
+       → pane_parts.header_bar.set_state_dot(name) # THE ONLY header authority
+       → helpers.header_bridge.set_hb_text(txt)    # fallback label update only
+
+core.core_machine (model-driven later)
+ → services.cli_prompt.current_prompt()/format_line()
+ → core.logbus.event()/state() → file
+ → ui tails logs (no dwell; model triggers state)
+```
+
+---
+
+## Index (Read Every Time)
+
+### Current Rails
+
+*Active phase and current step only.*
+
+### Parked
+
+*Deferred items with note on when they’ll be unparked.*
+
+### Known Issues
+
+*List of active bugs or broken features.*
+
+---
+
+## Usage
+
+* Enforce **Rules** every reply.
+* Check Index chapters if relevant (Rails, Known Issues, etc.).
+* Keep non-essential sections untouched unless explicitly updated.
+* After code changes: update **Call Graph, Rails, Known Issues, Parked, and KGB**.
+* If inconsistencies are found between project mirrors and this canvas, they must be called out and corrected immediately.
+* Guides are external; always pull them from Drive/Dropbox mirrors if needed.
+
+---
+
+# ⬇️ Read-When-Needed Section
+
+## Current Rails (extended)
+
+*From README\_RAILS — remaining actionable rails; completed items removed for clarity.*
+**We are here:** Phase **H**.
+
+### Phase G — Tests & Linters (wrap-up)
+
+* **G01 — Import smoke tests** → finalize & re-run.
+* **G02 — Linter configs (ruff/black)** → finalize (no code reformat yet).
+
+### Phase H — Cleanup & Closure (active)
+
+* **H01 — Remove dead placeholders & legacy shims**
+
+  * Move `services/asr_vosk.py` and `services/wake_porcupine.py` → `services/old/`; update imports to modular adapters. (Spotted in mirrors)
+  * Delete any empty/obsolete modules; ensure imports pass.
+* **H02 — Size & structure audit**
+
+  * Enforce targets (entry ≤150; panes ≤120). Warn if `_app_gui_entry_impl.py` >150.
+  * Ensure `common/logging.py` is **renamed** → `common/log_utils.py`; fix imports (shadow-risk cleanup).
+* **H03 — Wrap & snapshot**
+
+  * README\_FIRST note; produce final KGB zip `RERAIL_SOLIDBASE_WRAP`.
+
+**Immediate focus (Known Issues folded into rails):**
+
+* Avatar zoom/crop fix → `ui/helpers/avatar_fix.py` + `ui/pane_parts/avatar_pane.py`.
+* Autoscroll stickiness → `ui/helpers/scroll_utils.py` + chat/logs call sites.
+
+## Known Issues (extended)
+
+* **Avatar scale is wrong (zoomed-in).**
+  *Fix path:* `layout_constants.py` (knobs) + `ui/helpers/avatar_fix.py` (calc) + `ui/pane_parts/avatar_pane.py` (apply).
+
+* **Autoscroll sometimes doesn’t stick.**
+  *Fix path:* `ui/helpers/scroll_utils.py` + `chat_pane.py` / `logs_pane.py` append sites.
+
+* **Stdlib logging shadow risk.**
+  *Symptom:* `common/logging.py` can shadow Python’s stdlib `logging`.
+  *Fix path:* rename to `common/log_utils.py` and update imports (planned under H02).
+
+* **Legacy adapter shims present.**
+  *Symptom:* `services/asr_vosk.py` and `services/wake_porcupine.py` still in tree.
+  *Fix path:* move to `services/old/` and ensure modular imports are canonical (planned under H01).
+
+* **Avatar scale is wrong (zoomed-in).**
+  *Fix path:* `layout_constants.py` (knobs) + `ui/helpers/avatar_fix.py` (calc) + `ui/pane_parts/avatar_pane.py` (apply).
+
+* **Autoscroll sometimes doesn’t stick.**
+  *Fix path:* `ui/helpers/scroll_utils.py` + `chat_pane.py` / `logs_pane.py` append sites.

@@ -1,0 +1,159 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: state_label @ line 8
+--------------------------------------------------------------------------------
+     3: from __future__ import annotations
+     4: import argparse, os, sys, shutil
+     5: from pathlib import Path
+     6: 
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_label @ line 241
+--------------------------------------------------------------------------------
+   236:     try:
+   237:         dpg.configure_item("state_dot_circle", fill=color)
+   238:     except Exception:
+   239:         pass
+   240:     try:
+   241:         dpg.set_value("state_label", f"State: {state_text}")
+   242:     except Exception:
+   243:         pass
+   244: 
+   245: # ---------- Public API ----------
+   246: def init_ui(log_path: str) -> None:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_label @ line 288
+--------------------------------------------------------------------------------
+   283:             dpg.add_spacer(width=16)
+   284:             with dpg.drawlist(width=14, height=14, tag="state_dot_draw"):
+   285:                 dpg.draw_circle(center=(7, 7), radius=6, color=(0, 0, 0, 0),
+   286:                                 fill=_DEFAULT_DOT, tag="state_dot_circle")
+   287:             dpg.add_spacer(width=6)
+   288:             dpg.add_text("State: SLEEPING", tag="state_label")
+   289:             dpg.add_spacer(width=12); dpg.add_text("Â·"); dpg.add_spacer(width=8)
+   290:             dpg.add_text("Last update: -", tag="hb_label")
+   291:             dpg.add_spacer(width=12); dpg.add_text("Â·"); dpg.add_spacer(width=8)
+   292:             dpg.add_text("Tone: neutral", tag="tone_label")
+   293:             dpg.add_spacer(width=12); dpg.add_text("Â·"); dpg.add_spacer(width=8)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: state_label @ line 202
+--------------------------------------------------------------------------------
+   197:                     dpg.add_button(label="Inj Log [DEV]", callback=_inject_log)
+   198:                     dpg.add_button(label="Inj Error [DEV]", callback=_inject_error)
+   199: 
+   200:             # --- Tab 2: State ---
+   201:             with dpg.tab(label="State", tag="dev_tab_state"):
+   202:                 dpg.add_text("State:", tag="dev_state_label")
+   203:                 dpg.add_text("Queued:", tag="dev_state_queue")
+   204:                 dpg.add_text("Last update:", tag="dev_state_age")
+   205:                 dpg.add_spacer(height=4)
+   206: 
+   207:                 # UI-only state preview dropdown that emits a control line the GUI ingests
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: state_label @ line 231
+--------------------------------------------------------------------------------
+   226:                     pass
+   227: 
+   228:                 # periodic refresher for labels
+   229:                 def _dev_state_tick():
+   230:                     try:
+   231:                         dpg.set_value("dev_state_label", f"State: {get_state()}")
+   232:                     except Exception:
+   233:                         pass
+   234:                     try:
+   235:                         q = list(get_queue())
+   236:                         dpg.set_value("dev_state_queue", "Queued: " + (" / ".join(q) if q else "-"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_label @ line 19
+--------------------------------------------------------------------------------
+    14: _DEFAULT = (200, 200, 200, 255)
+    15: 
+    16: def build(log_path: Optional[str] = None) -> None:
+    17:     """
+    18:     Create the header row if it does not exist yet.
+    19:     Tags used elsewhere: state_dot_circle, state_label, hb_label, tone_label, sarcasm_label, tailing_label.
+    20:     Safe to call multiple times.
+    21:     """
+    22:     try:
+    23:         if dpg.does_item_exist("header_row"):
+    24:             return
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_label @ line 35
+--------------------------------------------------------------------------------
+    30:             dpg.add_spacer(width=16)
+    31:             with dpg.drawlist(width=14, height=14, tag="state_dot_draw"):
+    32:                 dpg.draw_circle(center=(7, 7), radius=6, color=(0, 0, 0, 0),
+    33:                                 fill=_DEFAULT, tag="state_dot_circle")
+    34:             dpg.add_spacer(width=6)
+    35:             dpg.add_text("State: SLEEPING", tag="state_label")
+    36:             dpg.add_spacer(width=12); dpg.add_text("·"); dpg.add_spacer(width=8)
+    37:             dpg.add_text("-", tag="hb_label")  # heartbeat text
+    38:             dpg.add_spacer(width=12); dpg.add_text("·"); dpg.add_spacer(width=8)
+    39:             dpg.add_text("Tone: neutral", tag="tone_label")
+    40:             dpg.add_spacer(width=12); dpg.add_text("·"); dpg.add_spacer(width=8)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_label @ line 60
+--------------------------------------------------------------------------------
+    55:     If state_name is not provided, derive it from state_text.
+    56:     """
+    57:     import dearpygui.dearpygui as dpg
+    58: 
+    59:     # --- keep your existing label updates exactly as they are ---
+    60:     try: dpg.set_value("state_label", state_text)
+    61:     except Exception: pass
+    62:     try: dpg.set_value("heartbeat_text", heartbeat_text)
+    63:     except Exception: pass
+    64:     try: dpg.set_value("tone_text", tone_text)
+    65:     except Exception: pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_label @ line 91
+--------------------------------------------------------------------------------
+    86:         _hb.set_state_dot(name)
+    87:     except Exception:
+    88:         pass
+    89:     """Update header labels; inputs are already composed strings."""
+    90:     try:
+    91:         if dpg.does_item_exist("state_label"):
+    92:             dpg.set_value("state_label", state_text)
+    93:         if dpg.does_item_exist("hb_label"):
+    94:             dpg.set_value("hb_label", heartbeat_text)
+    95:         if dpg.does_item_exist("tone_label"):
+    96:             dpg.set_value("tone_label", tone_text)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_label @ line 92
+--------------------------------------------------------------------------------
+    87:     except Exception:
+    88:         pass
+    89:     """Update header labels; inputs are already composed strings."""
+    90:     try:
+    91:         if dpg.does_item_exist("state_label"):
+    92:             dpg.set_value("state_label", state_text)
+    93:         if dpg.does_item_exist("hb_label"):
+    94:             dpg.set_value("hb_label", heartbeat_text)
+    95:         if dpg.does_item_exist("tone_label"):
+    96:             dpg.set_value("tone_label", tone_text)
+    97:         if dpg.does_item_exist("sarcasm_label"):

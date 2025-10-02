@@ -1,0 +1,173 @@
+Accomplished
+
+UTF-8 mojibake scrub (CLI+GUI)
+Replaced problem glyphs (→, –, stray Â·) with ASCII (->, -, ·). Result: no mojibake in chat/logs; CLI “Flow:” line renders cleanly.
+Files touched earlier: core_commands.py, UI header strings.
+
+Sleep command parity
+Ensured sleep shows a visible reply path (“Going to sleep.”) and correct state transitions. Verified in CLI and GUI logs.
+
+Header: single authority + hygiene
+
+Moved all header UI to pane_parts/header_bar.py (dot + labels).
+
+Removed duplicate inline header code from _panes_impl.py.
+
+Fixed double “State:” (now static “State: ” + dynamic name only).
+
+Switched dot to drawlist circle and centralized set_state_dot.
+
+Removed stray/continuous separators; cleaned under-header line.
+
+No fallbacks; no duplicate tag IDs.
+
+Layout alignment and spacing
+
+Tightened gaps: header↔copy-row and copy-row↔panes use the right constants (SPACE.GAP).
+
+Chat column placement fixed (parenting + spacer logic); logs symmetrical.
+
+Introduced / honored offsets so small global nudges are possible without reflow.
+
+Theme & title bar
+
+Introduced a functioning light-blue palette path (global + per-pane) and removed the global “blank theme” override that previously reset colors to grey.
+
+Removed the white Windows title bar via viewport.decorated=False (borderless window).
+
+Bound pane theme to root/chat/logs/avatar so major regions follow the palette (some minor areas remain grey; acceptable for now).
+
+Residue scrub (code hygiene)
+
+Dropped duplicate imports in _panes_impl.py.
+
+Routed root position through constants (L.WINDOW.OFFSET_*).
+
+Made pane theme colors match the light-blue palette when enabled.
+
+Fixed a mojibake comment and unified avatar constants with aliases (HEIGHT/MIN_HEIGHT → mapped to PANEL_H/MIN_PANEL_H).
+
+Cleaned fallback imports and dead code discovered during audits.
+
+Rails / canvas kept in sync
+Collapsed finished rails; kept a lean Known Issues: none state; added the big red banner rule at the top of the canvas.
+
+Failed (or abandoned for now)
+
+Full theme unification across all widgets
+Some sub-widgets still render in default greys. We stopped short of a full audit of every bound theme/component to avoid churn; current state is acceptable to you.
+
+DPG bootstrap peel (I06) & tick/parse extract (I07)
+Not executed yet (prior threads struggled). We prepared the plan and confirmed wrapper availability, but did not merge to avoid destabilizing a working GUI.
+
+Make every layout constant “live”
+We discovered constants defined but not yet wired (e.g., HEADER.BOTTOM_GAP, CHAT.INSET_*, some component autosize flags). We wired the critical ones but did not refactor every component path.
+
+Issues (open / observed)
+
+Theme coverage: A few areas still render grey (non-critical). Root/chat/logs/avatar are blue; minor items may need explicit binds or component-level theme parts to match.
+
+Component vs. pane_parts duplication: Chat/logs exist in multiple builders; the authoritative path works, but duplication remains a latent risk.
+
+Autosize in component builders: Some components (components/chat_pane.py, components/logs_pane.py) historically used autosize_* which can ignore layout_constants if those paths are invoked. Current main path respects constants, but these should be normalized eventually.
+
+Constants clarity: We added/kept aliases for avatar sizing to avoid breakage; a single naming scheme should be chosen later.
+
+Rules, Preferences, & Corrections (to carry forward)
+
+Golden Rule (capital letters, persistent):
+
+ALWAYS CHECK THE LIVE MIRRORS IN THE DRIVES BEFORE PROPOSING CHANGES.
+(Use Dropbox/Google Drive TXT mirrors of the actual .py files. Verify and cite exact lines. No guessing.)
+
+Response / workflow rules
+
+Mirrors-first gate in every patch:
+
+MIRRORS (file + line refs) → 2) BEFORE→AFTER minimal diff → 3) WHY → 4) SMOKE → 5) ROLLBACK.
+
+No fallbacks, no duplicates: Remove dead code, avoid duplicate authority, strip try/except import fallbacks unless required.
+
+Single-authority header: Only pane_parts/header_bar.py builds header UI. Others only place it.
+
+All geometry in layout_constants.py: No magic numbers in panes/components; wire constants where missing.
+
+Patches live in code, not the canvas: Rails in the canvas are for guidance; do not paste code there.
+
+Investigative approach: When behavior surprises (e.g., “no effect”), assume alternate code paths or autosize overrides; confirm by reading mirrors.
+
+Tone/language: Use English by default; only Turkish if you do or if asked.
+
+Minimalism: Every file/function must have a purpose; remove fallbacks/duplication rather than letting “something else” catch it.
+
+Theme rules
+
+Do not bind a global blank theme that overrides custom palettes.
+
+When an env theme is enabled, ensure per-item themes mirror the global palette to avoid resets.
+
+Keep legibility (dark text on light-blue backgrounds); verify hover/selection contrast.
+
+Rails discipline
+
+Keep rails concise; collapse done items; keep Known Issues empty unless real.
+
+KGB tags on successful steps, smoke tests for each slice.
+
+Park non-critical tasks explicitly with where/when they’ll be tackled.
+
+Environment Changes (current state)
+
+Borderless viewport: dpg.configure_viewport(0, decorated=False) — removes the white Windows title bar.
+
+Theme flag: PIPER_UI_THEME=lightblue recognized (global + pane-mirrored); yields pale light-blue backgrounds with dark text in main regions.
+
+(Earlier experimental encoding envs were tried during debugging but final fix was switching glyphs to ASCII; no special encoding envs required now.)
+
+Handoff (what the next thread should do first)
+
+I06 — DPG bootstrap peel (park-lift) [High priority]
+
+Delegate lifecycle (create/show/start/destroy) to ui/dpg_app.run.
+
+Ensure theme application and decorated=False still occur in the correct phase.
+
+Keep tailer/thread/tick scheduling behavior unchanged.
+
+Risk: prior attempts failed due to ordering and missing callbacks; use mirrors and keep the diff minimal.
+
+I07 — Tick/parse extract [High]
+
+Move _refresh_needed/GUI loop helpers into ui/helpers/gui_loop.py to reduce entry size and keep logic centralized.
+
+Confirm “last change” (heartbeat) still ticks and state changes update header/dot.
+
+Theme unification pass [Medium]
+
+Inventory any remaining grey regions; bind them to pane/global theme appropriately (no global overrides).
+
+Verify hover/selection/scrollbar colors in both panes for readability.
+
+Constants wiring cleanup [Medium]
+
+Finish hooking any “dead” constants (e.g., ensure any component builders no longer use autosize_* that bypass layout_constants).
+
+Pick a single authority for chat/logs (component vs. pane_parts) and delete the other.
+
+Quality of life (Optional)
+
+Add a small “× Exit” button in the header (since window is borderless) to call dpg.stop_dearpygui().
+
+Consider a tiny “drag zone” or keyboard shortcut for moving the borderless window if needed.
+
+Standing guardrails for the continuation thread
+
+Start every change with MIRRORS-FIRST proof (file+line cites).
+
+Keep patches surgical; one slice at a time with a smoke.
+
+No code duplication or fallbacks; constants only.
+
+Keep the canvas rails tight and green quickly; park what’s not essential.
+
+If you want, I can spin up the continuation with I06’s exact before→after diffs ready to paste, based solely on the current mirrors.

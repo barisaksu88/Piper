@@ -1,0 +1,46 @@
+﻿# scripts/common/types.py
+# Canonical type hints for Piper Core events & payloads (names only; no behavior).
+
+from __future__ import annotations
+from typing import TypedDict, Literal, Optional, Any
+
+# Robust imports for both launch styles (C:\Piper and C:\Piper\scripts)
+try:
+    from core.state_defs import CoreState, EventType
+except ModuleNotFoundError:
+    from core.state_defs import CoreState, EventType  # type: ignore
+
+# ---- Event payloads ---------------------------------------------------------
+
+class ASRResultPayload(TypedDict, total=False):
+    text: str                    # final recognized text
+    lang: Optional[str]          # e.g., 'en-US', 'tr-TR'
+    confidence: Optional[float]  # 0.0..1.0 if available
+    raw: Optional[Any]           # backend-specific extras
+
+class SpeakPayload(TypedDict, total=False):
+    text: str                    # text to speak (required in practice)
+    voice: Optional[str]         # backend voice hint
+    interrupt: Optional[bool]    # if True, implies StopSpeak before Speak
+
+class ErrorPayload(TypedDict, total=False):
+    where: str                   # module/component name
+    message: str                 # human-readable error
+    detail: Optional[Any]        # exception or extra info
+
+class WakePayload(TypedDict, total=False):
+    keyword: Optional[str]       # which wake word fired
+    score: Optional[float]       # detector score if available
+
+# ---- Convenience aliases ----------------------------------------------------
+
+StateName  = Literal["SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"]
+EventName  = Literal["WakeDetected", "ASRResult", "Speak", "StopSpeak", "Sleep"]
+
+__all__ = [
+    "CoreState", "EventType",
+    "ASRResultPayload", "SpeakPayload", "ErrorPayload", "WakePayload",
+    "StateName", "EventName",
+]
+
+

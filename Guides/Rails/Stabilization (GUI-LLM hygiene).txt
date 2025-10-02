@@ -1,0 +1,192 @@
+Recovery Rails — Chapter: Stabilization (GUI/LLM hygiene)
+
+Objective: Clean modularization drift and align the KGB tag with reality — without adding features. When these rails pass, Overseer will approve the KGB and unlock LLM06 (llama.cpp provider).
+
+Rail R1 — Prune Legacy UI (single authority path)
+
+Scope: ✅ In-scope (UI hygiene)
+Why: Duplicate “components/” tree invites drift; must be removed.
+Files/Paths (Windows):
+
+Root: C:\Piper\scripts
+
+Remove folder: scripts\ui\components\ (entire subtree)
+
+Plan (one step):
+
+Delete scripts\ui\components\* (the whole folder).
+
+Search project for imports of ui.components and fail build if any remain.
+
+Acceptance / Smoke:
+
+python -m scripts.entries.app_gui_entry launches.
+
+No ImportError.
+
+Chat input still works (Enter-to-send; “Copy Chat” works).
+
+No change in layout or header.
+
+KGB tag on pass: KGB-YYYY-MM-DD_R1_prune_components
+
+Rollback: Restore folder from snapshot if any import breaks; add missing pane under ui\pane_parts\ (not components) and retry.
+
+Timebox: 20 minutes.
+
+Rail R2 — Slim GUI Entry (delegation, not logic sink)
+
+Scope: ✅ In-scope (entries hygiene)
+Why: entries\_app_gui_entry_impl.py grew to ~300 LoC; entries must only coordinate.
+
+Plan (two commits max):
+
+Create/confirm helpers
+
+scripts\ui\tailer.py
+
+start_tailer(log_path: str, on_line: Callable[[str], None]) -> TailerHandle
+
+stop_tailer(handle: TailerHandle) -> None
+
+Pure UI-side tailing/classification; no service imports.
+
+scripts\ui\helpers\header_utils.py
+
+publish_header(status: str, *, heartbeat: bool = True) -> None
+
+set_state_dot(color: str) -> None
+
+UI-only label/state painting; no services.
+
+Reduce scripts\entries\_app_gui_entry_impl.py to a coordinator:
+
+Responsibilities allowed: viewport boot, init_ui(log_path), start/stop tailer, heartbeat tick, clean shutdown.
+
+Forbidden: line parsing, state decisions, banner logic, LLM logic.
+
+LoC target: 80–120 lines (comments excluded).
+
+Acceptance / Smoke:
+
+Launch GUI; header shows status + heartbeat as before.
+
+Chat input works (unchanged).
+
+No log spam; process exits cleanly.
+
+_app_gui_entry_impl.py ≤120 LoC and imports only UI modules (ui.*) and stdlib.
+
+KGB tag on pass: KGB-YYYY-MM-DD_R2_slim_gui_entry
+
+Rollback: Revert only the entry file; leave helpers in place.
+
+Timebox: 40 minutes.
+
+Rail R3 — LLM04 Robustness (make the tag true)
+
+Scope: ✅ In-scope (services hygiene; no UI change)
+Why: Current KGB name claims robustness; client lacks timeout/fallback. Fix the code (or retag). Overseer requires the code.
+
+Plan (one commit):
+
+In scripts\services\llm_client.py:
+
+Add PIPER_LLM_TIMEOUT_MS (default 2000).
+
+Wrap provider call in a timeout (thread or future with concurrent.futures).
+
+On timeout/exception: return a short fallback string (e.g., "…(temporary issue)") and print("[ERR] LLM timeout or error").
+
+Keep existing providers: echo, stub. Do not add new providers.
+
+Acceptance / Smoke:
+
+With PIPER_LLM_PROVIDER=echo (default), normal replies as today.
+
+(Optional local test) Temporarily insert a sleep inside echo path to exceed timeout → GUI remains responsive; fallback text appears once; [ERR] printed to stdout.
+
+No UI file changed; no new envs required to run.
+
+KGB tag on pass: KGB-YYYY-MM-DD_R3_llm04_robustness_true
+
+If you refuse code change: Retag instead to …_LLM03_style_hook and stop here. (Overseer still prefers the robustness fix.)
+
+Timebox: 30 minutes.
+
+Rail R4 — Final Consistency & Blessing
+
+Scope: ✅ In-scope (tagging + proof)
+Plan (one step):
+
+Produce a short health report (paste in thread) including:
+
+KGB tag list from R1–R3 in order.
+
+File count & top-5 largest files (post-slim).
+
+Confirm scripts\ui\components\ absent.
+
+Confirm _app_gui_entry_impl.py LoC ≤120.
+
+Confirm services\llm_client.py shows timeout wrapper.
+
+Acceptance / Smoke:
+
+GUI launches; chat send/echo works; no regressions vs pre-rails.
+
+Mission Control still launches; attach-mode unaffected.
+
+Blessing tag (Overseer will stamp): KGB-YYYY-MM-DD_OVR_stable_gui_llm_base
+
+Timebox: 10 minutes.
+
+Guardrails & Operating Rules (for the executing thread)
+
+One change → smoke → KGB for each rail above. If a rail fails twice, revert & PARK.
+
+No feature adds. No new buttons, no streaming, no new providers.
+
+No persona edits. personality.py is read-only.
+
+No cross-ring leaks. Entries must not import services.* directly except via clearly defined UI hooks.
+
+Constants, not magic numbers. If you must introduce a size/padding number, route it through ui\layout_constants.py.
+
+Handover Pack (what the executing thread needs)
+
+Baseline archive: KGB-2025-09-26_LLM04_style_switch.zip (the one you gave me).
+
+These rails (paste into the new thread).
+
+Runbook snippets:
+
+Delete folder (PowerShell):
+Remove-Item -Recurse -Force "C:\Piper\scripts\ui\components"
+
+Count LoC (PowerShell quick & dirty):
+Get-ChildItem -Recurse C:\Piper\scripts | ? {$_.Extension -eq ".py"} | % { (Get-Content $_.FullName).Count } | Measure-Object -Sum
+
+Launch GUI:
+(venv) PS C:\Piper> python -m scripts.entries.app_gui_entry
+
+Parking (explicitly out of scope here)
+
+Mission Control polish (Resource Guard, archival).
+
+Canonical chat/log state & refresh_ui wiring.
+
+LLM06 provider (llama.cpp) and streaming.
+
+Any visual/theme changes.
+
+Overseer Compliance Template (the executing thread must reply with)
+
+Chapter: Stabilization (GUI/LLM hygiene)
+Rail: R1 / R2 / R3 / R4 (one at a time)
+Scope: ✅
+Plan: (1–3 lines)
+Patch summary: (what changed, where)
+Smoke: (bulleted, pass/fail, 1–2 lines each)
+KGB: (exact new tag)
+Notes/Parking: (if any)

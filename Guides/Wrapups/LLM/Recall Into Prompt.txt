@@ -1,0 +1,83 @@
+Chapter: M02
+
+Rail: M02.1 / M02.2
+Scope: ✅
+Plan: Recency recall preamble injected into provider input (single-shot + streaming).
+Patch summary:
+
+services/llm_client.py: _maybe_build_recall_preamble(); prepend in generate() and stream_generate(); canonical scripts.services.* imports.
+
+services/memory_policy.py: select_for_recall(episodes, budget_tokens) (recency-only, drop oldest if over).
+Smoke:
+
+With PIPER_MEM_RECALL=1, generate('hello') yields:
+
+[[recall]]
+…(recent episode lines)…
+---
+hello
+
+
+Recall off → no preamble.
+
+Streaming shows preamble before first chunk; budget respected.
+KGB: KGB-2025-09-29_M02.1_recall_single, KGB-2025-09-29_M02.2_recall_stream
+Notes: Performance ≤50ms; no embeddings; UI untouched.
+
+Open/parked items
+
+Emoji font fallback (Windows 11): parked by choice.
+
+MC console pop-up: patched MC + provider; if any residual appears, we’ll target that spawn site specifically.
+
+If you want a single roll-up baseline tag:
+KGB-2025-09-29_M02_recall_bl
+
+
+
+
+Env List Summary
+
+Provider / Core
+
+PIPER_LLM_PROVIDER → selects backend (echo, stub, llamacpp).
+
+PIPER_LLM_TIMEOUT_MS → max ms per call (single or stream, sliding).
+
+Streaming / Cancel
+
+(implicit) cancel token passed from UI, no env.
+
+Persona / Style
+
+PIPER_PERSONA_TONE → "formal", "casual", etc.
+
+PIPER_PERSONA_SARCASM → 1/0 sarcasm toggle.
+
+Memory (M01 / M02)
+
+PIPER_MEM_EPISODES → path for memory JSONL file.
+
+PIPER_MEM_SUMMARY_TURNS → how many turns to include in summaries.
+
+PIPER_MEM_SUMMARY_MAX → max chars in a summary (default 200).
+
+PIPER_MEM_MINLEN → min summary length to allow write (default 50).
+
+PIPER_MEM_WRITE → 0 disables memory writes.
+
+PIPER_MEM_AVG_CHARS_PER_TOKEN → chars-per-token heuristic (default 4).
+
+PIPER_MEM_RECALL → 1 enables recall injection into prompt.
+
+PIPER_MEM_BUDGET_TOKENS → recall budget (default 256).
+
+UI / Mission Control
+
+PIPER_CORE_LOG → log file path for GUI tailer.
+
+PIPER_UI_TAIL_FROM_START → 1 = load logs from file start.
+
+PIPER_UI_POLL_SEC → tail poll interval seconds.
+
+PIPER_GUI_DEBUG_CHAT → 1 enables chat debug prints.

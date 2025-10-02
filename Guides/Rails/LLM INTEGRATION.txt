@@ -1,0 +1,162 @@
+🟦 New Chapter Rails — LLM INTEGRATION (LLM01 → LLM05)
+
+Goal: After you type in the new Chat box, Piper replies with an assistant line. Start with a safe stub (offline), then make it pluggable.
+Rings: Services (LLM adapter) + a tiny call site in UI send handler.
+Baseline KGB: <fill with your latest KGB tag>
+SAFE_MODE: ON (default provider = echo / offline).
+No drift: If a step touches Core, wake/mic, or model backends prematurely → PARK.
+
+Thread Anchor (paste at top of the new thread)
+
+Chapter: LLM Integration | Step: LLM01
+
+Invariants:
+
+Layout numbers still from ui/layout_constants.py (no new literals).
+
+personality.py is user-owned/read-only.
+
+Attach-mode runbook remains the source of truth; GUI tailing unchanged.
+
+Guardrails: one change per step; snapshot after pass; revert & PARK on 2× fail.
+
+SAFE_MODE: default provider = echo (offline).
+
+No drift. Out-of-rail asks are PARKED.
+
+Micro-steps (one change each)
+LLM01 — Minimal stub that replies
+
+Change (Services + tiny UI call site):
+
+Create services/llm_client.py with a single function:
+
+generate(user_text: str, *, persona) -> str
+
+For now, return a canned friendly answer (e.g., "Hello! (stub)").
+
+In the GUI send handler (where you already append > You:), call llm_client.generate(...) and append Assistant: ... to Chat.
+
+Do not touch Logs; do not change Core.
+
+Smoke:
+
+Type hello → Chat shows > You: hello then Assistant: Hello! (stub).
+
+UI stays responsive; Logs unchanged.
+
+KGB tag: KGB-YYYY-MM-DD_LLM01_stub
+
+LLM02 — Provider adapter (pluggable, still offline by default)
+
+Change (Services):
+
+Expand services/llm_client.py into a tiny strategy/factory:
+
+Env var PIPER_LLM_PROVIDER=echo|template|ollama|local (default: echo).
+
+Implement two offline providers now:
+
+echo: returns the user text (maybe prefixed politely).
+
+template: returns a short canned reply, varies with input length/punctuation (still deterministic).
+
+Wire generate() to pick provider based on env.
+
+Smoke:
+
+With default env, behavior same as LLM01.
+
+Set PIPER_LLM_PROVIDER=template → reply text changes accordingly.
+
+UI remains smooth; no blocking.
+
+KGB tag: KGB-YYYY-MM-DD_LLM02_provider
+
+LLM03 — Persona shaping (tone/sarcasm/maxlen hints)
+
+Change (Services only):
+
+Inside llm_client.generate(), lightly post-process the model text using your existing persona surface:
+
+Apply style_line(...) (tone & sarcasm).
+
+Enforce max_len (truncate gracefully at sentence boundary if possible).
+
+Basic punctuation hints (commas for pauses; expand obvious numbers like “19:26” → “nineteen twenty-six” if you already have a helper—otherwise PARK this hint).
+
+Do not change persona storage; just consume it read-only.
+
+Smoke:
+
+Toggle sarcasm/tone in GUI → assistant line audibly changes style.
+
+Very long provider output is capped cleanly.
+
+No changes to Chat/Logs mechanics.
+
+KGB tag: KGB-YYYY-MM-DD_LLM03_persona_shaping
+
+LLM04 — Robustness (timeouts & errors)
+
+Change (Services + minimal UI banner):
+
+Wrap generate() with a short timeout (e.g., 2s default; read from PIPER_LLM_TIMEOUT_MS if set).
+
+On exception/timeout:
+
+Return a concise fallback reply: “Sorry—I couldn’t think just now.”
+
+Emit a single log line [ERROR] LLM timeout (or exception type) so it’s visible in Logs pane via tail.
+
+Never block the UI.
+
+Smoke:
+
+Set a test flag (e.g., PIPER_LLM_TEST_FAIL=1) to force an exception → Chat shows polite fallback; Logs show one [ERROR] line.
+
+Clearing the flag restores normal replies.
+
+KGB tag: KGB-YYYY-MM-DD_LLM04_resilience
+
+LLM05 — Provider plumbing (hooks only, still SAFE)
+
+Change (Services):
+
+Add hooks, not implementations for real providers (kept PARKED unless a future chapter enables them):
+
+ollama: placeholder factory branch that currently raises “Provider not enabled in SAFE_MODE”.
+
+local: same.
+
+Keep default provider = echo. Add a single docstring explaining how these will be enabled later.
+
+Smoke:
+
+Setting PIPER_LLM_PROVIDER=ollama shows a concise GUI banner or Chat notice that SAFE_MODE disallows it (and falls back to echo).
+
+Normal operation unaffected.
+
+KGB tag: KGB-YYYY-MM-DD_LLM05_hooks_safe
+
+Parking (out of scope for this chapter)
+
+Streaming tokens / incremental Chat append.
+
+Real model backends (Ollama, llama.cpp bindings), prompt templates, and memory.
+
+Core turn-taking / state signals tied to LLM.
+
+TTS realism & avatar reactions.
+
+We’ll tackle these in dedicated chapters once LLM basic reply is locked.
+
+Compliance checklist (repeat on each step)
+
+Rings clean (Services + tiny UI call site only).
+
+persona is read-only; layout constants untouched.
+
+One change; smoke green; snapshot tagged.
+
+On two failures, revert & PARK (no heroic fixes).

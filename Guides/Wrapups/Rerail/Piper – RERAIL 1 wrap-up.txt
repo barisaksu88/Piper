@@ -1,0 +1,193 @@
+Piper – RERAIL 1 wrap-up
+What’s stable (keep)
+
+CLI path works (UTF-8 solved).
+
+GUI boot path (when using the KGB you reverted to).
+
+Chat & Logs panes show content; basic autoscroll behavior works on the KGB.
+
+State dot updates with state transitions.
+
+Dev tools → buffers: messages flow into chat/logs correctly.
+
+What’s parked (do NOT touch in the new thread until later)
+
+Heartbeat “seconds” tick in header (live timer).
+
+Side effects we saw: competing update paths, header indicators freezing when timers/painters fight each other.
+
+Aggressive autoscroll logic (re-enable on bottom dwell).
+
+Parked due to subtle interactions with your existing scroll flags.
+
+What broke during experiments (so we’ll avoid repeating)
+
+Import paths to header parts (scripts.ui.panes vs scripts.ui.pane_parts vs scripts.ui.pane_parts.header_bar) caused runtime import loops.
+
+DearPyGui drawlist size requirement on your build (needs width/height).
+
+Creating DPG items without explicit parent caused “Parent could not be deduced” exceptions.
+
+Adding a second “painter” in app_gui_entry.py caused header labels to freeze (double refresh paths).
+
+Recommended baseline to start Rerail 2
+
+Use your last known good snapshot (the KGB you just reverted to). That’s our KGB-A02_passed equivalent for Rerail 2.
+
+Rerail 2 – how we’ll proceed (lean + safe)
+
+We’ll keep the rails short, surgical, and one change per micro-step, with a 3-line smoke test each time.
+
+Pre-flight (verify the baseline)
+
+Run these exactly, and only proceed when all look good.
+
+# kill stray python & clear caches
+try { taskkill /IM python.exe /F 2>$null } catch {}
+Get-ChildItem -Path "C:\Piper" -Recurse -Include "__pycache__","*.pyc" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# import sanity
+python -m scripts.tests.import_sanity
+
+# CLI quick check
+python -m scripts.entries.app_cli_entry
+
+# GUI quick check (no dev input)
+Remove-Item Env:PIPER_UI_DEV_INPUT -ErrorAction SilentlyContinue
+python -m scripts.entries.app_gui_entry
+
+
+✅ Expected: GUI opens, header shows (no ticking), chat/logs/dot behave.
+
+Phase B (UI Modularization) — new, smaller rails
+
+We’ll only “route” calls; we won’t add timers, painters, or extra state. Shorter code, identical behavior.
+
+B01 — Confirm foundations (no code changes)
+
+Verify these modules exist, otherwise we skip references to them:
+
+scripts\ui\dpg_app.py
+
+scripts\ui\layout_constants.py (class L)
+
+scripts\ui\pane_parts\header_bar.py
+
+Commands:
+
+python -c "import scripts.ui.dpg_app as m; print('dpg_app OK')"
+python -c "from scripts.ui.layout_constants import L; print('L OK', L.WINDOW.WIDTH)"
+python -c "import scripts.ui.pane_parts.header_bar as hb; print('header_bar OK')"
+
+B02 — Wire header through its module (no behavior change)
+
+Goal: Make panes.py delegate header build/refresh to pane_parts/header_bar.py.
+Constraints: No new imports in app_gui_entry.py. No timers. If import fails, fall back to current behavior.
+
+Micro-step B02-a (single file: panes.py)
+
+Add a try import at the top:
+
+try:
+    from scripts.ui.pane_parts import header_bar as HB
+except Exception:
+    HB = None
+
+
+In init_ui(log_path), if HB exists: call HB.build(log_path=log_path). Else keep current header build.
+
+In refresh_ui(...), if HB exists: call
+
+HB.refresh(
+    state_text=state_text,
+    heartbeat_text=heartbeat_text,
+    tone_text=f"Tone: {globals().get('current_tone','neutral')}",
+    sarcasm_text=("Sarcasm: on" if bool(globals().get('sarcasm_on',False)) else "Sarcasm: off"),
+    tailing_text=...  # same logic you already use
+)
+
+
+Else keep current label updates.
+
+Smoke test (B02-a)
+
+python -m scripts.entries.app_gui_entry
+# Flip tone/sarcasm in dev tools; run wake/help/sleep for state changes.
+
+
+✅ Expected: identical behavior. If HB exists, it now owns header updates. If not, fallback works.
+
+We’ll do this step together in Rerail 2 with full function blocks so you only paste once.
+
+B03 — Extract right column (logs + avatar) into a part
+
+Goal: Move right-column UI into pane_parts/right_column.py with build() and refresh(); keep logic unchanged.
+
+Micro-steps:
+
+B03-a: create pane_parts/right_column.py with minimal build() that reproduces current UI and a stub refresh() that does nothing yet.
+
+B03-b: change panes.py to call RC.build() where it currently builds logs/avatar (guarded by if RC else legacy).
+
+B03-c: implement RC.refresh() to update log_text and manage badges—using the same flags you already have.
+
+Smoke test (each sub-step)
+
+python -m scripts.entries.app_gui_entry
+
+
+✅ Expected: no visible changes.
+
+B04 — (Parked) Heartbeat tick
+
+We will not implement live ticking until B01–B03 are stable and short. When we do, we’ll:
+
+confine the 1 Hz timer inside header_bar.py only,
+
+start it after hb_label is created,
+
+use a single provider for the text (e.g., lambda: humanize(last_update_ts)), and
+
+avoid any per-frame painters in app_gui_entry.py.
+
+Practical policies for Rerail 2
+
+One change per step with a micro smoke test.
+
+No new behaviors while modularizing (only move code behind a guard).
+
+All DPG creations must specify a parent (or be inside a with on a known container).
+
+For DPG widgets like drawlist, always give width/height in your build function for your DearPyGui version.
+
+If a part/module import fails, never crash—fallback to the old path.
+
+Avoid double painters/timers; the entry script should remain thin (event loop + wiring).
+
+Handy commands & env baseline (keep for future)
+# UTF-8 shell & Python (once per shell)
+$env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; chcp 65001 > $null
+
+# Clear caches
+Get-ChildItem -Path "C:\Piper" -Recurse -Include "__pycache__","*.pyc" |
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# CLI
+python -m scripts.entries.app_cli_entry
+
+# GUI (no dev input, tails default)
+Remove-Item Env:PIPER_UI_DEV_INPUT -ErrorAction SilentlyContinue
+python -m scripts.entries.app_gui_entry
+
+# GUI (dev input ON if/when needed)
+$env:PIPER_UI_DEV_INPUT = 1
+python -m scripts.entries.app_gui_entry
+
+What I’ll need from you to kick off Rerail 2
+
+Confirm which KGB we’re starting from (the zip name or tag).
+
+Run the Pre-flight commands above and paste the short outputs (especially the import_sanity line that says all REQUIRED imports loaded successfully).
+
+Then I’ll give you the exact full function replacements for panes.py (B02-a), tested to be guard-safe and short—so we can finally start shrinking code without breaking behavior.

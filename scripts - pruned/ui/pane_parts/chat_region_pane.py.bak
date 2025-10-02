@@ -1,0 +1,59 @@
+﻿"""Chat pane — build + refresh hooks."""
+from __future__ import annotations
+import dearpygui.dearpygui as dpg
+from scripts.ui.layout_constants import L
+
+def build() -> None:
+    """
+    Create the chat column widgets (left pane).
+    This replicates the legacy build removed from panes.py.
+    """
+    try:
+        if not dpg.does_item_exist("body_row"):
+            return
+        if dpg.does_item_exist("chat_container"):
+            return
+
+        with dpg.group(parent="body_row", tag="chat_container"):
+            # Header row for Chat
+            with dpg.group(horizontal=True):
+                dpg.add_text("Chat", tag="chat_hdr")
+                dpg.add_spacer(width=10)
+                dpg.add_button(label="Copy Chat", tag="copy_chat_btn")
+                dpg.add_spacer(width=10)
+                dpg.add_text("[⏸ autoscroll]", tag="chat_autoscroll_badge", show=False)
+
+            dpg.add_separator()
+            dpg.add_spacer(height=6)
+
+            # Scrollable Chat area
+            with dpg.child_window(
+                tag="chat_scroll",
+                width=(L.PANE.LEFT_WIDTH - L.SPACE.PAD),
+                height=(L.VIEWPORT.HEIGHT - 120),  # initial, recalibrated later
+                autosize_x=False,
+                autosize_y=False,
+            ):
+                dpg.add_text("", tag="chat_text", wrap=(L.PANE.LEFT_WIDTH - L.SPACE.PAD))
+                dpg.add_spacer(tag="chat_pad", height=L.SPACE.SMALL)
+
+            # Theme binding remains handled in panes.py
+    except Exception:
+        pass
+
+
+def refresh(text: str, autoscroll_on: bool) -> None:
+    """Update chat text and autoscroll badge."""
+    try:
+        if dpg.does_item_exist("chat_text"):
+            dpg.set_value("chat_text", text)
+        # Keep badge hidden (no UX) and do not scroll here; refresh_core handles it.
+        if dpg.does_item_exist("chat_autoscroll_badge"):
+            try:
+                dpg.configure_item("chat_autoscroll_badge", show=False)
+            except Exception:
+                pass
+        # (no direct set_y_scroll here)
+    except Exception:
+        pass
+

@@ -1,0 +1,70 @@
+﻿# scripts/services/adapters/mock_asr_wake.py
+"""
+Mock Services (flagless, offline) for early Core wiring and tests.
+
+Implements minimal WakeSvc and ASRSvc interfaces defined in scripts/services/base.py:
+  - WakeSvc.start() / stop()
+  - ASRSvc.listen(timeout: float | int | None) -> str | None
+
+Usage idea (in tests or flagged demos):
+    wake = MockWakeSvc(on_wake=lambda: print("[MOCK] wake!"))
+    asr = MockASRSvc(script=["hello piper", "run status", ""])  # "" marks end-of-utterance
+
+    wake.start()        # will synchronously invoke on_wake() exactly once
+    txt = asr.listen(3) # -> "hello piper"
+    txt = asr.listen(3) # -> "run status"
+    txt = asr.listen(3) # -> "" (EOU)
+    txt = asr.listen(3) # -> None (exhausted)
+"""
+
+from __future__ import annotations
+from typing import Callable, Iterable, List, Optional, Union
+
+try:
+    # project-relative import
+    from scripts.services.base import WakeSvc, ASRSvc  # type: ignore
+except ModuleNotFoundError:
+    # fallback when running from scripts/ cwd
+    from services.base import WakeSvc, ASRSvc  # type: ignore
+
+
+class MockWakeSvc(WakeSvc):
+    """One-shot wake service: start() triggers the callback once; stop() is a no-op."""
+    def __init__(self, on_wake: Optional[Callable[[], None]] = None) -> None:
+        self._on_wake = on_wake
+        self._started = False
+        self._fired = False
+
+    def start(self) -> None:
+        self._started = True
+        if not self._fired and self._on_wake:
+            try:
+                self._on_wake()
+            finally:
+                self._fired = True
+
+    def stop(self) -> None:
+        self._started = False
+
+
+class MockASRSvc(ASRSvc):
+    """
+    Scripted ASR: returns the next string from a script on each listen() call.
+    Use "" (empty string) to indicate end-of-utterance; None is returned when exhausted.
+    """
+    def __init__(self, script: Optional[Iterable[str]] = None) -> None:
+        self._script: List[str] = list(script or [])
+        self._started = False
+
+    # Optional convenience if your interface ever expands
+    def start(self) -> None:
+        self._started = True
+
+    def stop(self) -> None:
+        self._started = False
+
+    def listen(self, timeout: Optional[Union[int, float]] = None) -> Optional[str]:
+        if not self._script:
+            return None
+        return self._script.pop(0)
+

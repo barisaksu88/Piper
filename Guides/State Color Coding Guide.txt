@@ -1,0 +1,65 @@
+Piper Layout – State Color Coding Guide
+States & Colors
+State	Dot Color	Why
+SLEEPING	Grey (128, 128, 128)	Inactive / idle baseline
+WAKING	Orange (255, 165, 0)	Transition, warming up
+LISTENING	Blue (70, 130, 180)	Awaiting input (user speaking)
+THINKING	Yellow (255, 215, 0)	Processing / reasoning
+SPEAKING	Green (0, 200, 100)	Responding (TTS active)
+
+Color dwell (0.3–0.5s) lets transient states flash briefly so you can visually confirm them, even if Piper transitions instantly.
+
+Implementation Snippet (Python / DearPyGui)
+import dearpygui.dearpygui as dpg
+import time
+
+# State → color mapping
+STATE_COLORS = {
+    "SLEEPING":  (128, 128, 128, 255),   # grey
+    "WAKING":    (255, 165,   0, 255),   # orange
+    "LISTENING": ( 70, 130, 180, 255),   # steel blue
+    "THINKING":  (255, 215,   0, 255),   # gold
+    "SPEAKING":  (  0, 200, 100, 255),   # green
+}
+
+_last_state = None
+_last_change = 0
+
+def update_state_dot(current_state: str):
+    """Update GUI dot color based on core state + dwell for visibility."""
+    global _last_state, _last_change
+    now = time.time()
+
+    # detect state change
+    if current_state != _last_state:
+        _last_state = current_state
+        _last_change = now
+
+    # dwell: show last color for 0.3s before switching
+    if now - _last_change < 0.3 and _last_state:
+        color = STATE_COLORS.get(_last_state, (200, 200, 200, 255))
+    else:
+        color = STATE_COLORS.get(current_state, (200, 200, 200, 255))
+
+    dpg.configure_item("state_dot_btn", fill=color)
+    dpg.set_value("state_label", f"State: {current_state}")
+
+Usage in your update_ui() loop
+# inside GUI tick/update loop:
+current_state = latest_state_from_log()  # parsed from [STATE] lines
+update_state_dot(current_state)
+
+
+state_dot_btn → the round button widget (colored dot).
+
+state_label → optional text label next to the dot.
+
+Smoke Test
+
+Run wake → time → sleep in CLI.
+
+Watch GUI:
+
+Dot turns orange (WAKING) briefly, then green (SPEAKING), then blue (LISTENING).
+
+On sleep → dot turns grey.

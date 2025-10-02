@@ -1,0 +1,16 @@
+{
+  "PIPER_UI_THEME": "blue",
+  "PIPER_LLM_PROVIDER": "llamacpp",
+  "PIPER_LLAMA_MODEL": "C:\\Piper\\llama.cpp\\Hermes-3-Llama-3.1-8B.Q5_K_M.gguf",
+  "PIPER_LLAMA_EXE": "C:\\Piper\\llama.cpp\\llama-run.exe",
+  "PIPER_LLM_TIMEOUT_MS": "30000",
+  "PIPER_MEM_WRITE": "1",
+  "PIPER_MEM_RECALL": "1",
+  "PIPER_MEM_EPISODES": "C:\\Piper\\logs\\memory_episodes.jsonl",
+  "PIPER_LLAMA_CTX": "32768",
+  "PIPER_AVATAR": "C:\\Piper\\Library\\Urban Night Glow.png",
+  "PIPER_LLAMA_THREADS": "auto",
+  "PIPER_PERSONA_LEGACY": "0",
+  "PIPER_LLM_DEBUG": "1",
+  "PIPER_MEM_RECALL_MODE": "auto"
+}

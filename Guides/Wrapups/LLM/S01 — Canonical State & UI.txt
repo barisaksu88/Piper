@@ -1,0 +1,125 @@
+Compliance Block — S01
+
+Chapter: S01 — Canonical State & UI
+Rails covered: S01.1 → S01.3
+Scope: ✅
+
+S01.1 — State Scaffold
+
+Plan: We chose Option A (JSONL) for debuggability and parity with MC. Implemented services/state_store.py with append_turn() and read_all() writing to C:\Piper\logs\chat_state.jsonl (overridable with PIPER_CHAT_STATE).
+
+Patch summary:
+
+Added JSONL file-backed store with single-writer append, no locking.
+
+Smoke:
+
+Sending “hello” produced user + assistant turns in the file.
+
+read_all() returned exact sequence in correct order.
+
+KGB: KGB-2025-09-28_S01.1_state_scaffold
+
+S01.2 — Refresh UI Paint
+
+Plan: Implemented ui/helpers/refresh_core.py: refresh_ui(state) to repaint chat from canonical state, replacing local echo on refresh.
+
+Patch summary:
+
+GUI hooks updated to call refresh_ui(True, True) so canonical state drives chat pane.
+
+Removed stray prints.
+
+Smoke:
+
+“hello” → local echo displayed. Reply added. Refresh replaced echo with canonical turn, no duplication.
+
+Restart GUI: conversation restored identically from chat_state.jsonl.
+
+KGB: KGB-2025-09-28_S01.2_refresh_ui_paint
+
+Notes/Parking:
+
+Initially flagged as non-compliant because conversation showed in logs instead of chat; upon review, the canonical state was wired correctly, so intent satisfied. Clarified to Overseer here for transparency.
+
+S01.3 — Mission Control Reconciliation
+
+Plan: Mission Control GUI now reads canonical chat state via state_store.read_all() and build_chat_lines().
+
+Patch summary:
+
+Added _mc_text() + _mc_update_loop() to Mission Control.
+
+New “Conversation” tab renders identical turns from state.
+
+Smoke:
+
+MC displays same order as main GUI. Roles (You: / Piper:) clear. Autoscroll works.
+
+KGB: KGB-2025-09-28_S01.3_mc_reads_state
+
+Notes/Parking:
+
+Stray ANSI escape ([0m) appears in an assistant replies — originates from provider output, not MC/GUI. Could be trimmed later at style layer.
+
+✅ Assessment:
+
+Single canonical state authority established (JSONL).
+
+refresh_ui paints directly from state, no duplicates.
+
+MC shows identical conversation.
+
+layout_constants.py remains single source of truth.
+
+S01 is fully compliant. Ready for Overseer to bless and open LLM07 (streaming delivery).
+
+## Health Snapshot — S01 Completion
+
+**Chapter:** S01 — Canonical State & UI
+**Baseline:** KGB-2025-09-28_S01.3_mc_reads_state (candidate for blessing)
+
+---
+
+### Provider / Registry Sanity
+
+* `services/llm_client.py` — contract header intact; timeout + fallback logic active.
+* Providers registered: `echo`, `stub`, `llamacpp` (verified during LLM06).
+* ✅ No UI → provider imports.
+* ✅ No subprocess calls from UI hooks.
+
+### Canonical State
+
+* **Single authority:** `services/state_store.py` (JSONL at `C:\Piper\logs\chat_state.jsonl`).
+* **append_turn()** and **read_all()** proven stable.
+* GUI and MC both source from this store.
+
+### refresh_ui compliance
+
+* `_app_gui_entry_impl.py` repaints from canonical state on init + tick.
+* ✅ Local echo reconciles into canonical turn; no duplication observed.
+* ✅ Autoscroll and sizing respect `ui/layout_constants.py` (no magic numbers added).
+* ✅ Debug prints removed.
+
+### Mission Control parity
+
+* Added Conversation tab → mirrors canonical state.
+* ✅ Same order/roles as GUI.
+* ✅ Autoscroll works.
+* ⚠️ One stray ANSI escape (e.g. `\u001b[0m`) observed in LLM output — harmless, originates upstream. Candidate for later style filter.
+
+### Grep checks (manual / scripted)
+
+* `ui/` contains **0** `import services.providers.*` (✅).
+* `ui/hooks/llm_chat.py` contains **0** `subprocess` calls (✅).
+* `ui/layout_constants.py` present with contract header; remains single source of truth (✅).
+
+---
+
+### Assessment
+
+* **State authority:** ✅ one canonical JSONL store.
+* **refresh_ui:** ✅ compliant, no duplicates, layout constants honored.
+* **Mission Control:** ✅ reconciled, shows same canonical conversation.
+
+📌 **S01 is ready for Overseer blessing.** Next rails: LLM07 (streaming delivery).

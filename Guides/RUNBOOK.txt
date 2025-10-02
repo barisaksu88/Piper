@@ -1,0 +1,96 @@
+CLI
+
+# From PowerShell in your venv
+cd C:\Piper
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($true)
+chcp 65001 > $null
+New-Item -ItemType Directory -Force C:\Piper\run | Out-Null
+Remove-Item C:\Piper\run\core.log -ErrorAction SilentlyContinue
+
+# Make sure Python can import the 'scripts' package from C:\Piper
+$env:PYTHONPATH = "C:\Piper"
+
+# Run CLI and tee every line to core.log in UTF-8
+python -u -m scripts.entries.app_cli_entry |
+  ForEach-Object {
+    $_
+    $_ | Out-File -FilePath C:\Piper\run\core.log -Append -Encoding utf8
+  }
+
+
+$env:PYTHONUTF8='1'; $env:PYTHONIOENCODING='utf-8'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); if($PSVersionTable.PSEdition -eq 'Desktop'){chcp 65001>$null}; ni run -fo|Out-Null; ri run\core.log -ea SilentlyContinue; python -u -m scripts.entries.app_cli_entry 2>&1 | % { $_; $_ | Add-Content -Path run\core.log -Encoding UTF8 }
+
+==========================================================================================================================================
+
+GUI
+
+cd C:\Piper
+$env:PIPER_CORE_LOG = "C:\Piper\run\core.log"
+python -m scripts.entries.app_gui_entry
+
+==========================================================================================================================================
+
+ACTIVATE VENV
+
+cd C:\Piper\scripts
+& ..\venv\Scripts\Activate.ps1
+cd..
+
+==========================================================================================================================================
+
+ENVIRONMENTS
+Remove-Item Env:\PIPER_LLM_STYLE
+
+$env:PIPER_UI_TAIL_FROM_START = "1"
+$env:PIPER_AVATAR = 'C:\Piper\Library\Urban Night Glow.png'
+$env:PIPER_UI_THEME = "blue"	(or 0)
+$env:PIPER_BRIDGE_TEST_FAIL="1"
+$env:PIPER_LLM_PROVIDER = "llamacpp"   (or echo)
+$env:PIPER_LLM_STYLE="pilot" (or plain (default), pilot, snark)
+$env:PIPER_LLM_TIMEOUT_MS="2000"
+
+==========================================================================================================================================
+
+KGB
+
+$Name='KGB-2025-09-08_HDR-MR6b_hb-shim-ALIased'; $root='C:\Piper'; $out=Join-Path $root 'snapshots'; $t=Get-Date; python "$root\scripts\make_snapshot.py"; New-Item -ItemType Directory -Path $out -Force | Out-Null; $zip=Get-ChildItem -Path $root -Recurse -Filter *.zip -File | Where-Object { $_.LastWriteTime -ge $t } | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if($zip){ Move-Item $zip.FullName (Join-Path $out "$Name.zip") -Force; Write-Host "Snapshot saved as $(Join-Path $out "$Name.zip")" } else { Write-Warning "No zip produced by make_snapshot.py" }
+
+==========================================================================================================================================
+
+REALTIME TXT CONVERSION
+
+# Drive letter variant (most common now)
+python C:\Piper\tools\mirror_py_to_txt.py --dest "G:\My Drive\PiperTXT\scripts"
+python C:\Piper\tools\mirror_py_to_txt.py --dest "C:\Users\Hawk Gaming\Dropbox\scripts"
+
+# User-folder variant
+python C:\Piper\tools\mirror_py_to_txt.py --dest "C:\Users\<YOU>\Google Drive\PiperTXT\scripts"
+
+==========================================================================================================================================
+
+Generate reports
+
+pyan3 C:\Piper\scripts\**\*.py --uses --no-defines > C:\Piper\sidekick\callgraph.dot
+vulture C:\Piper\scripts > C:\Piper\sidekick\vulture.txt
+bandit -r C:\Piper\scripts > C:\Piper\sidekick\bandit.txt
+
+==========================================================================================================================================
+
+Opening Statement for New Thread
+User:
+Go ahead and analize the current kgb to have an idea where everything is. 
+All file edits are done by you. Every edit must happen inside the Canvas. If a file already exists, prompt me to open its Canvas by name — I’ll paste what I have and you’ll apply the edits there. If you need to read a file, just tell me and I’ll connect the mirrors. No assuming what code I have: if you’re not sure, ask and I’ll provide the exact file. No blind edits. If Canvas or mirror reading fails, give me a single-line failure notice (no bloat) and we’ll retry. Keep chat lean. Always prompt me to open the relevant Canvas for edits. 
+Any questions?
+
+Instruction for Wrap-Up to close this thread and start continuation thread
+
+Generate a wrap-up txt file that must:
+Summarize everything we accomplished, everything that failed, and all open issues.
+Include a list of all the rules, preferences, and corrections I had to teach you in this thread, so I don’t have to repeat them in the next one.
+Note all environment changes.
+Capture any workflow or railmaster rules confirmed in this thread.
+End with a Handoff section that explains what the continuation thread should focus on first (next rails, priorities, parked items).
+Format it in structured Markdown sections (## Accomplished, ## Failed, ## Issues, ## Rules, ## Handoff) so I can read it quickly.
+Keep it detailed enough that someone new could join in at the new thread and be fully caught up without needing to reread this thread.

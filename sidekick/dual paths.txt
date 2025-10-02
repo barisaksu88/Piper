@@ -1,0 +1,49 @@
+Path                                            LineNumber Line
+----                                            ---------- ----
+C:\Piper\scripts\common\config.py                        8     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\common\types.py                         9     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\core\bridge.py                          9     from scripts.core.core_app import CoreApp
+C:\Piper\scripts\core\bridge.py                         10     from scripts.core.events import publish
+C:\Piper\scripts\core\bridge.py                         11     from scripts.core.state_defs import EventType, CoreState
+C:\Piper\scripts\core\bridge.py                         12     from scripts.services.base import WakeSvc, ASRSvc
+C:\Piper\scripts\core\core_app.py                        9     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\core\core_app.py                       10     from scripts.core.event_queue import EventQueue
+C:\Piper\scripts\core\core_app.py                       11     from scripts.core.events import try_dequeue, Event
+C:\Piper\scripts\core\core_app.py                       12     from scripts.core.router import process_event
+C:\Piper\scripts\core\core_machine.py                    7     from scripts.core.core_commands import handle_core_command, core_banner...
+C:\Piper\scripts\core\core_machine.py                   13     from scripts.services.cli_prompt import current_prompt  # type: ignore
+C:\Piper\scripts\core\core_machine.py                   19     from scripts.services.cli_prompt import current_prompt  # type: ignore
+C:\Piper\scripts\core\events.py                         11     from scripts.core.state_defs import EventType
+C:\Piper\scripts\core\events.py                         12     from scripts.core.event_queue import EventQueue
+C:\Piper\scripts\core\router.py                         11     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\core\startup.py                        12     from scripts.core.flags import summarize as summarize_flags
+C:\Piper\scripts\core\startup.py                        13     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\core\transition_plan.py                 7     from scripts.core.state_defs import CoreState, EventType
+C:\Piper\scripts\entries\app_cli_entry.py                7     from scripts.core.core_machine import CoreMachine  # type: ignore
+C:\Piper\scripts\entries\app_cli_entry.py               13     from scripts.services.cli_prompt import current_prompt, format_line  # ...
+C:\Piper\scripts\entries\app_cli_entry.py               61             from scripts.core.core_commands import core_banner as _cb  # wh...
+C:\Piper\scripts\entries\app_cli_entry.py               65             from scripts.core.core_commands import core_banner as _cb  # ty...
+C:\Piper\scripts\entries\app_cli_entry.py               79                     from scripts.core.core_commands import handle_core_comm...
+C:\Piper\scripts\entries\_app_gui_entry_impl.py         24 from scripts.ui.pane_parts import header_bar as _hb
+C:\Piper\scripts\entries\_app_gui_entry_impl.py         26 from scripts.ui.layout_constants import L
+C:\Piper\scripts\entries\_app_gui_entry_impl.py         27 from scripts.ui.helpers.gui_loop import update_panes as _update_panes
+C:\Piper\scripts\entries\_app_gui_entry_impl.py        204         from scripts.ui.panes import init_ui, refresh_ui  # no fallback
+C:\Piper\scripts\entries\_app_gui_entry_impl.py        455             from scripts.ui.theme_utils import apply_theme_if_enabled as _a...
+C:\Piper\scripts\entries\_app_gui_entry_impl.py        530                     from scripts.ui.dev_tools import attach_dev_tools as _a...
+C:\Piper\scripts\entries\_app_gui_entry_impl.py        594         from scripts.ui.dpg_app import run as dpg_run              # ★ new ...
+C:\Piper\scripts\services\persona_adapter.py             9         import scripts.personality as p; return p
+C:\Piper\scripts\ui\dpg_app.py                           3 from scripts.ui.layout_constants import L
+C:\Piper\scripts\ui\_panes_impl.py                      14 from scripts.ui.pane_parts import header_bar as _hb
+C:\Piper\scripts\ui\_panes_impl.py                      15 from scripts.ui.layout_constants import L
+C:\Piper\scripts\ui\_panes_impl.py                      16 from scripts.ui.helpers.refresh_core import refresh_ui
+C:\Piper\scripts\ui\_panes_impl.py                      19 from scripts.ui.helpers.tag_utils import first_existing_tag, shorten_path a...
+C:\Piper\scripts\ui\_panes_impl.py                      20 from scripts.ui.helpers.theme_utils import ensure_pane_theme as _ensure_pan...
+C:\Piper\scripts\ui\_panes_impl.py                      21 from scripts.ui.pane_parts.avatar_pane import post_layout_fix as _avatar_po...
+
+
+(venv) PS C:\Piper>
+(venv) PS C:\Piper> # Any sys.path surgeries that might reintroduce ambiguity
+(venv) PS C:\Piper> Select-String -Path C:\Piper\scripts\**\*.py -Pattern 'sys\.path\.insert|sys\.path\.append'
+
+scripts\entries\app_wake_entry.py:7:sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+

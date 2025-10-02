@@ -1,0 +1,29 @@
+# scripts/core/logbus.py  — seed; behavior-neutral until adopted
+
+from __future__ import annotations
+from typing import Callable, Any
+
+SayFn = Callable[[str, str | None], Any]
+
+def state(say: SayFn, prev: str, nex: str) -> None:
+    """Emit a state transition in the exact format the GUI tailer understands."""
+    say(f"[STATE] {prev} -> {nex}", "status")
+
+def event(say: SayFn, name: str, **kv: Any) -> None:
+    """
+    Emit a compact event line.
+    Example: [EVENT] wake button=dev_tools
+    """
+    if kv:
+        args = " ".join(f"{k}={v}" for k, v in kv.items())
+        say(f"[EVENT] {name} {args}", "status")
+    else:
+        say(f"[EVENT] {name}", "status")
+
+def info(say: SayFn, msg: str) -> None:
+    """Plain informational line (routes to Logs)."""
+    say(msg, "info")
+
+def speak(say: SayFn, msg: str) -> None:
+    """Spoken line: ensures Chat renders it."""
+    say(f"[TTS] {msg}", "status")

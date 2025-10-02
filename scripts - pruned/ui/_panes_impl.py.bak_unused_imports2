@@ -1,0 +1,236 @@
+# DEV NOTE - B04 size cap
+# Target size 80-120 lines before Phase H closure.
+# This module should only compose components and call helpers (no heavy logic).
+
+# DEV NOTE (B04 Size Target): keep this file ≤150 lines by delegating to ui/dpg_app.py and ui/pane_parts/*. 
+# Do not add new logic here; only thin entry glue and argument parsing may remain.
+# KGB target: KGB-2025-08-29_RERAIL2_B04_size_note_app_gui_entry
+
+# LAYOUT/LOOK - LL04C independent, intent-based autoscroll (final, avatar-ready)
+from __future__ import annotations
+import os
+import time
+import dearpygui.dearpygui as dpg
+from scripts.ui.pane_parts import header_bar as _hb
+from scripts.ui.layout_constants import L
+from scripts.ui.helpers.refresh_core import refresh_ui
+
+# Dev Pane component (flag-gated)
+from scripts.ui.components.controls_pane import build as controls_build, refresh as controls_refresh
+from scripts.ui.helpers.tag_utils import first_existing_tag, shorten_path as _shorten_path
+from scripts.ui.helpers.theme_utils import ensure_pane_theme as _ensure_pane_theme
+from scripts.ui.helpers.viewport_utils import calibrate_to_viewport
+from scripts.ui.pane_parts.avatar_pane import post_layout_fix as _avatar_post_layout_fix
+
+# --- B04.6: Dev Controls adapters (visual-only) ---
+# current tailed log path for header label
+_LOG_PATH: str = ""
+
+# ---------- layout ----------
+VIEWPORT_W = L.WINDOW.WIDTH
+VIEWPORT_H = L.WINDOW.HEIGHT
+LEFT_W     = L.PANE.LEFT_WIDTH
+RIGHT_W    = L.PANE.RIGHT_WIDTH
+ROW_H      = VIEWPORT_H - L.PANE.BODY_VPAD
+PAD        = L.SPACE.PAD
+
+# ---------- copy helpers ----------
+def _copy_chat():
+    try:
+        dpg.set_clipboard_text(dpg.get_value("chat_text") or "")
+    except Exception:
+        pass
+
+def _copy_logs():
+    try:
+        dpg.set_clipboard_text(dpg.get_value("log_text") or "")
+    except Exception:
+        pass
+
+def _ensure_texture_registry():
+    if not dpg.does_item_exist("texture_registry"):
+        with dpg.texture_registry(tag="texture_registry"):
+            pass
+
+def _load_avatar_from_file(path: str):
+    """Load file into a static texture and remember dimensions; return texture id or None."""
+    global _AVATAR_TEX, _AVATAR_IMG_W, _AVATAR_IMG_H
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        _ensure_texture_registry()
+        w, h, c, data = dpg.load_image(path)
+        tex_id = dpg.add_static_texture(w, h, data, parent="texture_registry")
+        _AVATAR_TEX, _AVATAR_IMG_W, _AVATAR_IMG_H = tex_id, w, h
+        return tex_id
+    except Exception:
+        return None
+    
+# ---------- Public API ----------
+def init_ui(log_path: str) -> None:
+    if dpg is None:
+        return  # DPG not available; safe no-op
+    
+    """Root fixed & primary. Non-scrolling headers. Dedicated scroll windows for content."""
+    if dpg.does_item_exist("root"):
+        dpg.delete_item("root")
+    
+    global _LOG_PATH
+    _LOG_PATH = str(log_path or "")
+
+
+    root = dpg.add_window(
+        tag="root",
+        pos=(L.WINDOW.OFFSET_X, L.WINDOW.OFFSET_Y),
+        no_title_bar=True,
+        no_move=True,
+        no_resize=True,
+        no_scrollbar=True,
+    )
+    # (build header AFTER we create a header_row parent; see block below)
+    dpg.set_item_width("root",  VIEWPORT_W)
+    dpg.set_item_height("root", VIEWPORT_H)
+    dpg.set_primary_window("root", True)
+    pane_theme = _ensure_pane_theme()
+    dpg.bind_item_theme("root", pane_theme)
+
+    # ---- App header (single authority; no inline duplication) ----
+    if not dpg.does_item_exist("header_row"):
+        header_row = dpg.add_group(parent=root, tag="header_row", horizontal=True)
+        _hb.build(parent=header_row, log_path=log_path)  # keyword-only — matches signature
+        dpg.add_spacer(parent=root, height=L.HEADER.BOTTOM_GAP)  # ↓ move body below header
+        # ---- Body row: Left = Chat, Right = Logs + Avatar ----
+        with dpg.group(parent=root, tag="body_row", horizontal=True):
+            dpg.add_spacer(width=L.CHAT.INSET_LEFT)
+
+
+            # ===== LEFT - Chat column (RESTORED LEGACY BUILD) =====
+            if not dpg.does_item_exist("chat_container"):
+                with dpg.group(parent="body_row", tag="chat_container"):
+                    # Chat header row
+                    with dpg.group(horizontal=True):
+                        dpg.add_text("Chat", tag="chat_hdr")
+                        dpg.add_spacer(width=L.SPACE.GAP)
+                        dpg.add_button(label="Copy Chat", tag="copy_chat_btn", callback=_copy_chat)
+                        dpg.add_spacer(width=L.SPACE.GAP)
+
+                    dpg.add_spacer(height=L.CHAT.INSET_TOP)
+
+                # Chat scroll area
+                with dpg.child_window(
+                    parent="chat_container",
+                    tag="chat_scroll",
+                    width=(LEFT_W - PAD),
+                    height=ROW_H,                  # recalibrated by calibrate_to_viewport()
+                    autosize_x=False,
+                    autosize_y=False,
+                    no_scrollbar=False,
+                ):
+                    dpg.add_text("", tag="chat_text", wrap=(LEFT_W - PAD))
+                    dpg.add_spacer(tag="chat_pad", height=L.SPACE.SMALL)
+                dpg.bind_item_theme("chat_scroll", pane_theme)
+
+        # ===== RIGHT - Logs + Avatar column (MODULE BUILDS + STABLE INLINE) =====
+        if not dpg.does_item_exist("logs_container"):
+            with dpg.group(parent="body_row", tag="logs_container"):
+                # Logs header row
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Logs", tag="logs_hdr")
+                    dpg.add_spacer(width=L.SPACE.GAP)
+                    dpg.add_button(label="Copy Logs", tag="copy_logs_btn", callback=_copy_logs)
+                    dpg.add_spacer(width=L.SPACE.GAP)
+
+                dpg.add_spacer(height=L.CHAT.INSET_TOP)
+
+                # Logs scroll area
+                with dpg.child_window(
+                    tag="logs_scroll",
+                    width=(RIGHT_W - PAD),
+                    height=(ROW_H - L.AVATAR.PANEL_H - L.SPACE.SECTION_GAP),  # leave room for avatar_panel
+                    autosize_x=False,
+                    autosize_y=False,
+                    no_scrollbar=False,
+                ):
+                    dpg.add_text("", tag="log_text", wrap=(RIGHT_W - PAD))
+                    dpg.add_spacer(tag="logs_pad", height=L.SPACE.SMALL)
+                dpg.bind_item_theme("logs_scroll", pane_theme)
+
+                # Avatar panel (stacked under logs)
+                if not dpg.does_item_exist("avatar_panel"):
+                    with dpg.child_window(
+                        tag="avatar_panel",
+                        width=(RIGHT_W - PAD),
+                        height=L.AVATAR.MIN_PANEL_H,  # recalibrated by calibrate_to_viewport()
+                        autosize_x=False,
+                        autosize_y=False,
+                        no_scrollbar=True,
+                    ):
+                        dpg.bind_item_theme("avatar_panel", pane_theme)
+                        if not dpg.does_item_exist("avatar_draw"):
+                            dpg.add_drawlist(width=(RIGHT_W - PAD), height=L.AVATAR.MIN_PANEL_H, tag="avatar_draw")
+
+                # --- Optional: load a placeholder avatar image (env or candidates)
+                try:
+                    import os
+                    cwd = os.getcwd()
+                    env_avatar = os.environ.get("PIPER_AVATAR", "").strip()
+
+                    DEFAULT_AVATAR_CANDIDATES = [
+                        env_avatar if env_avatar else None,                     # 1) explicit override
+                        os.path.join(cwd, "assets", "avatar.png"),              # 2) project asset
+                        os.path.join(cwd, "Library", "Confident Scientist in the Lab.png"),   # 3) your library file
+                        os.path.join(cwd, "Library", "avatar.png"),             # 4) generic library file
+                    ]
+
+                    chosen = None
+                    for p in DEFAULT_AVATAR_CANDIDATES:
+                        if p and os.path.exists(p):
+                            chosen = p
+                            break
+
+                    if chosen:
+                        _ensure_texture_registry()
+                        _load_avatar_from_file(chosen)  # sets _AVATAR_TEX, _AVATAR_IMG_W/_H
+                        if _AVATAR_TEX and dpg.does_item_exist("avatar_panel"):
+                            if not dpg.does_item_exist("avatar_image"):
+                                dpg.add_image(_AVATAR_TEX, tag="avatar_image", parent="avatar_panel")
+                            # Hide drawlist when image visible to avoid stacking height / scroll
+                            if dpg.does_item_exist("avatar_draw"):
+                                dpg.configure_item("avatar_draw", show=False)
+                except Exception:
+                    pass
+                # --- B04.22b: align right column height to chat ROW_H, then fit avatar image ---
+                try:
+                    # 1) Ensure right column (logs + avatar) matches chat height (ROW_H)
+                    #    logs height was set to (ROW_H - 400 - L.SPACE.SECTION_GAP), so make avatar_panel exactly 400.
+                    if dpg.does_item_exist("avatar_panel"):
+                        dpg.configure_item("avatar_panel", height=L.AVATAR.PANEL_H)
+
+                    # run on next frame so sizes are settled
+                    dpg.set_frame_callback(dpg.get_frame_count() + 1, lambda s=None,a=None: _b04_fit_avatar_once())
+                except Exception:
+                    pass
+                try:
+                    if dpg and dpg.does_item_exist("avatar_panel") and dpg.does_item_exist("avatar_image"):
+                        dpg.set_frame_callback(
+                            dpg.get_frame_count() + 1,
+                            lambda s=None, a=None: _avatar_post_layout_fix("avatar_image", "avatar_panel")
+                        )
+                    # Re-calibrate avatar after viewport resize (let layout settle first)
+                    def _recalibrate_avatar_on_resize(sender=None, app_data=None, user_data=None):
+                        try:
+                            dpg.set_frame_callback(
+                                dpg.get_frame_count() + 2,
+                                lambda s=None, a=None: _avatar_post_layout_fix("avatar_image", "avatar_panel")
+                            )
+                        except Exception:
+                            pass
+
+                    try:
+                        dpg.set_viewport_resize_callback(_recalibrate_avatar_on_resize)
+                    except Exception:
+                        pass
+
+                except Exception:
+                    pass
+

@@ -1,0 +1,127 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: STATE_RE @ line 132
+--------------------------------------------------------------------------------
+   127: _UI_READY = False
+   128: # -------------------------------
+   129: # Classifiers (robust parsing)
+   130: # -------------------------------
+   131: AVAILABLE_STATES_BANNER_RE = re.compile(r"\[STATE\].*available_states=", re.IGNORECASE)
+   132: STATE_RE = re.compile(
+   133:     r"\[STATE\]\s*(?:([A-Za-z_]+)\s*(?:→|->)\s*([A-Za-z_]+)|([A-Za-z_]+))",
+   134:     re.IGNORECASE
+   135: )
+   136: # Valid Piper states (whitelist to avoid parsing junk like "[STATE]TE]")
+   137: VALID_STATES = {"SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"}
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: STATE_RE @ line 294
+--------------------------------------------------------------------------------
+   289: 
+   290:     # --- State detection (robust + heuristics) ---
+   291:     has_state_tag = "[STATE]" in s  # used to avoid duplicate echo
+   292:     new_state = None
+   293: 
+   294:     m = STATE_RE.search(s)
+   295:     if m:
+   296:         if m.group(2):       # OLD -> NEW
+   297:             new_state = m.group(2)
+   298:         elif m.group(3):     # NEW
+   299:             new_state = m.group(3)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: STATE_RE @ line 778
+--------------------------------------------------------------------------------
+   773:                 globals()["persona_sarcasm"] = (val in ("on","true","1"))
+   774:                 _refresh_needed = True
+   775:         # --- State detection from logs (mirror of top-level logic) ---
+   776:         try:
+   777:             ns = None
+   778:             m = STATE_RE.search(s)
+   779:             if m:
+   780:                 if m.group(2):      # OLD -> NEW
+   781:                     ns = m.group(2)
+   782:                 elif m.group(3):    # NEW
+   783:                     ns = m.group(3)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: STATE_RE @ line 131
+--------------------------------------------------------------------------------
+   126: _UI_READY = False
+   127: # -------------------------------
+   128: # Classifiers (robust parsing)
+   129: # -------------------------------
+   130: AVAILABLE_STATES_BANNER_RE = re.compile(r"\[STATE\].*available_states=", re.IGNORECASE)
+   131: STATE_RE = re.compile(
+   132:     r"\[STATE\]\s*(?:([A-Za-z_]+)\s*(?:→|->)\s*([A-Za-z_]+)|([A-Za-z_]+))",
+   133:     re.IGNORECASE
+   134: )
+   135: # Valid Piper states (whitelist to avoid parsing junk like "[STATE]TE]")
+   136: VALID_STATES = {"SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"}
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: STATE_RE @ line 293
+--------------------------------------------------------------------------------
+   288: 
+   289:     # --- State detection (robust + heuristics) ---
+   290:     has_state_tag = "[STATE]" in s  # used to avoid duplicate echo
+   291:     new_state = None
+   292: 
+   293:     m = STATE_RE.search(s)
+   294:     if m:
+   295:         if m.group(2):       # OLD -> NEW
+   296:             new_state = m.group(2)
+   297:         elif m.group(3):     # NEW
+   298:             new_state = m.group(3)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: STATE_RE @ line 10
+--------------------------------------------------------------------------------
+     5: from pathlib import Path
+     6: 
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]
+    15: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: STATE_RE @ line 10
+--------------------------------------------------------------------------------
+     5: from datetime import datetime
+     6: from typing import Deque, Tuple
+     7: 
+     8: # Public constants (imported by entry)
+     9: AVAILABLE_STATES_BANNER_RE = re.compile(r"\[STATE\].*available_states=", re.IGNORECASE)
+    10: STATE_RE   = re.compile(r"\[STATE\]\s*(?:([A-Za-z_]+)\s*(?:→|->)\s*([A-Za-z_]+)|([A-Za-z_]+))", re.IGNORECASE)
+    11: VALID_STATES = {"SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"}
+    12: STATE_WORD_RE = re.compile(r"\b(sleeping|waking|listening|thinking|speaking)\b", re.IGNORECASE)
+    13: SLEEP_HINT_RE = re.compile(r"(going to sleep|back to sleep|piper is (now )?sleeping|^sleep$|sleeping\.\.\.)", re.IGNORECASE)
+    14: TONE_RE     = re.compile(r"\[TONE\]\s*([A-Za-z]+)", re.IGNORECASE)
+    15: SARCASM_RE  = re.compile(r"\[SARCASM\]\s*(on|off|true|false|1|0)", re.IGNORECASE)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: STATE_RE @ line 65
+--------------------------------------------------------------------------------
+    60:             state_queue.popleft()
+    61:             return state_queue, now, True
+    62:     return state_queue, last_display_switch, changed
+    63: 
+    64: def detect_new_state(s: str) -> str | None:
+    65:     m = STATE_RE.search(s)
+    66:     if m:
+    67:         if m.group(2): return m.group(2)
+    68:         if m.group(3): return m.group(3)
+    69:     else:
+    70:         mw = STATE_WORD_RE.search(s)

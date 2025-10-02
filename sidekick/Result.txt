@@ -1,0 +1,217 @@
+(venv) PS C:\Piper> $orph | ForEach-Object {
+>>   $p = 'C:\Piper\scripts\' + ($_ -replace '\.','\') + '.py'
+>>   if (Test-Path $p) {
+>>     $hit = Select-String -Path $p -Pattern 'if __name__\s*==\s*["'']__main__["'']'
+>>     if ($hit) { "MAIN: $_" }
+>>   }
+>> }
+MAIN: entries._app_gui_entry_impl
+MAIN: entries.app_cli_entry
+MAIN: entries.app_gui_entry
+MAIN: entries.app_wake_entry
+MAIN: make_snapshot
+MAIN: show_arch_live
+
+
+(venv) PS C:\Piper> $orph | ForEach-Object {
+>>   $name = $_
+>>   Select-String -Path 'C:\Piper\scripts\**\*.py' -Pattern $name -SimpleMatch |
+>>     ForEach-Object { "STRING USE: $($_.Path):$($_.LineNumber): $($_.Line)" }
+>> }
+STRING USE: C:\Piper\scripts\common\config.py:1: # scripts/common/config.py
+STRING USE: C:\Piper\scripts\common\types.py:1: # scripts/common/types.py
+STRING USE: C:\Piper\scripts\common\config.py:2: # Prints canonical Core state/event names at startup.
+STRING USE: C:\Piper\scripts\common\config.py:8:     _states_str = "|".join(list_core_state_names())
+STRING USE: C:\Piper\scripts\common\config.py:15: __all__ = ["CoreState", "EventType", "list_core_state_names", "list_event_type_names"]
+STRING USE: C:\Piper\scripts\common\types.py:2: # Canonical type hints for Piper Core events & payloads (names only; no behavior).
+STRING USE: C:\Piper\scripts\common\types.py:9:     from core.state_defs import CoreState, EventType
+STRING USE: C:\Piper\scripts\common\types.py:11:     from core.state_defs import CoreState, EventType  # type: ignore
+STRING USE: C:\Piper\scripts\common\types.py:33:     score: Optional[float]       # detector score if available
+STRING USE: C:\Piper\scripts\common\types.py:41:     "CoreState", "EventType",
+STRING USE: C:\Piper\scripts\core\bg_poller.py:1: # scripts/core/bg_poller.py
+STRING USE: C:\Piper\scripts\core\bridge.py:1: # scripts/core/bridge.py
+STRING USE: C:\Piper\scripts\core\bridge.py:2: # RingÃ¢â‚¬â€˜0 Core: tiny bridge that wires Services -> Core event queue.
+STRING USE: C:\Piper\scripts\core\bridge.py:9:     from core.core_app import CoreApp
+STRING USE: C:\Piper\scripts\core\bridge.py:10:     from core.events import publish
+STRING USE: C:\Piper\scripts\core\bridge.py:11:     from core.state_defs import EventType, CoreState
+STRING USE: C:\Piper\scripts\core\bridge.py:14:     from core.core_app import CoreApp  # type: ignore
+STRING USE: C:\Piper\scripts\core\bridge.py:15:     from core.events import publish  # type: ignore
+STRING USE: C:\Piper\scripts\core\bridge.py:16:     from core.state_defs import EventType, CoreState  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_app.py:1: # scripts/core/core_app.py
+STRING USE: C:\Piper\scripts\core\core_app.py:2: # Ring-0 Core: minimal loop (names/shape only; not wired to runtime).
+STRING USE: C:\Piper\scripts\core\core_app.py:7: class CoreApp:
+STRING USE: C:\Piper\scripts\core\core_app.py:8:     """Tiny Core loop holder. Processes at most one event per tick()."""
+STRING USE: C:\Piper\scripts\core\core_app.py:9:     def __init__(self, queue: Optional[EventQueue] = None, initial: CoreState = CoreState.SLEEPING) -> None:
+STRING USE: C:\Piper\scripts\core\core_app.py:13:     def tick(self) -> CoreState:
+STRING USE: C:\Piper\scripts\core\core_commands.py:1: # C:\Piper\scripts\core\core_commands.py
+STRING USE: C:\Piper\scripts\core\core_commands.py:2: # T-Core01: core CLI commands extracted (no persona deps)
+STRING USE: C:\Piper\scripts\core\core_commands.py:12: def core_banner(say: SayFn, version_str: str) -> None:
+STRING USE: C:\Piper\scripts\core\core_commands.py:16: def handle_core_command(cmd: str, say: SayFn, *, version_str: str) -> Optional[Literal["EXIT", True, False]]:
+STRING USE: C:\Piper\scripts\core\core_commands.py:21:       - False   â†’ not a core command (let caller try others)
+STRING USE: C:\Piper\scripts\core\core_commands.py:41:         say(f"Piper CLI - Core {version_str}. SAFE_MODE is ON.", "about")
+STRING USE: C:\Piper\scripts\core\core_commands.py:53:         say(f"Core version {version_str}.", "confirm")
+STRING USE: C:\Piper\scripts\core\core_machine.py:1: # C:\Piper\scripts\core\core_machine.py
+STRING USE: C:\Piper\scripts\core\core_machine.py:7:     from core.core_commands import handle_core_command, core_banner  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:9:     from core.core_commands import handle_core_command, core_banner  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:17: # in C:\Piper\scripts\core\core_machine.py near the top
+STRING USE: C:\Piper\scripts\core\core_machine.py:28: class CoreMachine:
+STRING USE: C:\Piper\scripts\core\core_machine.py:34:         core_banner(self._say, self._version)
+STRING USE: C:\Piper\scripts\core\core_machine.py:47:                 res = handle_core_command(user_input, self._say, version_str=self._version)
+STRING USE: C:\Piper\scripts\core\events.py:1: # scripts/core/events.py
+STRING USE: C:\Piper\scripts\core\events.py:2: # Ring-0 Core: canonical Event object + publish/dequeue helpers (names only).
+STRING USE: C:\Piper\scripts\core\events.py:11:     """Canonical Core event: (type, payload). Timestamping can be added later."""
+STRING USE: C:\Piper\scripts\core\event_queue.py:1: # Ring-0 Core: minimal FIFO queue skeleton (not wired by default).
+STRING USE: C:\Piper\scripts\core\flags.py:1: # scripts/core/flags.py
+STRING USE: C:\Piper\scripts\core\flags.py:3: Flag reader/summary for Core sandbox demos.
+STRING USE: C:\Piper\scripts\core\flags.py:13:     "PIPER_CORE_RUNTIME",
+STRING USE: C:\Piper\scripts\core\flags.py:14:     "PIPER_CORE_TRANSITIONS",
+STRING USE: C:\Piper\scripts\core\flags.py:15:     "PIPER_CORE_FORWARD_INPUT",
+STRING USE: C:\Piper\scripts\core\flags.py:16:     "PIPER_CORE_SANDBOX",
+STRING USE: C:\Piper\scripts\core\flags.py:17:     "PIPER_CORE_DEMO_ASR",
+STRING USE: C:\Piper\scripts\core\flags.py:18:     "PIPER_CORE_DEMO_ASR2",
+STRING USE: C:\Piper\scripts\core\flags.py:19:     "PIPER_CORE_DEMO_SPEAK",
+STRING USE: C:\Piper\scripts\core\flags.py:20:     "PIPER_CORE_DEMO_STOP",
+STRING USE: C:\Piper\scripts\core\flags.py:21:     "PIPER_CORE_BRIDGE_DEMO",
+STRING USE: C:\Piper\scripts\core\flags.py:22:     "PIPER_CORE_BRIDGE_MOCK",
+STRING USE: C:\Piper\scripts\core\flags.py:23:     "PIPER_CORE_BRIDGE_REAL",
+STRING USE: C:\Piper\scripts\core\flags.py:24:     "PIPER_CORE_BRIDGE_BG",
+STRING USE: C:\Piper\scripts\core\flags.py:28: class CoreFlags:
+STRING USE: C:\Piper\scripts\core\flags.py:57: def read() -> CoreFlags:
+STRING USE: C:\Piper\scripts\core\flags.py:59:     return CoreFlags(
+STRING USE: C:\Piper\scripts\core\flags.py:60:         runtime=_is_on("PIPER_CORE_RUNTIME"),
+STRING USE: C:\Piper\scripts\core\flags.py:61:         transitions=_is_on("PIPER_CORE_TRANSITIONS"),
+STRING USE: C:\Piper\scripts\core\flags.py:62:         forward_input=_is_on("PIPER_CORE_FORWARD_INPUT"),
+STRING USE: C:\Piper\scripts\core\flags.py:63:         sandbox=_is_on("PIPER_CORE_SANDBOX"),
+STRING USE: C:\Piper\scripts\core\flags.py:64:         demo_asr=_is_on("PIPER_CORE_DEMO_ASR"),
+STRING USE: C:\Piper\scripts\core\flags.py:65:         demo_asr2=_is_on("PIPER_CORE_DEMO_ASR2"),
+STRING USE: C:\Piper\scripts\core\flags.py:66:         demo_speak=_is_on("PIPER_CORE_DEMO_SPEAK"),
+STRING USE: C:\Piper\scripts\core\flags.py:67:         demo_stop=_is_on("PIPER_CORE_DEMO_STOP"),
+STRING USE: C:\Piper\scripts\core\flags.py:68:         bridge_demo=_is_on("PIPER_CORE_BRIDGE_DEMO"),
+STRING USE: C:\Piper\scripts\core\flags.py:69:         bridge_mock=_is_on("PIPER_CORE_BRIDGE_MOCK"),
+STRING USE: C:\Piper\scripts\core\flags.py:70:         bridge_real=_is_on("PIPER_CORE_BRIDGE_REAL"),
+STRING USE: C:\Piper\scripts\core\flags.py:71:         bridge_bg=_is_on("PIPER_CORE_BRIDGE_BG"),
+STRING USE: C:\Piper\scripts\core\logbus.py:1: # scripts/core/logbus.py  — seed; behavior-neutral until adopted
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:1: # scripts/core/poll_helpers.py
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:3: Tiny, single-shot polling helper for CoreBridge ASR forwarding.
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:8: adapter for a few ticks and forward any tokens (including "" for EOU) into Core,
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:13: - No imports of Services at module import time (keeps Core clean).
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:14: - Accepts the bridge instance and Core primitives (app, publish, EventType).
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:19: CoreApp, publish, EventType, CoreState = _core_imports()
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:20: app = CORE_APP or CoreApp(initial=CoreState.SLEEPING)
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:21: bridge = CoreBridge(app=app, wake=..., asr=...)
+STRING USE: C:\Piper\scripts\core\router.py:1: # scripts/core/router.py
+STRING USE: C:\Piper\scripts\core\router.py:2: # Ring-0 Core: router with a feature-flagged first transition.
+STRING USE: C:\Piper\scripts\core\router.py:11:     from core.state_defs import CoreState, EventType
+STRING USE: C:\Piper\scripts\core\router.py:13:     from core.state_defs import CoreState, EventType  # type: ignore
+STRING USE: C:\Piper\scripts\core\router.py:16: # Turn ON only in tests/dev via:  os.environ["PIPER_CORE_TRANSITIONS"]="1"
+STRING USE: C:\Piper\scripts\core\router.py:17: _ENABLE = os.getenv("PIPER_CORE_TRANSITIONS") == "1"
+STRING USE: C:\Piper\scripts\core\router.py:19: # A handler takes (state, payload) and returns the next CoreState.
+STRING USE: C:\Piper\scripts\core\router.py:20: TransitionFn = Callable[[CoreState, Any], CoreState]
+STRING USE: C:\Piper\scripts\core\router.py:22: def _wake_from_sleep_handler(state: CoreState, payload: Any) -> CoreState:
+STRING USE: C:\Piper\scripts\core\router.py:24:     return CoreState.WAKING
+STRING USE: C:\Piper\scripts\core\router.py:28: _TRANSITIONS: Dict[Tuple[CoreState, EventType], TransitionFn] = (
+STRING USE: C:\Piper\scripts\core\router.py:31:         (CoreState.SLEEPING,  EventType.WakeDetected): _wake_from_sleep_handler,
+STRING USE: C:\Piper\scripts\core\router.py:34:         (CoreState.WAKING,    EventType.ASRResult): (lambda s, p: CoreState.LISTENING),
+STRING USE: C:\Piper\scripts\core\router.py:37:         (CoreState.LISTENING, EventType.ASRResult): (lambda s, p: CoreState.THINKING),
+STRING USE: C:\Piper\scripts\core\router.py:40:         (CoreState.THINKING,  EventType.Speak):      (lambda s, p: CoreState.SPEAKING),
+STRING USE: C:\Piper\scripts\core\router.py:43:         (CoreState.SPEAKING,  EventType.StopSpeak):  (lambda s, p: CoreState.LISTENING),
+STRING USE: C:\Piper\scripts\core\router.py:46:         (CoreState.WAKING,    EventType.Sleep):      (lambda s, p: CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\router.py:47:         (CoreState.LISTENING, EventType.Sleep):      (lambda s, p: CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\router.py:48:         (CoreState.THINKING,  EventType.Sleep):      (lambda s, p: CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\router.py:49:         (CoreState.SPEAKING,  EventType.Sleep):      (lambda s, p: CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\router.py:50:         # (CoreState.SLEEPING, EventType.Sleep) naturally stays SLEEPING
+STRING USE: C:\Piper\scripts\core\router.py:56: def process_event(state: CoreState, event_type: EventType, payload: Any = None) -> CoreState:
+STRING USE: C:\Piper\scripts\core\router.py:58:     Core router entry point.
+STRING USE: C:\Piper\scripts\core\startup.py:1: # scripts/core/startup.py
+STRING USE: C:\Piper\scripts\core\startup.py:3: Startup banner printer for Piper Core.
+STRING USE: C:\Piper\scripts\core\startup.py:12:     from core.flags import summarize as summarize_flags
+STRING USE: C:\Piper\scripts\core\startup.py:13:     from core.state_defs import CoreState, EventType
+STRING USE: C:\Piper\scripts\core\startup.py:15:     from core.flags import summarize as summarize_flags  # type: ignore
+STRING USE: C:\Piper\scripts\core\startup.py:16:     from core.state_defs import CoreState, EventType      # type: ignore
+STRING USE: C:\Piper\scripts\core\startup.py:22:       - [CORE] probe: file=... runtime_flag=...
+STRING USE: C:\Piper\scripts\core\startup.py:23:       - [CORE] demo_flags_active=...
+STRING USE: C:\Piper\scripts\core\startup.py:28:     runtime_flag = os.getenv("PIPER_CORE_RUNTIME")
+STRING USE: C:\Piper\scripts\core\startup.py:29:     print(f"[CORE] probe: file={probe_file} runtime_flag={runtime_flag!r}")
+STRING USE: C:\Piper\scripts\core\startup.py:32:         print(f"[CORE] demo_flags_active={active}")
+STRING USE: C:\Piper\scripts\core\startup.py:34:     print(f"[STATE] available_states={'|'.join(s.name for s in CoreState)}")
+STRING USE: C:\Piper\scripts\core\state_defs.py:1: # Ring-0 Core: enum names only (no behavior). Safe to import.
+STRING USE: C:\Piper\scripts\core\state_defs.py:4: class CoreState(Enum):
+STRING USE: C:\Piper\scripts\core\state_defs.py:18: __all__ = ["CoreState", "EventType"]
+STRING USE: C:\Piper\scripts\core\timers.py:1: # scripts/core/timers.py
+STRING USE: C:\Piper\scripts\core\timers.py:2: # Ring-0 Core: timers skeleton (names only, not wired).
+STRING USE: C:\Piper\scripts\core\transition_plan.py:7:     from core.state_defs import CoreState, EventType
+STRING USE: C:\Piper\scripts\core\transition_plan.py:9:     from core.state_defs import CoreState, EventType  # type: ignore
+STRING USE: C:\Piper\scripts\core\transition_plan.py:12: INTENDED: Tuple[Tuple[CoreState, EventType, CoreState], ...] = (
+STRING USE: C:\Piper\scripts\core\transition_plan.py:13:     (CoreState.SLEEPING,  EventType.WakeDetected, CoreState.WAKING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:14:     (CoreState.WAKING,    EventType.ASRResult,   CoreState.LISTENING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:15:     (CoreState.LISTENING, EventType.ASRResult,   CoreState.THINKING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:16:     (CoreState.THINKING,  EventType.Speak,       CoreState.SPEAKING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:17:     (CoreState.SPEAKING,  EventType.StopSpeak,   CoreState.LISTENING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:18:     (CoreState.SPEAKING,  EventType.Sleep,       CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:20:     (CoreState.SLEEPING,  EventType.Sleep,       CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:21:     (CoreState.LISTENING, EventType.Sleep,       CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:22:     (CoreState.THINKING,  EventType.Sleep,       CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\core\transition_plan.py:23:     (CoreState.WAKING,    EventType.Sleep,       CoreState.SLEEPING),
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:5: # --- Required: make CoreMachine visible ---
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:7:     from core.core_machine import CoreMachine  # type: ignore
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:9:     from core.core_machine import CoreMachine  # type: ignore
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:41:     # Inject our _say into CoreMachine and run
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:42:     # (CoreMachine writes its own prompts via stdout; we override below)
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:43:     cm = CoreMachine(say=_say, version_str=VERSION_STR)
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:47:     # Since CoreMachine writes '> ' directly, we mimic that in the loop by
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:51:     # Lightweight REPL using CoreMachine internals without modifying it:
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:56:     # Rebuild a tiny run loop that uses our prompt; reuse cm._say via CoreMachine
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:60:         from core.core_commands import handle_core_command as _hcc, core_banner as _cb
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:3: from core.startup import print_banner
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:4: from core.state_defs import CoreApp
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:5: from core.flags import read
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:11:     app = CoreApp()
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:19:                 print("[CORE] sandbox=exit")
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:25:                 if "PIPER_CORE_FORWARD_INPUT" in flags.active_keys():
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:26:                     print(f"[CORE] fwd_input text='{user_input}' -> state={app.state.name}")
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:28:         print("\n[CORE] interrupted, shutting down")
+STRING USE: C:\Piper\scripts\entries\_app_gui_entry_impl.py:32: LOG_PATH = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+STRING USE: C:\Piper\scripts\entries\_app_gui_entry_impl.py:56:         log_path    = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+STRING USE: C:\Piper\scripts\entries\_app_gui_entry_impl.py:176:     - Starts a UTF-8 tailer thread for core.log
+STRING USE: C:\Piper\scripts\entries\_app_gui_entry_impl.py:188:     log_path = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+STRING USE: C:\Piper\scripts\services\cli_prompt.py:16:     Entries/Core call this so we can evolve formatting later without touching them.
+STRING USE: C:\Piper\scripts\ui\dev_tools.py:174:                     # Send directly to Logs (no Core) with a DEV prefix
+STRING USE: C:\Piper\scripts\ui\theme.py:40:             dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 6, category=dpg.mvThemeCat_Core)
+STRING USE: C:\Piper\scripts\ui\theme.py:41:             dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 8, category=dpg.mvThemeCat_Core)
+STRING USE: C:\Piper\scripts\ui\theme.py:42:             dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 8, category=dpg.mvThemeCat_Core)
+STRING USE: C:\Piper\scripts\ui\theme.py:43:             dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 6, 6, category=dpg.mvThemeCat_Core)
+STRING USE: C:\Piper\scripts\ui\_panes_impl.py:16: from ui.helpers.refresh_core import refresh_ui
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:7: Allow callers (entries, tests, or future loopers) to poll the bridge's ASR
+STRING USE: C:\Piper\scripts\core\startup.py:4: No side effects beyond printing; safe to call from entries or tests.
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:1: # C:\Piper\scripts\entries\app_cli_entry.py
+STRING USE: C:\Piper\scripts\entries\app_wake_entry.py:1: # entries/app_wake_entry.py
+STRING USE: C:\Piper\scripts\services\cli_prompt.py:16:     Entries/Core call this so we can evolve formatting later without touching them.
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:55:     Heuristic: find the folder that contains the 'scripts' package with entries/.
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:61:             if (p / "scripts" / "entries").is_dir():
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:72:         return "entries.app_cli_entry" if iu.find_spec("entries.app_cli_entry") else None
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:103:     so `python -m scripts.entries.app_cli_entry` works reliably.
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:108:         raise RuntimeError("Could not locate app_cli_entry module (checked scripts.entries and entries).")
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:72:         return "entries.app_cli_entry" if iu.find_spec("entries.app_cli_entry") else None
+STRING USE: C:\Piper\scripts\ui\ipc_child.py:103:     so `python -m scripts.entries.app_cli_entry` works reliably.
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:6: # Try both import paths; this module never writes to personality.py
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:9:         import personality as p; return p
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:12:             import personality as p; return p
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:16: personality = _import_persona()
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:33: # -------- Runtime overrides (None = follow personality.py) --------
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:38:     return getattr(personality, name, default) if personality else default
+STRING USE: C:\Piper\scripts\core\bridge.py:2: # RingÃ¢â‚¬â€˜0 Core: tiny bridge that wires Services -> Core event queue.
+STRING USE: C:\Piper\scripts\core\bridge.py:12:     from services.base import WakeSvc, ASRSvc
+STRING USE: C:\Piper\scripts\core\bridge.py:17:     from services.base import WakeSvc, ASRSvc  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:13:     from services.cli_prompt import current_prompt  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:15:     from services.cli_prompt import current_prompt  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:19:     from services.cli_prompt import current_prompt  # type: ignore
+STRING USE: C:\Piper\scripts\core\core_machine.py:21:     from services.cli_prompt import current_prompt  # type: ignore
+STRING USE: C:\Piper\scripts\core\poll_helpers.py:13: - No imports of Services at module import time (keeps Core clean).
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:13:     from services.cli_prompt import current_prompt, format_line  # type: ignore
+STRING USE: C:\Piper\scripts\entries\app_cli_entry.py:15:     from services.cli_prompt import current_prompt, format_line  # type: ignore
+STRING USE: C:\Piper\scripts\services\base.py:1: # scripts/services/base.py
+STRING USE: C:\Piper\scripts\services\base.py:2: # Ringâ€‘1 Services: minimal contracts (names only; no behavior).
+STRING USE: C:\Piper\scripts\services\cli_prompt.py:1: # services/cli_prompt.py
+STRING USE: C:\Piper\scripts\services\persona_adapter.py:1: # C:\Piper\scripts\services\persona_adapter.py
+STRING USE: C:\Piper\scripts\entries\_app_gui_entry_impl.py:455:             from ui.theme_utils import apply_theme_if_enabled as _apply_theme
+(venv) PS C:\Piper>

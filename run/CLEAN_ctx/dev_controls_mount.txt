@@ -1,0 +1,175 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 654
+--------------------------------------------------------------------------------
+   649:         except Exception:
+   650:             from ui.panes import init_ui, refresh_ui, set_hb_text          # type: ignore
+   651:         # Dev Tools mounters (we'll try multiple names)
+   652:         mounters = []
+   653:         for modname, sym in [
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 655
+--------------------------------------------------------------------------------
+   650:             from ui.panes import init_ui, refresh_ui, set_hb_text          # type: ignore
+   651:         # Dev Tools mounters (we'll try multiple names)
+   652:         mounters = []
+   653:         for modname, sym in [
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+   660:         ]:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 658
+--------------------------------------------------------------------------------
+   653:         for modname, sym in [
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+   660:         ]:
+   661:             try:
+   662:                 mod = __import__(modname, fromlist=[sym])
+   663:                 fn = getattr(mod, sym, None)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 659
+--------------------------------------------------------------------------------
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+   660:         ]:
+   661:             try:
+   662:                 mod = __import__(modname, fromlist=[sym])
+   663:                 fn = getattr(mod, sym, None)
+   664:                 if callable(fn):
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 1022
+--------------------------------------------------------------------------------
+  1017:                 _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+  1018: 
+  1019:             # Fallback: embedded controls if window API is absent
+  1020:             if not mounted:
+  1021:                 for modname, sym in [
+  1022:                     ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1023:                     ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1024:                     ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1025:                     ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1026:                 ]:
+  1027:                     try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 1023
+--------------------------------------------------------------------------------
+  1018: 
+  1019:             # Fallback: embedded controls if window API is absent
+  1020:             if not mounted:
+  1021:                 for modname, sym in [
+  1022:                     ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1023:                     ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1024:                     ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1025:                     ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1026:                 ]:
+  1027:                     try:
+  1028:                         mod = __import__(modname, fromlist=[sym])
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 1024
+--------------------------------------------------------------------------------
+  1019:             # Fallback: embedded controls if window API is absent
+  1020:             if not mounted:
+  1021:                 for modname, sym in [
+  1022:                     ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1023:                     ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1024:                     ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1025:                     ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1026:                 ]:
+  1027:                     try:
+  1028:                         mod = __import__(modname, fromlist=[sym])
+  1029:                         fn  = getattr(mod, sym, None)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_controls_mount @ line 1025
+--------------------------------------------------------------------------------
+  1020:             if not mounted:
+  1021:                 for modname, sym in [
+  1022:                     ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1023:                     ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+  1024:                     ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1025:                     ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+  1026:                 ]:
+  1027:                     try:
+  1028:                         mod = __import__(modname, fromlist=[sym])
+  1029:                         fn  = getattr(mod, sym, None)
+  1030:                         if callable(fn):
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: dev_controls_mount @ line 12
+--------------------------------------------------------------------------------
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]
+    15: 
+    16: def _read_text(p: Path) -> str:
+    17:     # resilient reader for mixed encodings
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: dev_controls_mount @ line 70
+--------------------------------------------------------------------------------
+    65: from scripts.ui.components.controls_pane import build as dev_controls_build, refresh as dev_controls_refresh  # B02
+    66: from scripts.ui.helpers.scroll_utils import is_at_bottom, scroll_to_bottom_next_frame  # B04.2
+    67: from scripts.ui.helpers.tag_utils import first_existing_tag, shorten_path as _shorten_path
+    68: from scripts.ui.helpers.header_utils import compose_header_strings
+    69: from scripts.ui.helpers.scroll_utils import update_autoscroll_badges  # B04.6
+    70: from scripts.ui.helpers.dev_controls_mount import lazy_mount_under_logs  # B04.7
+    71: from scripts.ui.helpers.header_bridge import apply_header_updates  # B04.8
+    72: from scripts.ui.helpers.chatlog_writer import write_chat, write_logs  # B04.9
+    73: from scripts.ui.helpers.dev_adapters import build_dev_adapters  # B04.12a
+    74: from scripts.ui.helpers.layout_utils import apply_wraps_if_present, update_bottom_padding_if_present
+    75: from scripts.ui.helpers.refresh_core import refresh_ui  # B04.13b
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\refresh_core.py
+HIT: dev_controls_mount @ line 14
+--------------------------------------------------------------------------------
+     9:     is_at_bottom,
+    10:     scroll_to_bottom_next_frame,
+    11:     update_autoscroll_badges,
+    12: )
+    13: from scripts.ui.helpers.chatlog_writer import write_chat, write_logs
+    14: from scripts.ui.helpers.dev_controls_mount import lazy_mount_under_logs
+    15: from scripts.ui.helpers.dev_adapters import build_dev_adapters
+    16: from scripts.ui.helpers.layout_utils import apply_wraps_if_present, update_bottom_padding_if_present
+    17: # Layout constants (wrap widths & bottom pads) — fall back to 0 if not defined
+    18: try:
+    19:     from scripts.ui.layout_constants import CHAT_WRAP, LOG_WRAP, CHAT_BOTTOM_PAD, LOG_BOTTOM_PAD

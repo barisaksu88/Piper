@@ -1,0 +1,80 @@
+Overseer Compliance — Chapter: Stabilization (GUI/LLM hygiene)
+Rail R1 — Prune Legacy UI
+
+Scope: ✅
+Plan: Remove scripts\ui\components\ and reject any ui.components imports.
+Patch summary: Deleted folder; verified no imports.
+Smoke: GUI launches; layout/header unchanged — pass.
+KGB: KGB-2025-09-28_R1_prune_components
+Notes: None.
+
+Rail R2 — Slim GUI Entry
+
+Scope: ✅
+Plan: Keep _app_gui_entry_impl.py as a coordinator only; helpers own logic.
+Patch summary: Entry slimmed; logic moved to ui.helpers/* and ui.pane_parts/*.
+Smoke: Header/heartbeat OK; chat input OK; clean exit — pass.
+LoC check: 112 (≤120) — pass.
+KGB: KGB-2025-09-28_R2_slim_gui_entry
+Notes: None.
+
+Rail R3 — LLM04 Robustness (true)
+
+Scope: ✅
+Plan: Add timeout+fallback in services\llm_client.py (no new providers).
+Patch summary: concurrent.futures wrapper with PIPER_LLM_TIMEOUT_MS; prints [ERR] LLM timeout or error and returns short fallback on timeout/exception.
+Smoke: PIPER_LLM_PROVIDER=echo normal; injected sleep triggers fallback without freezing — pass.
+Signals present: _TIMEOUT_ENV, ThreadPoolExecutor, .result(timeout=...), TimeoutError handler — present.
+KGB: KGB-2025-09-28_R3_llm04_robustness_true
+Notes: None.
+
+Rail R4 — Final Consistency & Blessing (residue sweep)
+
+Scope: ✅
+Plan: Lean sweeps; prove cleanliness.
+Patch summary:
+
+header_bar.py — single authority for labels + dot; prefixes normalized; dot follows state.
+
+header_utils.py — minimal (compose_header_strings, publish_header, set_state_dot).
+
+refresh_core.py — UI-only, no fallbacks; parses [STATE]/[PERSONA] in logs when state_text empty; no auto-creating tags.
+
+logs_avatar_column.py — lean avatar fit; logs panel tidy.
+
+Proof (your outputs):
+
+PY files: 58
+
+Top-5 largest .py:
+
+ui\pane_parts\header_bar.py — 11.3 KB
+
+ui\pane_parts\chat_column.py — 10.6 KB
+
+ui\tailer.py — 6.9 KB
+
+services\input_bridge_cli.py — 5.2 KB
+
+ui\helpers\refresh_core.py — 5.0 KB
+
+Legacy components folder: components exists: False — pass
+
+Entry LoC: 112 — pass
+
+LLM timeout signals in file: present — pass
+
+Stray ui.components imports under scripts: none — pass
+
+Smoke: GUI launches clean — pass
+
+KGB: KGB-2025-09-28_R4_residue_sweep_clean
+Notes/Parking:
+
+“Inject Chat → Logs” remains parked by design.
+
+Mission Control left as original; GUI derives header state/persona from log markers.
+
+Blessing Tag (request to Overseer)
+
+KGB-2025-09-28_OVR_stable_gui_llm_base

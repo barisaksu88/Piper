@@ -1,0 +1,303 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 107
+--------------------------------------------------------------------------------
+   102: 
+   103: current_state = "SLEEPING"
+   104: _last_state_change_ts = 0.0  # UI timing sentinel
+   105: 
+   106: # Persona read-outs (UI-only, read-only)
+   107: persona_tone = os.environ.get("PIPER_PERSONA_TONE", "neutral").strip().lower()
+   108: persona_sarcasm = (os.environ.get("PIPER_PERSONA_SARCASM", "off").strip().lower() in ("1","on","true","yes"))
+   109: 
+   110: # State & timing
+   111: state_queue = deque()
+   112: last_update_ts: datetime | None = None
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 273
+--------------------------------------------------------------------------------
+   268:         pm = PERSONA_RE.search(s)
+   269:         if pm:
+   270:             t = pm.group(1).strip().lower()
+   271:             sv = pm.group(2).strip().lower()
+   272:             if t:
+   273:                 globals()["persona_tone"] = t
+   274:             if sv:
+   275:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   276:             _refresh_needed = True
+   277:         else:
+   278:             tm = TONE_RE.search(s)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 280
+--------------------------------------------------------------------------------
+   275:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   276:             _refresh_needed = True
+   277:         else:
+   278:             tm = TONE_RE.search(s)
+   279:             if tm:
+   280:                 globals()["persona_tone"] = tm.group(1).strip().lower()
+   281:                 _refresh_needed = True
+   282:             sm = SARCASM_RE.search(s)
+   283:             if sm:
+   284:                 sv = sm.group(1).strip().lower()
+   285:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 464
+--------------------------------------------------------------------------------
+   459:             return default
+   460: 
+   461:     # Use provided args if 6 were passed, otherwise pull from globals
+   462:     if len(args) >= 6:
+   463:         # Compose authoritative header every time (persona/state are module globals)
+   464:         state_text = f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}"
+   465:         # dev-only trace + repaint nudge
+   466:         log_buffer.append(f"[DEV][TRACE] header_now tone={persona_tone} sarcasm={'on' if persona_sarcasm else 'off'}"); _log_dirty = True; _refresh_needed = True
+   467:     else:
+   468:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   469:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 466
+--------------------------------------------------------------------------------
+   461:     # Use provided args if 6 were passed, otherwise pull from globals
+   462:     if len(args) >= 6:
+   463:         # Compose authoritative header every time (persona/state are module globals)
+   464:         state_text = f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}"
+   465:         # dev-only trace + repaint nudge
+   466:         log_buffer.append(f"[DEV][TRACE] header_now tone={persona_tone} sarcasm={'on' if persona_sarcasm else 'off'}"); _log_dirty = True; _refresh_needed = True
+   467:     else:
+   468:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   469:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+   470:         chat_text  = _choose("chat_buffer", "_chat_text", "CHAT_BUFFER", default=[])
+   471:         log_text   = _choose("log_buffer", "_log_text", "LOG_BUFFER", default=[])
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 683
+--------------------------------------------------------------------------------
+   678:     _chat_dirty = False
+   679:     _log_dirty = False
+   680: 
+   681:     def _classify_and_buffer(line: str):
+   682:         nonlocal last_update_ts, _refresh_needed, _chat_dirty, _log_dirty
+   683:         global persona_tone, persona_sarcasm
+   684:         s = line.rstrip("\r\n")
+   685:         if not s:
+   686:             return
+   687:         # Normalize CLI-formatted structured lines: "> [STATE] ..." -> "[STATE] ..."
+   688:         raw = s.lstrip()
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 745
+--------------------------------------------------------------------------------
+   740:                 pm = re.search(r"\[PERSONA\].*?\btone\s*=\s*([A-Za-z]+).*?\bsarcasm\s*=\s*(on|off|true|false|1|0)", s, re.IGNORECASE)
+   741:                 if pm:
+   742:                     t  = pm.group(1).strip().lower()
+   743:                     sv = pm.group(2).strip().lower()
+   744:                     if t:
+   745:                         globals()["persona_tone"] = t
+   746:                     globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   747:                     _refresh_needed = True
+   748:                 else:
+   749:                     tm = re.search(r"\[TONE\]\s*([A-Za-z]+)", s, re.IGNORECASE)
+   750:                     if tm:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 751
+--------------------------------------------------------------------------------
+   746:                     globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   747:                     _refresh_needed = True
+   748:                 else:
+   749:                     tm = re.search(r"\[TONE\]\s*([A-Za-z]+)", s, re.IGNORECASE)
+   750:                     if tm:
+   751:                         globals()["persona_tone"] = tm.group(1).strip().lower()
+   752:                         _refresh_needed = True
+   753:                     sm = re.search(r"\[SARCASM\]\s*(on|off|true|false|1|0)", s, re.IGNORECASE)
+   754:                     if sm:
+   755:                         sv = sm.group(1).strip().lower()
+   756:                         globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 765
+--------------------------------------------------------------------------------
+   760: 
+   761:         if "[TONE]" in s:
+   762:             import re as _re
+   763:             m = _re.search(r"\[TONE\]\s*([A-Za-z\-]+)", s, _re.IGNORECASE)
+   764:             if m:
+   765:                 globals()["persona_tone"] = m.group(1).strip().lower()
+   766:                 _refresh_needed = True
+   767: 
+   768:         if "[SARCASM]" in s:
+   769:             import re as _re
+   770:             m = _re.search(r"\[SARCASM\]\s*(on|off|true|false|1|0)", s, _re.IGNORECASE)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 868
+--------------------------------------------------------------------------------
+   863:                             from ui.pane_parts import header_bar as _hb  # fallback import
+   864: 
+   865:                         _hb.refresh(
+   866:                             f"State: {current_state}",
+   867:                             _hb_text(),
+   868:                             f"Tone: {persona_tone}",
+   869:                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   870:                             ""   # empty tailing text so nothing shows there
+   871:                         )
+   872:                         try:
+   873:                             # Force the state label/dot to match current_state every tick
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 881
+--------------------------------------------------------------------------------
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+   879:                                 # Some builds accept state_text as first arg in refresh
+   880:                                 _hb.refresh(f"State: {current_state}", _hb_text(),
+   881:                                             f"Tone: {persona_tone}",
+   882:                                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   883:                                             "")
+   884:                         except Exception:
+   885:                             pass
+   886:                             
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 911
+--------------------------------------------------------------------------------
+   906:                             pass
+   907: 
+   908:                     except Exception:
+   909:                         pass
+   910:                     refresh_ui(
+   911:                         f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   912:                         f"{_hb_text()} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   913:                         chat_text,
+   914:                         log_text,
+   915:                         _chat_dirty,
+   916:                         _log_dirty
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: persona_tone @ line 912
+--------------------------------------------------------------------------------
+   907: 
+   908:                     except Exception:
+   909:                         pass
+   910:                     refresh_ui(
+   911:                         f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   912:                         f"{_hb_text()} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   913:                         chat_text,
+   914:                         log_text,
+   915:                         _chat_dirty,
+   916:                         _log_dirty
+   917:                     )
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: persona_tone @ line 106
+--------------------------------------------------------------------------------
+   101: chat_buffer = deque(maxlen=CHAT_MAX_LINES)
+   102: 
+   103: current_state = "SLEEPING"
+   104: 
+   105: # Persona read-outs (UI-only, read-only)
+   106: persona_tone = os.environ.get("PIPER_PERSONA_TONE", "neutral").strip().lower()
+   107: persona_sarcasm = (os.environ.get("PIPER_PERSONA_SARCASM", "off").strip().lower() in ("1","on","true","yes"))
+   108: 
+   109: # State & timing
+   110: state_queue = deque()
+   111: last_update_ts: datetime | None = None
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: persona_tone @ line 272
+--------------------------------------------------------------------------------
+   267:         pm = PERSONA_RE.search(s)
+   268:         if pm:
+   269:             t = pm.group(1).strip().lower()
+   270:             sv = pm.group(2).strip().lower()
+   271:             if t:
+   272:                 globals()["persona_tone"] = t
+   273:             if sv:
+   274:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   275:             _refresh_needed = True
+   276:         else:
+   277:             tm = TONE_RE.search(s)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: persona_tone @ line 279
+--------------------------------------------------------------------------------
+   274:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+   275:             _refresh_needed = True
+   276:         else:
+   277:             tm = TONE_RE.search(s)
+   278:             if tm:
+   279:                 globals()["persona_tone"] = tm.group(1).strip().lower()
+   280:                 _refresh_needed = True
+   281:             sm = SARCASM_RE.search(s)
+   282:             if sm:
+   283:                 sv = sm.group(1).strip().lower()
+   284:                 globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: persona_tone @ line 13
+--------------------------------------------------------------------------------
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]
+    15: 
+    16: def _read_text(p: Path) -> str:
+    17:     # resilient reader for mixed encodings
+    18:     for enc in ("utf-8", "cp1254", "latin-1"):
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: persona_tone @ line 270
+--------------------------------------------------------------------------------
+   265:                     width=220,
+   266:                     callback=lambda s, a, u: log_emit(
+   267:                         f"[PERSONA] tone={a} sarcasm={'on' if dpg.get_value('dev_persona_sarcasm') else 'off'}",
+   268:                         "status",
+   269:                     ),
+   270:                     tag="dev_persona_tone",
+   271:                 )
+   272:                 dpg.add_checkbox(
+   273:                     label="Sarcasm",
+   274:                     default_value=False,
+   275:                     tag="dev_persona_sarcasm",
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: persona_tone @ line 277
+--------------------------------------------------------------------------------
+   272:                 dpg.add_checkbox(
+   273:                     label="Sarcasm",
+   274:                     default_value=False,
+   275:                     tag="dev_persona_sarcasm",
+   276:                     callback=lambda s, a, u: log_emit(
+   277:                         f"[PERSONA] tone={dpg.get_value('dev_persona_tone')} sarcasm={'on' if a else 'off'}",
+   278:                         "status",
+   279:                     ),
+   280:                 )
+   281: 
+   282:     # stop/cleanup

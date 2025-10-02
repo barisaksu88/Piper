@@ -1,0 +1,119 @@
+
+====================================================
+PIPER MASTER ROADMAP v3 (2025-08-22)
+====================================================
+
+Role: Railmaster (ChatGPT) — ensures guardrails, microsteps, and parking.
+You (user) — hands control, only intervenes when asked for preferences (voice, tone, look).
+
+----------------------------------------------------
+0. FOUNDATION
+----------------------------------------------------
+KGB-SNAPSHOT RULES
+- After each stable micro-step: tag snapshot KGB-YYYY-MM-DD_<tag>
+- If failure repeats 2x: revert to last KGB, park issue
+- No Dev Agent edits until explicitly unlocked
+
+RAILS GUARDRAILS
+- One change per step (micro)
+- Persona file read-only (user-owned)
+- SAFE_MODE: no live mic/model calls unless toggled
+- Parking: avatar animation, dual models, Dev Agent v2
+
+----------------------------------------------------
+1. STABILIZATION (KGB-T01 → T05)
+----------------------------------------------------
+T01 Wake→Greet stable
+T02 Barge-in interrupts TTS
+T03 Auto-sleep returns to Sleep
+T04 Logs clean (no dupes, timestamped)
+T05 GUI mirrors state/log lines
+
+----------------------------------------------------
+2. CORE (T-Core01 → T-Core05)
+----------------------------------------------------
+T-Core01 Extract core_commands.py
+T-Core02 Extract core_machine.py
+T-Core03 Persona-safe CLI prompt (cli_prompt.py)
+T-Core04 common.paths adapter (fix missing seams)
+T-Core05 Bridge input unification (keyboard vs ASR)
+
+----------------------------------------------------
+3. PERSONA/VOICE (PV01 → PV12)
+----------------------------------------------------
+PV01 Persona adapter stub
+PV02 TTS phrasing polish
+PV03 Sarcasm toggle + tone
+PV04 Barge-in safe for long lines
+PV05 Help/error persona styling
+PV06 TTS punctuation hints
+PV07 Tone profiles (prefix/suffix)
+PV08 Tone show/clear
+PV09 Persona profiles save/load
+PV10 Multi-affix handling
+PV11 Persona README generator
+PV12 Persona preview stable
+
+----------------------------------------------------
+4. LAYOUT/LOOK (LL01 → LL06)
+----------------------------------------------------
+LL01 Clean theme foundation
+LL02 Pane separation (chat/logs)
+LL03 Autoscroll + wrap
+LL04 State indicators
+LL05 Tone/sarcasm reflection
+LL06 Avatar placeholder
+
+----------------------------------------------------
+5. STATE SIGNALS & INPUT BRIDGE (SS01 → SS04)
+----------------------------------------------------
+SS01 Core emits [STATE] events consistently
+SS02 GUI consumes real [STATE] (replace synthetic)
+SS03 Input bridge: unify CLI/GUI entry → Core
+SS04 Idle/timeout paths stable
+
+----------------------------------------------------
+6. DEV AGENT v2 (DA01 → DA04)
+----------------------------------------------------
+DA01 Patch apply rollback clean
+DA02 Class-level patching (stable)
+DA03 GUI Dev Console toggle
+DA04 CI-lite self-check before restart
+
+----------------------------------------------------
+7. TTS ENHANCEMENTS (TT01 → TT04)
+----------------------------------------------------
+TT01 Prosody & pauses
+TT02 Expression tuning (emphasis, pitch)
+TT03 Realistic voices (GPU TTS)
+TT04 Persona-linked voice tone
+
+----------------------------------------------------
+8. AVATAR & VISUALS (AV01 → AV05)
+----------------------------------------------------
+AV01 Static avatar swap
+AV02 Toggle avatar on/off
+AV03 Animated mouth (phoneme sync)
+AV04 Gesture/pose hooks
+AV05 Full animation pipeline (ComfyUI)
+
+----------------------------------------------------
+9. MODEL INTEGRATION (LM01 → LM04)
+----------------------------------------------------
+LM01 Hook llama-run via Core bridge
+LM02 Safe prompt→reply loop (sandbox)
+LM03 GUI/CLI relay to model
+LM04 Dual mode (fast small vs slow big brain)
+
+----------------------------------------------------
+10. POLISH & EXPANSION (PX01 → PXn)
+----------------------------------------------------
+- Extended memory
+- Internet bridge (ask-first)
+- File ops (ask-first)
+- Profiles per user (voice auth gating)
+- Personality extensions (playful, dry, etc.)
+
+====================================================
+END — MASTER ROADMAP
+====================================================

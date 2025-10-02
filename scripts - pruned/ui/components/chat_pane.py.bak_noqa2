@@ -1,0 +1,56 @@
+# scripts/ui/components/chat_pane.py
+from __future__ import annotations
+import dearpygui.dearpygui as dpg
+from typing import Optional
+from scripts.ui.layout_constants import L  # <-- use live constants
+
+CHAT_SCROLL_CANDIDATES = ["chat_scroll", "chat_view", "chat_region"]
+CHAT_TEXT_CANDIDATES   = ["chat_text", "chat_buffer"]
+
+def _find_tag(cands):
+    for t in cands:
+        try:
+            if dpg.does_item_exist(t):
+                return t
+        except Exception:
+            pass
+    return None
+
+def build(parent: Optional[str] = None) -> None:
+    """Idempotent: ensure a scroll container + a text sink exist for chat."""
+    try:
+        scroll = _find_tag(CHAT_SCROLL_CANDIDATES)
+        if not scroll:
+            if parent is None:
+                parent = "root" if dpg.does_item_exist("root") else None
+            if parent is not None:
+                with dpg.child_window(
+                    parent=parent,
+                    tag="chat_scroll",
+                    width=(L.PANE.LEFT_WIDTH - L.SPACE.PAD),
+                    height=(L.WINDOW.HEIGHT - L.PANE.BODY_VPAD),
+                    autosize_x=False,
+                    autosize_y=False,
+                    no_scrollbar=False,
+                ):
+                    pass
+                scroll = "chat_scroll"
+
+        text = _find_tag(CHAT_TEXT_CANDIDATES)
+        if not text and scroll and dpg.does_item_exist(scroll):
+            dpg.add_text("", tag="chat_text", parent=scroll, wrap=(L.PANE.LEFT_WIDTH - L.SPACE.PAD))
+            # bottom spacer tag is useful for refresh helpers
+            if not dpg.does_item_exist("chat_pad"):
+                dpg.add_spacer(tag="chat_pad", parent=scroll, height=L.SPACE.SMALL)
+    except Exception:
+        pass
+
+def refresh(text_value: str, stick_to_bottom: bool = False) -> None:
+    """Set chat text; autoscroll is handled centrally by refresh_core."""
+    try:
+        text_tag = _find_tag(CHAT_TEXT_CANDIDATES) or "chat_text"
+        if dpg.does_item_exist(text_tag):
+            dpg.set_value(text_tag, text_value or "")
+        # NOTE: no local set_frame_callback here; refresh_core schedules next-frame scroll.
+    except Exception:
+        pass

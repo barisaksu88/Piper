@@ -1,0 +1,39 @@
+﻿# -*- coding: utf-8 -*-
+"""GUI loop helpers (peeled from entries/app_gui_entry.py)."""
+from __future__ import annotations
+try:
+    from ui.panes import refresh_ui
+except Exception:
+    from ui.panes import refresh_ui  # type: ignore
+# The update function mirrors the old signature expectations from app_gui_entry.
+# in scripts/ui/helpers/gui_loop.py
+def update_panes(
+    state_text=None, 
+    hb_text=None, 
+    chat_text=None, 
+    log_text=None, 
+    chat_dirty=None, 
+    log_dirty=None
+):
+    """Refresh UI panes. If arguments are None, fall back to globals."""
+    from ui import panes
+
+    # Use globals if args not passed
+    if state_text is None:
+        state_text = globals().get("_state_text", "")
+    if hb_text is None:
+        hb_text = globals().get("_hb_text", "")
+    if chat_text is None:
+        chat_text = globals().get("_chat_text", [])
+    if log_text is None:
+        log_text = globals().get("_log_text", [])
+    if chat_dirty is None:
+        chat_dirty = globals().get("_chat_dirty", False)
+    if log_dirty is None:
+        log_dirty = globals().get("_log_dirty", False)
+
+    panes.refresh_ui(state_text, hb_text, chat_text, log_text, chat_dirty, log_dirty)
+    
+def set_heartbeat_text(text: str) -> None:
+    """No-op: header text is owned by pane_parts/header_bar.set_state_dot()."""
+    return

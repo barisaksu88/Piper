@@ -1,0 +1,25 @@
+﻿[tool.black]
+line-length = 100
+target-version = ["py310"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 100
+src_paths = ["scripts"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["run/", "venv/", ".venv/"]
+# Keep noise low; we’ll dial up later
+select = ["E", "F", "I"]            # pylint-esque errors, flakes, import order
+ignore = ["E203", "E266", "E501"]   # handled by black / line length / comments
+
+[tool.ruff.lint.isort]
+known-first-party = ["scripts"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+docstring-code-format = false

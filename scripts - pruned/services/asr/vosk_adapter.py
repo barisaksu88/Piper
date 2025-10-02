@@ -1,0 +1,38 @@
+﻿# scripts/services/asr/vosk_adapter.py
+# Ring-1 (Services): ASR adapter STUB for Vosk.
+# Names/shape only; NOT wired. Safe to import anywhere.
+
+from __future__ import annotations
+from pathlib import Path
+from typing import Optional
+
+class ASRSvc:
+    """
+    Minimal interface surface (per contracts):
+      listen(timeout: float | int | None) -> Optional[str]
+    """
+    def listen(self, timeout: Optional[float] = None) -> Optional[str]:  # pragma: no cover - stub
+        return None
+
+_REQUIRED_SUBDIRS = ("am", "conf", "graph", "ivector")
+
+def _model_ok(model_dir: Path) -> tuple[bool, str]:
+    if not model_dir.exists():
+        return False, f"missing model dir: {model_dir}"
+    missing = [d for d in _REQUIRED_SUBDIRS if not (model_dir / d).exists()]
+    if missing:
+        return False, f"missing subdirs: {', '.join(missing)}"
+    return True, f"model={model_dir.name}"
+
+def sanity_check(model_name: Optional[str] = None) -> tuple[bool, str]:
+    """
+    Validate presence of a Vosk model. If model_name is given, prefer that folder.
+    """
+    model_dir = vosk_model_dir(model_name) if model_name else VOSK_MODEL
+    return _model_ok(model_dir)
+
+# Import - time note (prints once if imported directly; harmless if unused)
+_ok, _msg = sanity_check()
+print(f"[ASR] vosk_adapter stub ready ({'OK' if _ok else 'MISSING'}: {_msg})")
+
+__all__ = ["ASRSvc", "sanity_check"]

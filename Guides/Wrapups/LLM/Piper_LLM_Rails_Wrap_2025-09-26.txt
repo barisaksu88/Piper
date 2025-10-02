@@ -1,0 +1,82 @@
+# Piper — LLM Integration Wrap-Up (as of 2025-09-26)
+
+## Accomplished
+- **LLM01 — Stub reply (SAFE):** Implemented `services/llm_client.generate(user_text, *, persona) -> str` returning a deterministic stub. Hooked replies on direct chat submit (independent of CLI bridge) via `ui/hooks/llm_chat.py` and `scripts/ui/pane_parts/chat_column.py`. KGB: **KGB-2025-09-26_LLM01_stub** (set).
+- **LLM02 — Provider switch:** Added `PIPER_LLM_PROVIDER` with **echo** (default) and **stub** providers in `services/llm_client.py`. KGB: **KGB-2025-09-26_LLM02_provider_switch** (set).
+- **LLM03 — Style hook (persona pass-through):** Introduced `services/llm_style.apply_style(reply, *, persona) -> str` and routed outputs through it. No visible change by default. KGB: **KGB-2025-09-26_LLM03_style_hook** (set).
+- **LLM04 — Robustness:** Wrapped provider calls with a timeout + safe fallback in `services/llm_client.py` using `PIPER_LLM_TIMEOUT_MS` (default 2000 ms). Errors print to stdout as `[ERR]`. **KGB: pending** → propose **KGB-2025-09-26_LLM04_robustness**.
+- **Mission Control banner (attach-mode):** Chat column treats attach mode as send-only; the “CLI bridge stopped” badge is suppressed in attach mode and hidden after a successful `.send()`. Implemented in `scripts/ui/pane_parts/chat_column.py` (`_bridge_mode()`, `_cli_error_handler`, `_chat_submit`).
+- **Kept `_app_gui_entry_impl.py` lean:** Removed tailer-based LLM injection; retained harmless header `TAIL_TXT` constant.
+- **Assistant label fixed:** Replies are labeled **“Piper:”** (hard-coded; no env).
+
+### Files added/updated
+- `services/llm_client.py` — providers (echo/stub) + timeout/fallback + style hook call.
+- `services/llm_style.py` — style switch plumbing (default `plain`) and pass-through.
+- `ui/hooks/llm_chat.py` — pure hooks (`handle_chat_line`, `reply_for_user_text`).
+- `scripts/ui/pane_parts/chat_column.py` — direct-submit wiring; attach-mode banner handling.
+- `scripts/entries/_app_gui_entry_impl.py` — lean; only label/housekeeping.
+
+## Failed / Reverted
+- **Tailer-based auto-reply in `_app_gui_entry_impl.py`:** Caused regressions and noisy “bridge stopped” in attach mode → **reverted** and moved to `ui/hooks/llm_chat.py` + submit path.
+- **Canvas regex mis-edits:** A few automated patches failed to match; resolved by asking you to open the file and applying explicit one-liners.
+- **Stray path confusion:** A temporary `scripts/ui/components/chat_column.py` was created; real path is `scripts/ui/pane_parts/chat_column.py`. The components version can be deleted.
+
+## Issues (Open / Notes)
+- **KGB tagging for LLM04:** Implementation is done; tagging not yet confirmed. Action: set **KGB-2025-09-26_LLM04_robustness** (or confirm an alternate tag).
+- **Timeout visibility:** With `echo`/`stub`, timeouts won’t happen (they return instantly). `[ERR]` prints go to GUI stdout, not `core.log`, so the Logs pane won’t show them. (Optional test delay env is parked.)
+- **Header label mismatch (minor):** `llm_client.py` header shows **LLM04 — Robustness** (correct). `llm_style.py` header shows **LLM04** even though the style hook arrived in LLM03. Cosmetic only; parked.
+
+## Rules / Preferences / Corrections (from this thread)
+- **Workflow & Canvas**
+  - You open files in canvas; I only edit opened files.
+  - If canvas edit fails, I reply with a **single-line** retry instruction—no long chat.
+  - If I need to read code, I ask you to connect **mirrors**; no assumptions.
+  - Keep chat **lean**; one change per step; **snapshot after pass**; **revert & PARK** on 2× fail.
+- **Invariants**
+  - **Layout constants only; no magic numbers.**
+  - `personality.py` is **read-only**.
+  - **Attach-mode runbook unchanged**; MC attach is send-only (no reader expected).
+  - **SAFE_MODE default** with `PIPER_LLM_PROVIDER=echo`.
+- **Architecture**
+  - Keep `_app_gui_entry_impl.py` lean; push logic into `services/` and `ui/hooks/`.
+  - Assistant name is fixed: **Piper** (no env).
+  - Chat must reply even if the CLI bridge is stopped (handled via direct submit hook).
+- **Style / Communication**
+  - Be direct; minimal ceremony. Confirm with smokes + KGBs.
+  - Ask before editing: “open <file>” first.
+
+## Environment Changes (defaults shown)
+- `PIPER_LLM_PROVIDER` = **echo** (default) | `stub`  — provider switch (services/llm_client.py)
+- `PIPER_LLM_TIMEOUT_MS` = **2000** — per-call timeout & fallback (services/llm_client.py)
+- `PIPER_LLM_STYLE` = **plain** (default) | `pilot` | `snark` — style shaping (services/llm_style.py); default is no-op.
+- Existing UI/MC envs used (unchanged):  
+  `PIPER_CORE_LOG`, `PIPER_UI_TAIL_FROM_START`, `PIPER_UI_POLL_SEC`, `PIPER_UI_SUPPRESS_BOOT_SEC`, `PIPER_SCHED_SAFE_MODE`, `PIPER_PERSONA_TONE`, `PIPER_PERSONA_SARCASM`, `PIPER_UI_THEME`.
+
+## Railmaster Rules Confirmed
+- **One change per step → Smoke → KGB tag.**
+- **Revert & PARK** after 2× fail.
+- **No assumptions** outside canvas; use mirrors to read.
+- **Attach-mode is send-only**; do not treat “no reader” as error in MC.
+- Keep entry files lean; route behavior through hooks/services.
+
+## Handoff
+**Next rails (LLM06 — Actual model adapter, offline):**
+1. Add `services/providers/llamacpp.py`: run local `llama.cpp` binary once (no streaming yet); return text.
+2. Register provider in `services/llm_client.py`.
+   - Env: `PIPER_LLM_PROVIDER=llamacpp`
+   - Config:  
+     `PIPER_LLAMA_EXE`, `PIPER_LLAMA_MODEL`, `PIPER_LLAMA_CTX`, `PIPER_LLAMA_TOKENS`, `PIPER_LLAMA_THREADS` (allow `auto`).
+3. Respect LLM04 timeout/fallback; never block GUI.
+4. **Smoke:** model present → real text; missing exe/model → fallback string with `[ERR]` log; UI responsive.
+
+**Priorities**
+- No GUI file changes; only `services/` additions and provider registration.
+- Keep constants/envs; avoid magic numbers.
+
+**Parked (optional later)**
+- **Ollama provider** (localhost REST) behind envs.
+- Streaming tokens; persona-aware shaping in `llm_style`.
+- Optional `PIPER_LLM_TEST_DELAY_MS` for visible timeout demos.
+
+---
+Prepared on 2025-09-26.

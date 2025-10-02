@@ -1,0 +1,152 @@
+Piper Layout – CLI+GUI Trailing & Testing Guide
+What you’re doing
+
+You’ll run Core (CLI) in one PowerShell window and GUI (attach‑mode mirror) in another.
+The GUI does not inject commands; it tails the CLI’s output file and renders:
+
+Chat pane → just the spoken lines ([TTS] ...)
+
+Logs pane → [STATE] / [EVENT] / [TTS] lines
+
+A. Open two PowerShell windows
+Window A — Core (CLI) with UTF‑8 + trailing to file
+# UTF-8 console + Python
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($true)
+chcp 65001 > $null
+
+# Fresh log file
+New-Item -ItemType Directory -Force C:\Piper\run | Out-Null
+Remove-Item C:\Piper\run\core.log -ErrorAction SilentlyContinue
+
+# Start Core and tee output to both console and file (PowerShell 5.1 compatible)
+python -u -m entries.app_cli_entry |
+ForEach-Object {
+  $_
+  $_ | Out-File -FilePath C:\Piper\run\core.log -Append -Encoding utf8
+}
+
+
+Type commands here (press ENTER after each):
+
+wake
+time
+about
+sleep
+
+
+If your PS version supports it, Tee-Object is fine but may need -Encoding utf8 (not available in PS 5.1). The ForEach-Object pattern above works everywhere.
+
+Window B — GUI (attach mode)
+$env:PIPER_CORE_LOG = "C:\Piper\run\core.log"
+python -m entries.app_gui_entry
+
+
+What you should see
+
+Title mentions Attach mode/TLayout06 (depending on your build).
+
+Status bar: color dot (state), label, last-update heartbeat, bytes read.
+
+Chat: only the [TTS] content (e.g., “It’s 22:51.”).
+
+Logs: full [STATE]/[EVENT]/[TTS] stream.
+
+Autoscroll: on by default; pauses if you scroll up; resumes at bottom.
+
+Clean theme: dark/neutral (or light-blue if you set viewport color in this thread).
+
+B. How GUI trailing works (under the hood)
+
+The GUI reads PIPER_CORE_LOG path from the environment.
+
+A background thread opens the file in readline() loop with encoding='utf-8', errors='ignore'.
+
+By default it starts at end (tail‑f semantics) so you don’t get duplicate history.
+
+To replay from start, set:
+
+$env:PIPER_UI_TAIL_FROM_START = "1"
+
+
+Each new line is parsed:
+
+Lines containing [TTS] → appended to Chat and Logs.
+
+Lines containing [STATE] or [EVENT] → appended to Logs.
+
+A regex updates the current state; the status dot/label update with a short dwell so fast transitions are visible.
+
+C. Quick smoke test
+
+In Window A (CLI), type:
+
+wake
+time
+about
+sleep
+
+
+In Window B (GUI), watch:
+
+Chat shows Hello sir!, It’s HH:MM., Piper Core Commands baseline ready.
+
+Logs fill with transitions; long lines wrap.
+
+Status dot cycles colors (sleep/listen/think/speak; brief dwell makes transient states visible).
+
+Copy Chat / Copy Logs buttons copy the full visible content.
+
+D. Common pitfalls & fixes
+
+GUI not updating at all
+
+Ensure PIPER_CORE_LOG is set in the same window you launch the GUI from.
+
+Confirm the file updates: Get-Content C:\Piper\run\core.log -Wait (should stream new lines).
+
+Make sure CLI pipeline writes UTF‑8 (use the ForEach-Object | Out-File -Encoding utf8 pattern).
+
+Unicode error in CLI when piping
+
+Re-apply the UTF‑8 setup in Window A:
+
+$env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($true)
+chcp 65001 > $null
+
+
+Duplicate “Hello sir!” in Chat on GUI start
+
+You launched GUI before clearing old logs. Remove the file first or keep the default tail‑from‑end behavior (don’t set PIPER_UI_TAIL_FROM_START).
+
+Autoscroll not moving
+
+Scroll to bottom (mouse wheel/page down) to re‑enable; the GUI detects “at bottom” and resumes.
+
+Window background still grey
+
+In app_gui_entry.py, after dpg.create_viewport(...) add:
+
+dpg.set_viewport_clear_color((200, 220, 255, 255))  # light blue
+
+
+Keep this change in the Layout thread, not Core.
+
+E. Optional toggles (env)
+$env:PIPER_UI_THEME = "clean"           # already default in latest build
+$env:PIPER_UI_TAIL_FROM_START = "1"     # replay entire log on GUI start
+
+F. Rollback & KGB tags
+
+If anything regresses, revert to the last KGB snapshot (e.g., KGB-2025-08-20_TLayout06_theme-clean).
+
+After passing your smoke test, create a new snapshot:
+
+python -m make_snapshot
+
+
+Tag suggestion: KGB-YYYY-MM-DD_TLayout06_trailing-guide-ok.
+
+This keeps the Layout thread self-contained: how to run two windows, how the tail works, what to expect, and how to fix common issues.

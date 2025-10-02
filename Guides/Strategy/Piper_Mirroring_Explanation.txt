@@ -1,0 +1,115 @@
+Piper Drive Mirroring Setup — Explanation
+
+Goal
+
+We needed a way for ChatGPT to always see the latest Piper scripts
+without manually zipping or uploading files. Direct access to .py files
+through Google Drive was inconsistent, so we built a pipeline where
+every .py file is mirrored into .txt. ChatGPT can reliably read .txt in
+Drive.
+
+What We Did
+
+1.  Mirroring Script
+    -   Wrote mirror_py_to_txt.py which:
+        -   Watches C:\Piper\scripts for any changes to .py files.
+        -   Creates/updates .txt versions of each .py in a Google
+            Drive–synced folder (PiperTXT/scripts).
+        -   Deletes .txt files when their .py source is removed.
+    -   Works in two modes:
+        -   Watchdog (event-driven): instant updates when a .py is
+            saved.
+        -   Polling fallback: checks every 1s if watchdog is
+            unavailable.
+2.  Google Drive Sync
+    -   The target folder (G:\My Drive\PiperTXT\scripts) is synced by
+        Google Drive.
+    -   Whenever a .py is saved locally, a .txt copy is pushed to Drive
+        automatically.
+3.  Verification
+    -   Created test files (test test test.py → mirrored to .txt) and
+        confirmed changes appeared in real time.
+    -   Searched inside mirrored .txt (e.g., found OPTIONAL_SEEDS = [ at
+        line 17).
+    -   Ensured edits show up immediately in ChatGPT.
+
+Outcome
+
+-   Piper .py source is always visible in Drive as .txt.
+-   ChatGPT can read any file’s latest code instantly by looking at its
+    .txt mirror.
+-   No manual uploads/zips required anymore.
+-   You keep full control: editing locally, while I only ever read the
+    mirrored .txt.
+
+How To Use
+
+-   Keep the mirroring script running in background when working on
+    Piper:
+
+        python C:\Piper\tools\mirror_py_to_txt.py --dest "G:\My Drive\PiperTXT\scripts"
+
+-   To check code with ChatGPT, just say: > “Open
+    entries/app_cli_entry.txt and show first 40 lines”
+
+-   I’ll read the mirrored file directly.
+
+Benefits
+
+-   Real-time sync, no version drift.
+-   You stay offline-first — edits only flow through Google Drive’s
+    sync.
+-   ChatGPT collaboration is smoother: always reviewing the exact code
+    you have locally.
+
+------------------------------------------------------------------------
+
+This setup is now the standard pipeline for Piper development going
+forward.
+
+# Piper Mirroring & File Checking Rules
+
+1. **Mirrored Files Are Truths**
+   - The `.txt` files in Google Drive (e.g., `ui/layout_constants.txt`, `entries/_app_gui_entry_impl.txt`) are **live mirrors** of the real scripts.
+   - They must always be treated as the **single source of truth** for what code exists right now.
+
+2. **Examined = Fully Read**
+   - When I say a file is *examined*, that means:
+     - I open the `.txt` mirror.
+     - I read it from top to bottom.
+     - I can then reference actual **line numbers** and **line content** from that file.
+   - This examination step must always be listed at the top of my responses, so the user knows I actually looked at the file.
+
+3. **Idiotproofed = Change Confirmed**
+   - When the user edits a file, I open the `.txt` mirror immediately afterwards.
+   - I re-read it top to bottom and confirm that the change is present and correct.
+   - I then list this file under *Files idiotproofed (changed/verified)* to reassure the user it was checked properly.
+
+4. **Always Check**
+   - If I ever have a doubt about what is inside a file: I check the `.txt` mirror.
+   - If I ever propose a change: I check the `.txt` mirror afterwards to verify it.
+   - I must not assume; I must **always check**.
+
+5. **KGB Snapshots**
+   - KGB zip files are **not live**. They are frozen references for how things worked before.
+   - I can use KGBs for historical context, but never as the truth of what exists right now.
+
+6. **Workflow**
+   - Every response starts with:
+     ```
+     Drive mirror truths examined:
+     - ...
+     Idiotproofed change:
+     - ...
+     ```
+   - This guarantees that both the user and I know what has been opened, read, and verified in that step.
+
+---
+
+**In summary:**  
+The `.txt` mirrors are **live truths**.  
+*KGBs are old references only.*  
+“Examined” means I actually read the mirror file top-to-bottom.  
+“Idiotproofed” means I checked the latest change is present and correct.  
+I must always check the mirrors and track them, without waiting for permission.
+

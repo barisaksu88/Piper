@@ -1,0 +1,84 @@
+Piper Mirroring & File Checking Rules
+
+Mirroring Setup
+
+1.  Google Drive + Dropbox Redundancy
+    -   Every .py file under C:\Piper\scripts is mirrored into .txt.
+    -   Two destinations exist:
+        -   Google Drive (G:\My Drive\PiperTXT\scripts)
+        -   Dropbox (C:\Users\Hawk Gaming\Dropbox\scripts)
+    -   Both contain identical .txt mirrors of the .py source.
+    -   This dual setup is for fail-safety: if Google Drive access is
+        down, Dropbox serves as backup (and vice versa).
+2.  Mirroring Script
+    -   mirror_py_to_txt.py runs in background.
+    -   Watches C:\Piper\scripts for changes.
+    -   Updates both Google Drive and Dropbox .txt mirrors instantly
+        (via watchdog or polling fallback).
+    -   Deletes .txt mirrors if .py source is removed.
+3.  Verification
+    -   Example: editing entries/app_cli_entry.py updates both mirrors
+        instantly.
+    -   ChatGPT confirms by opening entries/app_cli_entry.txt from
+        Drive/Dropbox.
+    -   Changes appear live in mirrors without zipping/uploading.
+
+------------------------------------------------------------------------
+
+Rules for ChatGPT
+
+1.  Mirrored Files Are Truths
+    -   .txt mirrors (in Drive and Dropbox) are the live source of
+        truth.
+    -   KGB zip snapshots are frozen references only — for historical
+        comparison, not current state.
+2.  Examined = Fully Read
+    -   When I say a file is examined:
+
+        -   I open the .txt mirror (from Drive or Dropbox).
+        -   I read it top-to-bottom.
+        -   I can reference actual line numbers and content.
+
+    -   Each response must start with:
+
+            Drive/Dropbox mirror truths examined:
+            - ...
+            Idiotproofed change:
+            - ...
+3.  Idiotproofed = Change Confirmed
+    -   After the user edits, I re-open the .txt mirror.
+    -   I re-read top-to-bottom and confirm the change is present.
+    -   That file goes under Idiotproofed change.
+4.  Always Check
+    -   If I doubt what is inside: I check the .txt mirror
+        (Drive/Dropbox).
+    -   If I propose a change: I confirm by re-checking after.
+    -   Never assume, never act blind.
+5.  One-Liner Fail Rule
+    -   If I cannot reach both Drive and Dropbox mirrors in a given
+        instance:
+        -   I must stop and reply with a single line only: > “Need
+            Drive/Dropbox access to continue.”
+        -   This prevents me from acting blind.
+        -   Once access is restored, I continue normally.
+6.  Workflow
+    -   Workflow structure:
+
+            Drive/Dropbox mirror truths examined:
+            - entries/_app_gui_entry_impl.txt
+            - ui/panes.txt
+            Idiotproofed change:
+            - ui/layout_constants.txt (confirmed viewport size update)
+
+    -   This format reassures both me and the user that I am not working
+        blind.
+
+------------------------------------------------------------------------
+
+In summary:
+- .txt mirrors in Google Drive + Dropbox are the truths.
+- KGBs are old references.
+- “Examined” = I read the file top-to-bottom.
+- “Idiotproofed” = I confirmed a change after re-reading.
+- Always check both mirrors.
+- If I can’t access them, I stop with a one-liner.

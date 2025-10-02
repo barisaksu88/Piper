@@ -1,0 +1,43 @@
+$env:PIPER_CORE_LOG = "C:\Piper\run\trail_test_A.log"
+Remove-Item $env:PIPER_CORE_LOG -ErrorAction SilentlyContinue
+python -m entries.app_gui_entry
+
+===================================================================================================================================================
+
+# --- configure to the SAME path you saw in the GUI header ---
+$path = "C:\Piper\run\trail_test_A.log"
+
+# --- robust single-write helper (shares file with GUI; UTF-8) ---
+function Write-SharedLine($text) {
+  $fs  = [System.IO.File]::Open($path,
+           [System.IO.FileMode]::Append,
+           [System.IO.FileAccess]::Write,
+           [System.IO.FileShare]::ReadWrite)
+  $enc = New-Object System.Text.UTF8Encoding $true
+  $sw  = New-Object System.IO.StreamWriter($fs,$enc)
+  $sw.WriteLine($text)
+  $sw.Flush()
+  $sw.Dispose(); $fs.Dispose()
+}
+
+# --- convenience wrappers (so you can type less) ---
+function Write-Chat($msg="Hello from Chat")      { Write-SharedLine("> $msg") }
+function Write-TTS($msg="It is $(Get-Date -Format HH:mm).") { Write-SharedLine("[TTS] $msg") }
+function Write-Event($msg="WakeDetected")         { Write-SharedLine("[EVENT] $msg") }
+function Write-State($from="SLEEPING",$to="SPEAKING") { Write-SharedLine("[STATE] $from -> $to") }
+function Write-Error($msg="Traceback: dummy")     { Write-SharedLine($msg) }
+
+# --- long-line generators (wrap tests) ---
+function Write-LongChat()  { Write-SharedLine("> "  + ("WrapCheckChat_" * 10)  + (Get-Date -Format o)) }
+function Write-LongLogs()  { Write-SharedLine("[EVENT] " + ("SuperLengthEvent_" * 12) + (Get-Date -Format o)) }
+
+===================================================================================================================================================
+
+1..20 | ForEach-Object {
+  Write-Event "Tick $_"
+  Write-State LISTENING SPEAKING
+  Write-Error "Traceback: DummyError_$_"
+  Write-TTS "Time mark $_"
+  Write-Chat ("Chat long " + ("WrapCheck_" * 8) + $_)
+  Start-Sleep -Milliseconds 350
+}

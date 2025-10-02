@@ -1,0 +1,114 @@
+﻿"""
+B04.12a Dev Controls adapters â€” extracted from ui/panes.py
+Visual-only adapters used by the Dev Pane. No core state mutations.
+"""
+from __future__ import annotations
+from typing import Optional
+
+import dearpygui.dearpygui as dpg
+from scripts.ui.helpers.header_utils import compose_header_strings
+
+
+def build_dev_adapters(_hb, _shorten_path):
+    """
+    Returns callbacks for the Dev Pane that update header labels and panes visually.
+    This mirrors the previous _get_dev_controls_adapters() in ui/panes.py.
+    """
+    def _refresh_header_visual(state_text: Optional[str] = None):
+        try:
+            current_tone = globals().get("current_tone", "neutral")
+            sarcasm_on = bool(globals().get("sarcasm_on", False))
+            log_path = globals().get("_LOG_PATH")
+            state_text_effective = state_text if state_text is not None else globals().get("_last_state_text", "SLEEPING")
+
+            tone_str, sarcasm_str, tailing_str = compose_header_strings(
+                state_text=state_text_effective,
+                current_tone=current_tone,
+                sarcasm_on=sarcasm_on,
+                log_path=log_path,
+                shorten_path_fn=_shorten_path
+            )
+
+            if (_hb is not None) and hasattr(_hb, "refresh"):
+                _hb.refresh(
+                    state_text=state_text_effective,          # ← name only
+                    heartbeat_text=globals().get("_last_hb_text", ""),
+                    tone_text=tone_str,
+                    sarcasm_text=sarcasm_str,
+                    tailing_text=tailing_str,
+                )
+
+            # Try header's own dot setter if present
+            try:
+                if _hb is not None and hasattr(_hb, "set_state_dot") and state_text_effective is not None:
+                    _hb.set_state_dot(state_text_effective)
+            except Exception:
+                pass
+
+            globals()["_last_state_text"] = state_text_effective
+        except Exception:
+            pass
+
+    def on_set_state(name: str):
+        try:
+            if _hb is not None and hasattr(_hb, "set_state_dot"):
+                _hb.set_state_dot(name)
+        except Exception:
+            pass
+        _refresh_header_visual(name)
+
+    def on_toggle_sarcasm():
+        try:
+            globals()["sarcasm_on"] = not bool(globals().get("sarcasm_on", False))
+        except Exception:
+            globals()["sarcasm_on"] = False
+        _refresh_header_visual(None)
+
+    def on_cycle_tone():
+        try:
+            seq = ["neutral", "warm", "playful", "serious"]
+            cur = str(globals().get("current_tone", "neutral"))
+            nxt = seq[(seq.index(cur) + 1) % len(seq)] if cur in seq else "neutral"
+            globals()["current_tone"] = nxt
+        except Exception:
+            globals()["current_tone"] = "neutral"
+        _refresh_header_visual(None)
+
+    def on_dev_submit(text: str):
+        try:
+            tag = None
+            for t in ("chat_text", "chat_buffer"):
+                if dpg.does_item_exist(t):
+                    tag = t
+                    break
+            if tag:
+                old = dpg.get_value(tag) or ""
+                dpg.set_value(tag, (old + ("\n" if old else "") + (text or "")))
+        except Exception:
+            pass
+
+    def on_inject_chat(text: str):
+        on_dev_submit(text or "")
+
+    def on_inject_log(text: str):
+        try:
+            tag = None
+            for t in ("log_text", "logs_text", "log_buffer"):
+                if dpg.does_item_exist(t):
+                    tag = t
+                    break
+            if tag:
+                old = dpg.get_value(tag) or ""
+                dpg.set_value(tag, (old + ("\n" if old else "") + (text or "")))
+        except Exception:
+            pass
+
+    return {
+        "on_dev_submit": on_dev_submit,
+        "on_inject_chat": on_inject_chat,
+        "on_inject_log": on_inject_log,
+        "on_set_state": on_set_state,
+        "on_toggle_sarcasm": on_toggle_sarcasm,
+        "on_cycle_tone": on_cycle_tone,
+    }
+

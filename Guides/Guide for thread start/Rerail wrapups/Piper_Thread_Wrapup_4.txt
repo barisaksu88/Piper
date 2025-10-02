@@ -1,0 +1,91 @@
+# Piper — Thread Wrap-up (2025-09-09)
+
+This file summarizes all progress, failures, rules, and context adjustments made in this thread. It is intended as the handoff for the next thread.
+
+---
+
+## ✅ Accomplishments
+
+- **Cleanup Mini Rails** fully executed and tagged into KGB milestones.
+- **Removed dwell system** (`last_display_switch`, `advance_state_queue`, etc.) → confirmed obsolete with future model integration.
+- **Header heartbeat cleanup**: replaced stray `set_hb_text` calls with `_hb.set_state_dot`; stabilized heartbeat keeper snapshot.
+- **Quarantined legacy shims**: `services/asr_vosk.py` and `services/wake_porcupine.py` moved to `services/old/`; imports in tests updated.
+- **Canonical imports**: rewrote references to use modular adapters (`asr/vosk_adapter.py`, `wake/porcupine_adapter.py`).
+- **Renamed logging module**: `common/logging.py` → `common/log_utils.py` to avoid stdlib collisions.
+- **Size trims**: `_app_gui_entry_impl.py` reduced significantly; `ui/_panes_impl.py` now ~262 lines, `ui/panes.py` slimmed to 10 lines.
+- **Architecture tree** updated in Canvas with roles (Core/Services/UI).
+- **Call graph** consolidated and validated against mirrors, showing correct UI refresh chain.
+- **Rules reinforced**:
+  - Shell edits forbidden (PowerShell/regex mass edits banned).
+  - Mirrors are single source of truth (Drive/Dropbox) — must always be consulted.
+  - New response discipline template standardized.
+
+---
+
+## 🟨 Failures / Reverts
+
+- Attempted **DPG bootstrap peel** into `ui/dpg_app.py` broke due to shell edit mis‑insertions (SyntaxError). Reverted to `KGB-2025-09-09_H02b_entry_uses_gui_loop_helper`.
+- Attempted **set_hb_text purge** caused missing heartbeat. Partial cleanup applied; fallback preserved.
+
+---
+
+## 📖 Rules & Guardrails Added
+
+1. **Shell edits forbidden** — all edits must be given as before/after patches within replies.
+2. **Mirrors Hard Gate** — if Drive/Dropbox mirrors not accessible, assistant must halt with one-line:  
+   `> Need Drive/Dropbox access to continue.`
+3. **Auto‑unpark** — railmaster decides when/how to unpark parked steps; no asking which to do first.
+4. **Canvas discipline** — Always-Read section overrides all else. Canvas and mirrors must be reconciled continuously.
+
+---
+
+## 🚧 Known Issues
+
+- Avatar scale is wrong (zoomed-in). Fix requires `layout_constants.py` knobs and `ui/helpers/avatar_fix.py`.
+- Autoscroll stickiness in chat/logs. Fix requires `ui/helpers/scroll_utils.py` plus append sites in `chat_pane.py` / `logs_pane.py`.
+
+---
+
+## ⏸ Parked
+
+- **DPG bootstrap peel** (`_app_gui_entry_impl` → `ui/dpg_app.py`). Will be retried in Phase H02b after the entry stabilizes further.
+
+---
+
+## 📌 Current Rails (as of wrap-up)
+
+**Phase H — Cleanup & Closure**  
+- H01 — Remove dead placeholders → ✅ done  
+- H02a — Remove dwell remnants → ✅ done  
+- **H02b — Entry split (thin glue)** → 🟨 in progress (**we are here**)  
+  - Slice 1: use `gui_loop.update_panes` from entry → ✅ done  
+  - Slice 2: DPG bootstrap peel → ⏸ parked  
+  - Next: move tick/parse helpers → ◻️ pending  
+- H02c — Avatar scale fix → ◻️  
+- H02d — Autoscroll tuning → ◻️  
+- H03 — Wrap & snapshot → ◻️  
+
+Other Phases:  
+- B01/B03, D01/D02, F01 → ✅ done  
+- C01/C02, E01/E02, G01/G02 → ◻️ pending  
+
+---
+
+## 📂 KGB Tags (this thread)
+
+- `KGB-2025-09-09_H02b_entry_uses_gui_loop_helper`  
+- `KGB-2025-09-09_H01_quarantine_legacy_shims`  
+- `KGB-2025-09-06_HDR-MR5_heartbeat-keeper`  
+- `KGB-2025-09-03_MR1_headers`  
+
+---
+
+## 📑 Guidance for Next Thread
+
+- Pick up from **Phase H02b**: finish slimming `_app_gui_entry_impl.py` into `ui/dpg_app.py` and other helpers.
+- Keep an eye on **avatar scaling** and **autoscroll tuning** in Phase H02c/H02d.
+- Always enforce **no shell edits** and **mirrors-only checks**.
+- Ensure **Call Graph + Architecture** in Canvas stay current after each edit.
+- Known issues → park/unpark logic should be railmaster-led, not user-prompted.
+
+---

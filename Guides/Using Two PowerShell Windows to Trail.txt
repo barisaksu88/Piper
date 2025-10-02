@@ -1,0 +1,107 @@
+🖥️ Using Two PowerShell Windows to Trail Piper
+🪟 Window 1 – Run Piper GUI
+
+This is your main Piper GUI.
+
+Open PowerShell.
+
+Go to your scripts folder:
+
+cd C:\Piper\scripts
+
+
+Make sure the log file exists:
+
+New-Item -ItemType Directory -Force C:\Piper\run | Out-Null
+if (-not (Test-Path C:\Piper\run\core.log)) { New-Item -ItemType File -Force C:\Piper\run\core.log | Out-Null }
+$env:PIPER_CORE_LOG = "C:\Piper\run\core.log"
+
+
+Launch Piper GUI:
+
+python -m entries.app_gui_entry
+
+
+👉 GUI opens and starts tailing C:\Piper\run\core.log.
+
+🪟 Window 2 – Simulate Logs
+
+This is your writer window (injects lines into the log so GUI updates).
+
+A. Use StreamWriter (avoids “file in use” errors)
+$log = "C:\Piper\run\core.log"
+$sw = [System.IO.StreamWriter]::new($log, $true, [System.Text.Encoding]::UTF8)
+
+
+Now you can inject lines safely:
+
+Send a state change:
+
+$sw.WriteLine("[STATE] SLEEPING -> WAKING"); $sw.Flush()
+
+
+Simulate a wake event:
+
+$sw.WriteLine("[EVENT] WakeDetected"); $sw.Flush()
+
+
+Add chat output (TTS):
+
+$sw.WriteLine("> Hello sir!"); $sw.Flush()
+
+
+Simulate error:
+
+$sw.WriteLine("Traceback: dummy error"); $sw.Flush()
+
+
+Change persona tone/sarcasm:
+
+$sw.WriteLine("[PERSONA] tone=formal sarcasm=off"); $sw.Flush()
+$sw.WriteLine("[TONE] friendly"); $sw.Flush()
+$sw.WriteLine("[SARCASM] on"); $sw.Flush()
+
+
+When you’re done:
+
+$sw.Close()
+
+B. Loop Simulation (optional)
+
+You can also make it run continuously:
+
+while ($true) {
+    $sw.WriteLine("[EVENT] Tick $(Get-Date -Format HH:mm:ss)")
+    $sw.Flush()
+    Start-Sleep -Seconds 2
+}
+
+
+👉 This makes new lines every 2 seconds so the GUI scrolls and autoscroll logic can be tested.
+
+✅ Quick “Smoke Test”
+
+Open Window 1 → run GUI.
+
+Open Window 2 → run $sw = … setup.
+
+Inject:
+
+$sw.WriteLine("> Hello sir!"); $sw.Flush()
+
+
+GUI Chat pane should show Hello sir! and Logs should update.
+
+⚡ Why This Works
+
+Piper GUI is read-only → it tails the log file.
+
+Second PowerShell acts like Piper Core → writes events to the log.
+
+Using .StreamWriter ensures no “file in use” errors (which you saw before with Add-Content).
+
+👉 This is now the gold standard procedure:
+
+Window 1 = run GUI.
+
+Window 2 = drive the log with $sw.

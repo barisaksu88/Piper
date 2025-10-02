@@ -1,0 +1,181 @@
+📑 Strategy 1 — Consolidated Report
+1. Root Causes of Drift
+
+No stable baseline: too many patches on top of each other, no clear rollback point.
+
+Surface area explosion: GUI, threading, wake word, TTS, memory, and hot-patch agent were all touched at once.
+
+Fix-forward habit: symptoms were patched before problems were isolated.
+
+Vague done definitions: “works” meant different things, no standard smoke tests.
+
+Thread bloat: long ChatGPT conversations slowed to a crawl, creating anxiety about “losing memory.”
+
+2. New Operating Model
+Known-Good Baseline (KGB)
+
+Always roll back to a tagged working version (e.g., KGB-2025-08-05_bargein-ok).
+
+Each change must start from KGB, never patch-on-patch.
+
+One Change at a Time
+
+Only a single modification between baselines.
+
+If it fails twice, revert and park.
+
+Explicit States & Event Queue
+
+States: SLEEPING → WAKING → LISTENING → THINKING → SPEAKING → SLEEPING.
+
+One event queue; no sneaky cross-thread calls.
+
+Smoke Tests (“Definition of Done”)
+
+Wake: 10 tries → ≥8 success, no duplicates.
+
+ASR: “time” recognized in ≤5s.
+
+TTS: speaks, stops ≤0.5s.
+
+GUI: copy buttons don’t crash, text wraps properly.
+
+SAFE_MODE
+
+Only one wake engine active.
+
+pyttsx3 or subprocess TTS, not both.
+
+No avatar, no persistence, no multi-wake.
+
+3. Chapter System (Scope Control)
+
+Only one chapter active at a time. Out-of-scope requests go to the Parking Lot.
+
+Stabilization — wake → greet once, sleep cycle, copy buttons stable.
+
+Command Handling — one or two offline commands (“time”, “name”).
+
+Layout/Look — GUI polish (window color, text wrap, button positions).
+
+Persona/Voice — TTS expressiveness, greeting phrasing.
+
+Memory/Persistence — saving and loading small facts.
+
+Dev Agent — patch/rollback flow.
+
+4. Modularization (Target Architecture)
+
+Three rings:
+
+Ring 0 — Core
+
+core/state.py — finite state machine.
+
+core/events.py — event types + queue.
+
+core/app.py — orchestrator, owns state/event loop.
+
+Ring 1 — Services
+
+services/asr.py (Vosk)
+
+services/tts.py (pyttsx3 / subprocess)
+
+services/wake.py (Porcupine or Vosk keyword, never both)
+
+services/memory.py (later)
+
+services/persona.py (read-only personality access)
+
+Ring 2 — UI & Tools
+
+ui/gui.py (Dear PyGui shell, no direct service calls)
+
+tools/dev_agent.py (safe patcher/rollbacker)
+
+config.py (flags: SAFE_MODE, paths, device index)
+
+main.py (wires everything together)
+
+Litmus tests:
+
+Swap pyttsx3 ↔ subprocess TTS by changing one file → ✅ good modularization.
+
+Run Piper headless (no GUI) and still works → ✅ clean Core.
+
+5. Processes & Guardrails
+
+Logs: structured, one-liners like [STATE] message, rotating files.
+
+Time-boxing: max 45 min per fix; revert if not solved.
+
+Release rhythm: daily smoke test + “canary” build, every 2–3 days allow one small improvement.
+
+Parking Lot discipline: all out-of-scope requests explicitly logged for later.
+
+6. Context Management
+Starting New Threads
+
+Treat threads as chapters of a book.
+
+Use Context.txt as the “bookmark”.
+
+Attach three files every time:
+
+Context.txt (state of project: hardware, folders, current state, last KGB, today’s goal, parking lot).
+
+Piper_Snapshot.zip (scripts only, no models/venv).
+
+FolderMap.txt (tree view of C:\Piper).
+(Optional: latest logs + mini Run Transcript).
+
+Thread Guardrails
+
+Start each reply with the active chapter.
+
+Answer with ✅ (in scope), 🟨 (safe minor), or 🛑 (out of scope → parking).
+
+If user asks for earlier chapter change while later one is active → must explicitly switch.
+
+7. Tools & Automation
+
+Chapter Starter Script (start_chapter_pack.py):
+
+Lives outside Piper folder.
+
+Builds Context.txt, Snapshot.zip, FolderMap.txt, optional Logs zip, Run Transcript.
+
+Removes risk of missing info.
+
+Robust Agent (future):
+
+Outside Piper folder (C:\PiperTools\Agent).
+
+Applies patch packages (package.txt + payloads/) with preview/diff, rollback, syntax checks.
+
+Doesn’t change often; package spec evolves instead.
+
+8. Preferences & Rules
+
+Offline by default; ask before internet/file operations.
+
+personality.py is read-only.
+
+Voice auth: user full mode, guest limited.
+
+Auto-sleep after idle.
+
+Logs to GUI and rotating file.
+
+9. Key Lessons from Strategy 1
+
+Don’t overload threads — start new ones early.
+
+Always anchor to a Known-Good Baseline.
+
+Chapters + Guardrails keep scope from drifting.
+
+Modularization must favor clear boundaries, not micro-splits.
+
+Tools like the starter script and agent reduce human error.

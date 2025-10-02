@@ -1,0 +1,17 @@
+mkdir C:\Piper\scripts\tools -Force | Out-Null
+notepad C:\Piper\scripts\tools\inject.py
+# paste the script above, save
+
+================================================================================================================================
+
+# Tone & sarcasm (GUI header should update instantly)
+python -m tools.inject tone friendly
+python -m tools.inject sarcasm on
+python -m tools.inject persona tone=serious sarcasm=off
+
+# Quick mixes to exercise autoscroll/wrapping/badges
+python -m tools.inject tick 20
+python -m tools.inject evt WakeDetected
+python -m tools.inject err "DummyError_X"
+python -m tools.inject say "This is a very long chat line that should wrap nicely across the pane."
+python -m tools.inject state listening

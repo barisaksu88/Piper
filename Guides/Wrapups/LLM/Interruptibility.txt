@@ -1,0 +1,56 @@
+Overseer Compliance Snapshot — Chapter I01
+
+Important note:
+📌 All tests below were performed entirely from the Windows shell (PowerShell one-liners). The GUI was not opened during I01 smokes.
+
+Chapter: I01
+
+Rail: I01.1 — Cancel Token Plumbing
+
+Scope: ✅ Services only
+
+Plan: Introduce CancelToken, plumb through llm_client.stream_generate(..., cancel_token), expose llm_client.stop(token).
+
+Patch summary: scripts/services/llm_client.py — Cancel contract header; CancelToken; stop(token) (provider stop hook stub); stream checks cancel flag between chunks.
+
+Smoke (shell only): echo stream canceled mid-way → truncated to "this should stop", [PASS] canceled cooperatively; truncated output, elapsed 0.055 s.
+
+KGB: KGB-2025-09-28_I01.1_cancel_token
+
+Chapter: I01
+
+Rail: I01.2 — Provider Stop (llama.cpp)
+
+Scope: ✅ Services only
+
+Plan: Add start_stream(), iter_chunks(), stop(handle) in services/providers/llamacpp.py; wire handle to client token.
+
+Patch summary: llama.cpp process spawn/iter + idempotent stop (terminate→wait→kill).
+
+Smoke (shell only): llama.cpp provider stopped via token, total elapsed 0.33 s, length 0, [PASS] provider stop path engaged.
+
+KGB: KGB-2025-09-28_I01.2_provider_stop
+
+Chapter: I01
+
+Rail: I01.3 — UI Controls & Voice Barge-In
+
+Scope: ✅ UI hook only
+
+Plan: Add _active_token, stop_current_reply() to scripts/ui/hooks/llm_chat.py; mark last assistant turn with " [stopped]" once.
+
+Patch summary: UI hook holds cancel token, delegates stop to client, finalizes assistant turn.
+
+Smoke (shell only):
+
+Echo (short input): [STOP] False, stream finished before cancel.
+
+Echo (long input): [STOP] True, truncated turn ends with " [stopped]".
+
+Llamacpp: [STOP] True, returns promptly, turn contains " [stopped]".
+
+KGB: KGB-2025-09-28_I01.3_ui_stop_bargein
+
+✅ All three rails passed.
+No GUI lockups, no zombie processes, canonical state intact.
+This baseline is Overseer-ready for blessing into KGB-2025-09-28_I01_streaming_cancel_bl.

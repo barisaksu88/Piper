@@ -1,0 +1,28 @@
+﻿# scripts/common/config.py
+# Prints canonical Core state/event names at startup.
+
+from __future__ import annotations
+
+# Robust import (works from C:\Piper and from C:\Piper\scripts)
+try:
+    from scripts.core.state_defs import CoreState, EventType
+except ModuleNotFoundError:
+    from core.state_defs import CoreState, EventType  # type: ignore
+
+def list_core_state_names() -> list[str]:
+    return [m.name for m in CoreState]
+
+def list_event_type_names() -> list[str]:
+    return [m.name for m in EventType]
+
+# Print once at import time
+try:
+    _states_str = "|".join(list_core_state_names())
+    _events_str = "|".join(list_event_type_names())
+    print(f"[STATE] available_states={_states_str}")
+    print(f"[STATE] available_events={_events_str}")
+except Exception as _e:
+    print(f"[STATE] enumerate_error={_e.__class__.__name__}: {_e}")
+
+__all__ = ["CoreState", "EventType", "list_core_state_names", "list_event_type_names"]
+

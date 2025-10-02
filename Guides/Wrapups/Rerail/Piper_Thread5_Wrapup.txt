@@ -1,0 +1,30 @@
+# Piper — Thread 5 Wrap-Up
+
+## ✅ Accomplishments
+- **Rails audit + correction**: Compared against master `README_RAILS`, collapsed completed phases, updated unfinished ones.
+- **Canvas hygiene**: Cleaned, restructured sections (Execution Rules, Development Flow, Parked, Known Issues). Call graph and architecture updated.
+- **Avatar issue**: Implemented padding/fit fix through `layout_constants.py`, stable after smoke. Residue checked and cleaned.
+- **Docs integration**: Created and placed `Config Files.md` in `docs/` (explains YAML/EditorConfig/TOML). Created `test_attach_mode.md`. Both mirrored to drives for consistency.
+- **Config infra**: Added `.pre-commit-config.yaml`, `.editorconfig`, `pyproject.toml` to root. Clarified purpose vs runtime configs.
+- **Execution rules clarified**: Mirrors-first, Before→After with bookends, residue check after each successful step. Guardrails updated.
+- **Rails reorganized**: Built a single sprint (I01–I08) with robust microsteps from remaining items in `README_RAILS` + parked issues. Only unfinished items carried forward.
+- **Memory consolidation**: Railmaster bubble file ingested into assistant’s persistent memory. Reduced token bloat in Canvas by removing duplicated rules/graphs.
+
+## ⚠️ Failures / Rollbacks
+- **CLI → GUI sync**: Multiple attempts to unify sleep reply (`Going to sleep.`) in both Chat and Logs. Outcome inconsistent: DevTools showed `[TTS] Going to sleep.`, CLI window still only printed ✓. Reverted to KGB baseline each time. → Parked for Sprint I01.
+- **Bootstrap peel (H02b/Slice 2)**: Early attempts froze GUI or broke CLI input. Reverted. Parked for Sprint I06.
+- **Tick/parse helpers move (H02b/Slice 3)**: Introduced freezes and “nonlocal binding” errors. Reverted. Parked for Sprint I07.
+- **UTF‑8 mojibake scrub**: No working patch achieved in-thread. Still seeing `âœ“`, `â†’`. → Parked for Sprint I02.
+
+## 📍 Where We Left Off
+- Current snapshot: `KGB-2025-09-13_H03_wrap_ready` (set after stable wrap of H03).
+- GUI opens, avatar scales correctly, autoscroll working, dev tools inject/chat/log mostly healthy.
+- CLI window (`entries.app_cli_entry`) works standalone, but GUI tailer diverges: Chat misses some replies (esp. `sleep`). Needs parity work.
+- Theme still gray, header hygiene incomplete, mojibake persists, avatar tweak minor but pending.
+
+## 🎯 Next Steps (Thread 6 Kickoff)
+- Resume Rails I01 → Sleep reply parity (normalize CLI vs DevTools → Chat).
+- Proceed sequentially: I02 UTF‑8 scrub → I03 header hygiene → I04 theme lightblue → I05 avatar tweak → I06/H02b Slice 2 bootstrap peel → I07/H02b Slice 3 tick/parse extract → I08 wrap.
+- Parked items and known issues integrated directly into Rails to avoid drift.
+
+---

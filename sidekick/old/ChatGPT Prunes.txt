@@ -1,0 +1,87 @@
+Orphans (no incoming deps) — raw
+
+⚠️ Many of these show up only because test, tools, or old directories weren’t excluded. Re-run analyzers with excludes above to filter them out. The remaining orphans are actual candidates worth reviewing:
+
+Piper.scripts.common.config [C:\Piper\scripts\common\config.py]
+
+Piper.scripts.common.log_utils [C:\Piper\scripts\common\log_utils.py]
+
+Piper.scripts.common.types [C:\Piper\scripts\common\types.py]
+
+Piper.scripts.common.utils [C:\Piper\scripts\common\utils.py]
+
+Piper.scripts.core.bg_poller [C:\Piper\scripts\core\bg_poller.py]
+
+Piper.scripts.core.bridge [C:\Piper\scripts\core\bridge.py]
+
+Piper.scripts.core.core_app [C:\Piper\scripts\core\core_app.py]
+
+Piper.scripts.core.core_commands [C:\Piper\scripts\core\core_commands.py]
+
+Piper.scripts.core.core_machine [C:\Piper\scripts\core\core_machine.py]
+
+Piper.scripts.core.event_queue [C:\Piper\scripts\core\event_queue.py]
+
+Piper.scripts.core.events [C:\Piper\scripts\core\events.py]
+
+Piper.scripts.core.flags [C:\Piper\scripts\core\flags.py]
+
+Piper.scripts.core.logbus [C:\Piper\scripts\core\logbus.py]
+
+Piper.scripts.core.poll_helpers [C:\Piper\scripts\core\poll_helpers.py]
+
+Piper.scripts.core.router [C:\Piper\scripts\core\router.py]
+
+Piper.scripts.core.startup [C:\Piper\scripts\core\startup.py]
+
+Piper.scripts.core.state_defs [C:\Piper\scripts\core\state_defs.py]
+
+Piper.scripts.core.timers [C:\Piper\scripts\core\timers.py]
+
+Piper.scripts.core.transition_plan [C:\Piper\scripts\core\transition_plan.py]
+
+Piper.scripts.personality [C:\Piper\scripts\personality.py]
+
+Piper.scripts.services.adapters.mock_asr_wake [C:\Piper\scripts\services\adapters\mock_asr_wake.py]
+
+Piper.scripts.services.asr.vosk_adapter [C:\Piper\scripts\services\asr\vosk_adapter.py]
+
+Piper.scripts.services.base [C:\Piper\scripts\services\base.py]
+
+Piper.scripts.services.cli_prompt [C:\Piper\scripts\services\cli_prompt.py]
+
+Piper.scripts.services.persona_adapter [C:\Piper\scripts\services\persona_adapter.py]
+
+Piper.scripts.services.tts.speak_once [C:\Piper\scripts\services\tts\speak_once.py]
+
+Piper.scripts.services.tts.tts_manager [C:\Piper\scripts\services\tts\tts_manager.py]
+
+Piper.scripts.services.wake.porcupine_adapter [C:\Piper\scripts\services\wake\porcupine_adapter.py]
+
+Piper.scripts.ui.* (all helpers, panes, and components remain as valid UI orphans)
+
+scripts/ui/layout_constants.py: unused constants MIN_WIDTH, MIN_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT, SPLIT_RATIO, RIGHT_GUTTER, BORDER, ROUNDING, UI, MONO, TINY, BG, FG, ACCENT, MUTED, OK, WARN, ERR, MIN_WIDTH, MAX_WIDTH, POLL_SEC, FONT, COLOR, DEV, HB, RESERVED_BELOW, SEP_VISIBLE, SEP_THICKNESS
+
+Vulture Findings (filtered)
+
+These are the meaningful unused code findings after exclusions. Focused only on unused functions/classes/imports.
+
+scripts/core/bg_poller.py: unused class BackgroundPoller
+
+scripts/core/bridge.py: unused class CoreBridge
+
+scripts/core/logbus.py: unused functions event, info
+
+scripts/core/poll_helpers.py: unused function poll_asr_once
+
+scripts/core/timers.py: unused class IdleTimer, unused method expired
+
+scripts/entries/_app_gui_entry_impl.py: unused function schedule_recurring_update
+
+scripts/entries/app_cli_entry.py: unused function _readline, unused import _bi
+
+scripts/services/base.py: unused class TTSSvc
+
+scripts/services/persona_adapter.py: unused functions reload_persona, get_runtime_sarcasm, get_runtime_max_len, list_tones, show_tone, set_tone_field, clear_tone, export_runtime_dict, import_runtime_dict, get_greeting
+
+scripts/services/tts/tts_manager.py: unused function init

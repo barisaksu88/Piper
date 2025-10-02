@@ -1,0 +1,83 @@
+# scripts/core/poll_helpers.py
+"""
+Tiny, single-shot polling helper for CoreBridge ASR forwarding.
+
+Purpose
+-------
+Allow callers (entries, tests, or future loopers) to poll the bridge's ASR
+adapter for a few ticks and forward any tokens (including "" for EOU) into Core,
+advancing the FSM without threads.
+
+Design
+------
+- No imports of Services at module import time (keeps Core clean).
+- Accepts the bridge instance and Core primitives (app, publish, EventType).
+- Returns (last_state_name, tokens_forwarded) for easy assertions.
+
+Usage (example)
+---------------
+CoreApp, publish, EventType, CoreState = _core_imports()
+app = CORE_APP or CoreApp(initial=CoreState.SLEEPING)
+bridge = CoreBridge(app=app, wake=..., asr=...)
+bridge.start()
+state, n = poll_asr_once(bridge, app, publish, EventType, ticks=3, timeout=0.05)
+bridge.stop()
+"""
+
+from __future__ import annotations
+from typing import Any, Optional, Tuple
+
+
+def poll_asr_once(
+    bridge: Any,
+    app: Any,
+    publish: Any,
+    EventType: Any,
+    *,
+    ticks: int = 3,
+    timeout: float = 0.05,
+) -> Tuple[str, int]:
+    """
+    Polls bridge.asr.listen() up to `ticks` times, forwards any tokens to Core.
+
+    Parameters
+    ----------
+    bridge : CoreBridge-like object with .asr (having listen(timeout)->str|None)
+    app    : CoreApp instance with .queue and .tick()
+    publish: function(queue, EventType, payload)
+    EventType: Core EventType enum (expects .ASRResult)
+    ticks  : number of listen attempts (non-negative)
+    timeout: per-listen timeout seconds (float)
+
+    Returns
+    -------
+    (last_state_name, tokens_forwarded)
+    """
+    count = 0
+    last_state = getattr(app.state, "name", str(app.state))
+    asr = getattr(bridge, "asr", None)
+
+    if ticks <= 0 or asr is None:
+        return last_state, 0
+
+    for _ in range(ticks):
+        token: Optional[str]
+        try:
+            token = asr.listen(timeout=timeout)  # may be None, "", or text
+        except Exception:
+            token = None
+
+        if token is None:
+            continue
+
+        publish(app.queue, EventType.ASRResult, {"text": token})
+        new_state = app.tick()
+        last_state = getattr(new_state, "name", str(new_state))
+        count += 1
+
+        # Optional early exit: treat "" as EOU; stop after forwarding it
+        if token == "":
+            break
+
+    return last_state, count
+

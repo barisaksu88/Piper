@@ -1,0 +1,37 @@
+Compliance + Health Snapshot (LLM07)
+
+Chapter: LLM07 — Streaming Delivery
+Baseline: KGB-2025-09-28_S01.3_mc_reads_state (blessed) → advanced to KGB-2025-09-28_LLM07_streaming_bl
+
+Rails:
+
+LLM07.1 — Streaming API in Client ✅
+
+Added stream_generate() to llm_client.py with overall timeout + fallback.
+
+Smoke: echo provider yields chunks word-by-word; forced timeout returns fallback echo.
+
+LLM07.2 — Incremental Paint in UI ✅
+
+llm_chat.py gained stream_reply_for_user_text + stream_handle_chat_line.
+
+state_store.py gained append_or_accumulate_assistant().
+
+Smoke: GUI ticks per chunk, state shows one assistant turn with accumulated text.
+
+LLM07.3 — Robustness & Non-Blocking ✅
+
+Verified overall timeout engages in ~1s under a 3s stall.
+
+State shows fallback assistant turn; GUI loop not blocked.
+
+Contracts present:
+
+# CONTRACT — Streaming API in llm_client.py
+
+# CONTRACT - UI Hook + streaming functions in llm_chat.py
+
+append_or_accumulate_assistant() in state_store.py
+
+Smokes: All passed (echo, incremental paint, stall timeout).
+KGB: KGB-2025-09-28_LLM07_streaming_bl (blessed baseline)

@@ -1,0 +1,79 @@
+Piper Development Wrap‑Up (End of Thread)
+
+Context
+-------
+This thread covered Phase B (GUI modularization, cleanup, and state/GUI sync). 
+We alternated between Google Drive and Dropbox mirrors to keep files visible. 
+Both now mirror the live project to reduce downtime. Rule added: if mirrors fail,
+I must explicitly say “Need [drive] access to continue”.
+
+Achievements
+------------
+1. Modularization:
+   • Split app_gui_entry.py → _app_gui_entry_impl.py with thin wrapper.
+   • Split panes.py similarly.
+   • Added DEV NOTE headers with size caps (<150 lines for entries, ~80–120 for panes).
+
+2. CLI + GUI Sync:
+   • Double terminal setup works: CLI logs to run/core.log; GUI tails it live.
+   • Dev Tools injection pane restored; draggable window works again.
+   • Chat vs Logs routing fixed: chat shows responses, logs show state lines.
+   • Autoscroll and UTF‑8 console confirmed.
+
+3. Header / Persona:
+   • Tone and sarcasm toggle via Dev Tools now reflect in GUI header.
+   • Color dot for state transitions works (with mapped colors).
+   • Header text still sticks at WAKING → PARKED.
+   • Extra trailing text (“trailing: …”) stabilized partially but PARKED.
+
+4. State handling:
+   • [STATE] transitions detected and routed to logs.
+   • Color dot updates visible; shuffling bug fixed.
+   • State label update remains inconsistent → PARKED.
+
+5. Layout:
+   • Viewport size wired to layout_constants.py (1111×774).
+   • Avatar pane sizing also centralized.
+   • General layout stable, scroll only in chat/log panes.
+
+6. Cleaning Prep:
+   • Inventory scripts added (CLEAN_sizes.txt, CLEAN_map_by_symbol.tsv, CLEAN_ctx/).
+   • These locate duplicates and unused blocks (state, persona, dev).
+   • Plan: stepwise deletion/refactor in next rail.
+
+Failures / Parked
+-----------------
+• Header state label: stuck at WAKING despite log transitions.
+• Trailing text in header disappears after first input.
+• Duplicate tone/sarcasm bug appeared and was fixed, but fragile.
+• Old injected blocks still clutter _app_gui_entry_impl.py and refresh_core.py.
+• Some state propagation logic lives in multiple places (classifier vs refresh) → needs unification.
+• Persona integration with GUI header incomplete.
+• Dev Tools: only text injection/log demo works; state tab + persona tab PARKED.
+
+Next Steps (next thread)
+------------------------
+1. Resume mini‑rail “CLEAN”:
+   a. Systematically delete orphaned code blocks.
+   b. Proof scripts line by line: ensure each has purpose.
+   c. Refactor duplicates into helpers.
+   d. Re‑run CLEAN inventory after trims.
+
+2. Revisit Phase B04:
+   • Confirm entries and panes stay within target size.
+   • Ensure no redundant code after cleanup.
+
+3. Unpark state header:
+   • Move state updates to classifier or unify in refresh_core.
+   • Ensure dot + label update from same source.
+
+4. Persona header:
+   • Finish trailing text stabilization.
+   • Wire tone/sarcasm once (no duplicates).
+
+5. Always use mirrors (Dropbox + Google Drive). 
+   • If no access: I must say “Need [drive] access to continue”.
+
+Tag
+---
+End of Thread · Tag as: KGB‑2025‑09‑03_WRAPUP_CLEAN_PREP

@@ -1,0 +1,54 @@
+Objective: peel Dev Tools out of Piper’s GUI and consolidate into a standalone Mission Control (MC).
+Result: ✅ Success — MC now handles all testing, monitoring, and quick actions. Piper scripts folder is clean, old dev_tools removed.
+
+✅ Achievements
+
+Mission Control (stable):
+
+Double-clickable entry point.
+
+Sections: Imports, Helpers, Snapshot, Logs Tailer, CLI Runner, Watchdogs, GUI, Main.
+
+CLI: command input box with auto-focus + trailing into GUI.
+
+Watchdogs: start/stop, hidden windows, live state (working/standing by/last change).
+
+Snapshots: PS1 invoked, last 5 shown.
+
+Logs: live tail, auto-scroll, breathing room at bottom.
+
+Processes: Start/Stop GUI/CLI integrated.
+
+Dev Tools Tab: quick actions, watchdogs, env toggles.
+
+Old Dev Tools removed: no more ui.dev_tools, dev_controls_mount, dev_adapters, PIPER_UI_DEV_INPUT.
+
+Persistent memory aligned: MC is canonical Dev Tools entry point.
+
+⚠️ Known Non-Issues
+
+Stop buttons not critical since windows are closable.
+
+Blue “can’t run on this PC” windows solved by moving to proper py/bat wiring.
+
+Logs duplication fixed.
+
+Snapshot initially froze, now works.
+
+🔜 Next Rails (if/when ready)
+
+Resource Guard tab → live CPU/RAM/GPU stats inside MC.
+
+Archival/log rotation → weekly zip of logs/snapshots.
+
+Polish → improve visual layout, replace deprecated add_same_line with groups.
+
+Longer term → expand MC to monitor external tools (ComfyUI, llama.cpp runs).
+
+📌 Rails Status
+
+Baseline / KGB: current MC state in canvas, stable.
+
+Phase A complete: Dev Tools peeled & consolidated.
+
+MC is now the single point of truth.

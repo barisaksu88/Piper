@@ -1,0 +1,11 @@
+{
+  "goal": "From deps.txt + vulture.txt + bandit.txt, identify exactly ONE concrete, file-specific issue in scripts/ui or entries/app_gui_entry.py (e.g., fragile/circular import or truly dead function) and propose the smallest safe fix.",
+  "targets": ["scripts/ui/**/*.py", "scripts/entries/app_gui_entry.py"],
+  "lint": true,
+  "notes": "Railmaster: one change per step; behavior must match; include a 3-step Smoke Test; NO refactors.",
+  "extra": {
+    "deps": "C:\\Piper\\sidekick\\deps.txt",
+    "unused": "C:\\Piper\\sidekick\\vulture.txt",
+    "bandit": "C:\\Piper\\sidekick\\bandit.txt"
+  }
+}

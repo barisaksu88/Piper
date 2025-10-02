@@ -1,0 +1,6 @@
+Dot changes color: Yes
+Last update ticks: Yes
+Tone display works: Yes
+Sarcasm display works: Yes
+Chat autoscroll works: Yes
+Logs autoscroll works: Yes

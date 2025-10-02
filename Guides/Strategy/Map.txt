@@ -1,0 +1,82 @@
+Piper Master Rails (Chapter → Micro‑steps)
+0) Stabilization (Wake → Greet → Sleep)
+
+✅ S01 Smoke (Porcupine wake, speak_once kill for barge‑in)
+
+✅ S02 Auto‑sleep
+
+✅ S03 Clean logs (structured/timestamped)
+
+✅ KGB: Stabilization baseline
+
+1) Core Modularization
+
+✅ T‑Core01 Extract core commands → core/core_commands.py
+
+✅ T‑Core02 Extract state shell → core/core_machine.py
+
+✅ T‑Core03 Add services/cli_prompt.py seam
+
+✅ KGB: Core baseline
+
+2) Persona & Voice
+
+✅ PV01 Loader (get_greeting, style_line, max_len)
+
+✅ PV02 Phrasing polish
+
+✅ PV03 Sarcasm + tone env
+
+✅ PV04 Barge‑in safety (long lines)
+
+✅ PV05 Help/error voice
+
+✅ PV06 TTS hints (pauses/numbers)
+
+✅ PV07/08 Profiles + README
+
+✅ PV09 Hot reload
+
+✅ PV10/11 Extended tone profiles + presets
+
+✅ PV12 Style hygiene (whitespace, punctuation, truncation)
+
+✅ KGB: KGB‑2025‑08‑21_PV12_wrapup
+
+3) Layout/Look (GUI)
+
+✅ LL01 Theme foundation (working preset; blue variant parked)
+
+✅ LL02 Pane separation (Chat vs Logs)
+
+✅ LL03 Scroll handling (bottom‑stick, pause on scroll up)
+
+✅ LL04 Wrap + Copy (reliable, per‑pane)
+
+✅ LL05 Status indicators (state dot, tone/sarcasm labels)
+
+✅ LL06 Avatar placeholder (static, theme‑aligned)
+
+✅ KGB: KGB‑2025‑08‑22_LL06_wrapup
+
+4) State Signals (mini‑chapter)
+
+⏳ SS01 State enum + “[STATE] A -> B” logger (Core) — next recommended
+
+⏳ SS02 Event markers (wake/parse/tts_start/tts_end)
+
+⏳ SS03 Speaking boundaries & barge‑in transitions
+
+⏳ SS04 GUI consumption (remove synthetic placeholders)
+
+⏳ SS05 Wrap + snapshot
+
+5) Services Integration (after signals)
+
+⏳ SV01 Wake→ASR→NLU→TTS wire‑through with persona styling
+
+⏳ SV02 Error handling + retries
+
+⏳ SV03 Performance passes (latency, CPU, dropout)
+
+⏳ KGB: Services baseline

@@ -1,0 +1,36 @@
+﻿# scripts/core/startup.py
+"""
+Startup banner printer for Piper Core.
+No side effects beyond printing; safe to call from entries or tests.
+"""
+
+from __future__ import annotations
+import os
+from typing import Optional
+
+try:
+    from scripts.core.flags import summarize as summarize_flags
+    from scripts.core.state_defs import CoreState, EventType
+except ModuleNotFoundError:
+    from core.flags import summarize as summarize_flags  # type: ignore
+    from core.state_defs import CoreState, EventType      # type: ignore
+
+
+def print_banner(*, file_label: Optional[str] = None) -> None:
+    """
+    Prints:
+      - [CORE] probe: file=... runtime_flag=...
+      - [CORE] demo_flags_active=...
+      - [STATE] available_states=...
+      - [STATE] available_events=...
+    """
+    probe_file = file_label or "<unknown>"
+    runtime_flag = os.getenv("PIPER_CORE_RUNTIME")
+    print(f"[CORE] probe: file={probe_file} runtime_flag={runtime_flag!r}")
+    active = summarize_flags()
+    if active:
+        print(f"[CORE] demo_flags_active={active}")
+    # Canonical names (always)
+    print(f"[STATE] available_states={'|'.join(s.name for s in CoreState)}")
+    print(f"[STATE] available_events={'|'.join(e.name for e in EventType)}")
+

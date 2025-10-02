@@ -1,0 +1,922 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 103
+--------------------------------------------------------------------------------
+    98: 
+    99: from collections import deque
+   100: log_buffer  = deque(maxlen=LOG_MAX_LINES)
+   101: chat_buffer = deque(maxlen=CHAT_MAX_LINES)
+   102: 
+   103: current_state = "SLEEPING"
+   104: _last_state_change_ts = 0.0  # UI timing sentinel
+   105: 
+   106: # Persona read-outs (UI-only, read-only)
+   107: persona_tone = os.environ.get("PIPER_PERSONA_TONE", "neutral").strip().lower()
+   108: persona_sarcasm = (os.environ.get("PIPER_PERSONA_SARCASM", "off").strip().lower() in ("1","on","true","yes"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 211
+--------------------------------------------------------------------------------
+   206: 
+   207:     now = datetime.now()
+   208: 
+   209:     # Initialize queue with the current state and force a refresh
+   210:     if not state_queue:
+   211:         state_queue.append(current_state)
+   212:         last_display_switch = now
+   213:         _refresh_needed = True
+   214:         return
+   215: 
+   216:     head = state_queue[0]
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 218
+--------------------------------------------------------------------------------
+   213:         _refresh_needed = True
+   214:         return
+   215: 
+   216:     head = state_queue[0]
+   217: 
+   218:     # Pop head after it has been displayed for STATE_DWELL_SEC and differs from current_state
+   219:     if head != current_state:
+   220:         # Guard if last_display_switch somehow wasn't set
+   221:         last_sw = last_display_switch or now
+   222:         if (now - last_sw).total_seconds() >= STATE_DWELL_SEC:
+   223:             state_queue.popleft()
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 219
+--------------------------------------------------------------------------------
+   214:         return
+   215: 
+   216:     head = state_queue[0]
+   217: 
+   218:     # Pop head after it has been displayed for STATE_DWELL_SEC and differs from current_state
+   219:     if head != current_state:
+   220:         # Guard if last_display_switch somehow wasn't set
+   221:         last_sw = last_display_switch or now
+   222:         if (now - last_sw).total_seconds() >= STATE_DWELL_SEC:
+   223:             state_queue.popleft()
+   224:             last_display_switch = now
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 248
+--------------------------------------------------------------------------------
+   243: # -------------------------------
+   244: # Tailer → GUI ingestion
+   245: # -------------------------------
+   246: def _consume_line(line: str):
+   247:     """Ingest one log line; route to Chat or Logs; request UI refresh."""
+   248:     global last_update_ts, current_state, _chat_dirty, _log_dirty, _refresh_needed, _last_state_log, hb_seconds
+   249: 
+   250:     # Normalize
+   251:     if line.endswith("\n"):
+   252:         line = line[:-1]
+   253:     s = (line or "")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 312
+--------------------------------------------------------------------------------
+   307:             new_state = "SPEAKING"
+   308: 
+   309:         # Apply state if valid and changed (whitelist to block junk like "TE")
+   310:     if new_state:
+   311:         candidate = (new_state or "").strip().upper()
+   312:         if candidate in VALID_STATES and candidate != current_state:
+   313:             old_state = current_state
+   314:             current_state = candidate
+   315:             # record when WAKING began (for UI dwell advance)
+   316:             try:
+   317:                 import time as _t
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 313
+--------------------------------------------------------------------------------
+   308: 
+   309:         # Apply state if valid and changed (whitelist to block junk like "TE")
+   310:     if new_state:
+   311:         candidate = (new_state or "").strip().upper()
+   312:         if candidate in VALID_STATES and candidate != current_state:
+   313:             old_state = current_state
+   314:             current_state = candidate
+   315:             # record when WAKING began (for UI dwell advance)
+   316:             try:
+   317:                 import time as _t
+   318:                 if current_state == "WAKING":
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 314
+--------------------------------------------------------------------------------
+   309:         # Apply state if valid and changed (whitelist to block junk like "TE")
+   310:     if new_state:
+   311:         candidate = (new_state or "").strip().upper()
+   312:         if candidate in VALID_STATES and candidate != current_state:
+   313:             old_state = current_state
+   314:             current_state = candidate
+   315:             # record when WAKING began (for UI dwell advance)
+   316:             try:
+   317:                 import time as _t
+   318:                 if current_state == "WAKING":
+   319:                     globals()["_waking_seen_ts"] = _t.time()
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 318
+--------------------------------------------------------------------------------
+   313:             old_state = current_state
+   314:             current_state = candidate
+   315:             # record when WAKING began (for UI dwell advance)
+   316:             try:
+   317:                 import time as _t
+   318:                 if current_state == "WAKING":
+   319:                     globals()["_waking_seen_ts"] = _t.time()
+   320:                 else:
+   321:                     # clear stamp if we leave WAKING
+   322:                     globals().pop("_waking_seen_ts", None)
+   323:             except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 344
+--------------------------------------------------------------------------------
+   339: 
+   340:             # Mark repaint and hand off the new state to the UI thread
+   341:             # UI-thread: apply pending state to dot + label once
+   342:             pending = globals().pop("_pending_state_for_ui", None)
+   343:             if pending:
+   344:                 current_state = str(pending)  # <-- make the closure var current
+   345:                 try:
+   346:                     try:
+   347:                         from scripts.ui.pane_parts import header_bar as _hb
+   348:                     except Exception:
+   349:                         from ui.pane_parts import header_bar as _hb
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 350
+--------------------------------------------------------------------------------
+   345:                 try:
+   346:                     try:
+   347:                         from scripts.ui.pane_parts import header_bar as _hb
+   348:                     except Exception:
+   349:                         from ui.pane_parts import header_bar as _hb
+   350:                     _hb.set_state_dot(current_state)  # updates dot + "State: …"
+   351:                 except Exception:
+   352:                     pass
+   353: 
+   354:             _refresh_needed = True
+   355:             
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 362
+--------------------------------------------------------------------------------
+   357:             try:
+   358:                 try:
+   359:                     from scripts.ui.pane_parts import header_bar as _hb
+   360:                 except Exception:
+   361:                     from ui.pane_parts import header_bar as _hb
+   362:                 _hb.set_state_dot(current_state)
+   363:             except Exception:
+   364:                 pass
+   365:             if not state_queue or state_queue[-1] != candidate:
+   366:                 state_queue.append(candidate)
+   367:             if not has_state_tag:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 464
+--------------------------------------------------------------------------------
+   459:             return default
+   460: 
+   461:     # Use provided args if 6 were passed, otherwise pull from globals
+   462:     if len(args) >= 6:
+   463:         # Compose authoritative header every time (persona/state are module globals)
+   464:         state_text = f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}"
+   465:         # dev-only trace + repaint nudge
+   466:         log_buffer.append(f"[DEV][TRACE] header_now tone={persona_tone} sarcasm={'on' if persona_sarcasm else 'off'}"); _log_dirty = True; _refresh_needed = True
+   467:     else:
+   468:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   469:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 541
+--------------------------------------------------------------------------------
+   536:             # Maintain queued-state dwell progression
+   537:             _advance_state_if_needed()
+   538: 
+   539:             # Auto-snap from SPEAKING to SLEEPING after idle
+   540:             try:
+   541:                 if current_state == "SPEAKING" and last_update_ts:
+   542:                     idle = (datetime.now() - last_update_ts).total_seconds()
+   543:                     if idle >= SPEAKING_IDLE_SEC:
+   544:                         globals()["current_state"] = "SLEEPING"
+   545:                         globals()["_refresh_needed"] = True
+   546:             except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 544
+--------------------------------------------------------------------------------
+   539:             # Auto-snap from SPEAKING to SLEEPING after idle
+   540:             try:
+   541:                 if current_state == "SPEAKING" and last_update_ts:
+   542:                     idle = (datetime.now() - last_update_ts).total_seconds()
+   543:                     if idle >= SPEAKING_IDLE_SEC:
+   544:                         globals()["current_state"] = "SLEEPING"
+   545:                         globals()["_refresh_needed"] = True
+   546:             except Exception:
+   547:                 pass
+   548:             # Auto-advance: if we've been WAKING for a moment, move to LISTENING
+   549:             try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 552
+--------------------------------------------------------------------------------
+   547:                 pass
+   548:             # Auto-advance: if we've been WAKING for a moment, move to LISTENING
+   549:             try:
+   550:                 import time as _t
+   551:                 last = globals().get("_last_state_change_ts", 0.0)
+   552:                 if current_state == "WAKING":
+   553:                     if last and (_t.time() - last) >= 0.6:
+   554:                         globals()["current_state"] = "LISTENING"
+   555:                         globals()["_last_state_change_ts"] = _t.time()
+   556:                         try:
+   557:                             try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 554
+--------------------------------------------------------------------------------
+   549:             try:
+   550:                 import time as _t
+   551:                 last = globals().get("_last_state_change_ts", 0.0)
+   552:                 if current_state == "WAKING":
+   553:                     if last and (_t.time() - last) >= 0.6:
+   554:                         globals()["current_state"] = "LISTENING"
+   555:                         globals()["_last_state_change_ts"] = _t.time()
+   556:                         try:
+   557:                             try:
+   558:                                 from scripts.ui.pane_parts import header_bar as _hb
+   559:                             except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 569
+--------------------------------------------------------------------------------
+   564:             except Exception:
+   565:                 pass
+   566:                     # Auto-advance WAKING → LISTENING after a short dwell
+   567:             try:
+   568:                 import time as _t
+   569:                 if globals().get("current_state", "") == "WAKING":
+   570:                     ts = globals().get("_waking_seen_ts", 0.0)
+   571:                     if ts and (_t.time() - ts) >= 0.6:
+   572:                         globals()["current_state"] = "LISTENING"
+   573:                         # update dot/label immediately
+   574:                         try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 572
+--------------------------------------------------------------------------------
+   567:             try:
+   568:                 import time as _t
+   569:                 if globals().get("current_state", "") == "WAKING":
+   570:                     ts = globals().get("_waking_seen_ts", 0.0)
+   571:                     if ts and (_t.time() - ts) >= 0.6:
+   572:                         globals()["current_state"] = "LISTENING"
+   573:                         # update dot/label immediately
+   574:                         try:
+   575:                             try:
+   576:                                 from scripts.ui.pane_parts import header_bar as _hb
+   577:                             except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 722
+--------------------------------------------------------------------------------
+   717:                 m = _re.search(r"\[STATE\]\s*(?:[A-Z]+\s*->\s*)?([A-Z]+)", s)
+   718:                 if m:
+   719:                     new_state = (m.group(1) or "").strip().upper()
+   720:                     if new_state:
+   721:                         # Record and publish the new state
+   722:                         globals()["current_state"] = new_state
+   723:                         _refresh_needed = True
+   724:                         # Update the dot immediately via the header module (UI-thread safe helper)
+   725:                         try:
+   726:                             try:
+   727:                                 from scripts.ui.pane_parts import header_bar as _hb
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 795
+--------------------------------------------------------------------------------
+   790:                 elif s.lstrip().startswith(">"):
+   791:                     ns = "SPEAKING"
+   792: 
+   793:             if ns:
+   794:                 cand = (ns or "").strip().upper()
+   795:                 if cand in VALID_STATES and cand != globals().get("current_state"):
+   796:                     globals()["current_state"] = cand
+   797:                     try:
+   798:                         from scripts.ui.pane_parts import header_bar as _hb
+   799:                     except Exception:
+   800:                         from ui.pane_parts import header_bar as _hb
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 796
+--------------------------------------------------------------------------------
+   791:                     ns = "SPEAKING"
+   792: 
+   793:             if ns:
+   794:                 cand = (ns or "").strip().upper()
+   795:                 if cand in VALID_STATES and cand != globals().get("current_state"):
+   796:                     globals()["current_state"] = cand
+   797:                     try:
+   798:                         from scripts.ui.pane_parts import header_bar as _hb
+   799:                     except Exception:
+   800:                         from ui.pane_parts import header_bar as _hb
+   801:                     _hb.set_state_dot(current_state)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 801
+--------------------------------------------------------------------------------
+   796:                     globals()["current_state"] = cand
+   797:                     try:
+   798:                         from scripts.ui.pane_parts import header_bar as _hb
+   799:                     except Exception:
+   800:                         from ui.pane_parts import header_bar as _hb
+   801:                     _hb.set_state_dot(current_state)
+   802: 
+   803:                     globals()["_refresh_needed"] = True
+   804:         except Exception:
+   805:             pass
+   806: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 866
+--------------------------------------------------------------------------------
+   861:                             from scripts.ui.pane_parts import header_bar as _hb
+   862:                         except Exception:
+   863:                             from ui.pane_parts import header_bar as _hb  # fallback import
+   864: 
+   865:                         _hb.refresh(
+   866:                             f"State: {current_state}",
+   867:                             _hb_text(),
+   868:                             f"Tone: {persona_tone}",
+   869:                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   870:                             ""   # empty tailing text so nothing shows there
+   871:                         )
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 873
+--------------------------------------------------------------------------------
+   868:                             f"Tone: {persona_tone}",
+   869:                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   870:                             ""   # empty tailing text so nothing shows there
+   871:                         )
+   872:                         try:
+   873:                             # Force the state label/dot to match current_state every tick
+   874:                             if hasattr(_hb, "set_state"):
+   875:                                 _hb.set_state(current_state)
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 875
+--------------------------------------------------------------------------------
+   870:                             ""   # empty tailing text so nothing shows there
+   871:                         )
+   872:                         try:
+   873:                             # Force the state label/dot to match current_state every tick
+   874:                             if hasattr(_hb, "set_state"):
+   875:                                 _hb.set_state(current_state)
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+   879:                                 # Some builds accept state_text as first arg in refresh
+   880:                                 _hb.refresh(f"State: {current_state}", _hb_text(),
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 877
+--------------------------------------------------------------------------------
+   872:                         try:
+   873:                             # Force the state label/dot to match current_state every tick
+   874:                             if hasattr(_hb, "set_state"):
+   875:                                 _hb.set_state(current_state)
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+   879:                                 # Some builds accept state_text as first arg in refresh
+   880:                                 _hb.refresh(f"State: {current_state}", _hb_text(),
+   881:                                             f"Tone: {persona_tone}",
+   882:                                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 880
+--------------------------------------------------------------------------------
+   875:                                 _hb.set_state(current_state)
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+   879:                                 # Some builds accept state_text as first arg in refresh
+   880:                                 _hb.refresh(f"State: {current_state}", _hb_text(),
+   881:                                             f"Tone: {persona_tone}",
+   882:                                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   883:                                             "")
+   884:                         except Exception:
+   885:                             pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 890
+--------------------------------------------------------------------------------
+   885:                             pass
+   886:                             
+   887:                         try:
+   888:                             # Some builds expose a dedicated setter for the state/dot — call whichever exists.
+   889:                             if hasattr(_hb, "set_state"):
+   890:                                 _hb.set_state(current_state)
+   891:                             elif hasattr(_hb, "set_state_dot"):
+   892:                                     _hb.set_state_dot(current_state)
+   893:                             elif hasattr(_hb, "refresh_state"):
+   894:                                     _hb.refresh_state(current_state)
+   895:                         except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 892
+--------------------------------------------------------------------------------
+   887:                         try:
+   888:                             # Some builds expose a dedicated setter for the state/dot — call whichever exists.
+   889:                             if hasattr(_hb, "set_state"):
+   890:                                 _hb.set_state(current_state)
+   891:                             elif hasattr(_hb, "set_state_dot"):
+   892:                                     _hb.set_state_dot(current_state)
+   893:                             elif hasattr(_hb, "refresh_state"):
+   894:                                     _hb.refresh_state(current_state)
+   895:                         except Exception:
+   896:                             pass
+   897:                         # Ensure state label + dot update every frame
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 894
+--------------------------------------------------------------------------------
+   889:                             if hasattr(_hb, "set_state"):
+   890:                                 _hb.set_state(current_state)
+   891:                             elif hasattr(_hb, "set_state_dot"):
+   892:                                     _hb.set_state_dot(current_state)
+   893:                             elif hasattr(_hb, "refresh_state"):
+   894:                                     _hb.refresh_state(current_state)
+   895:                         except Exception:
+   896:                             pass
+   897:                         # Ensure state label + dot update every frame
+   898:                         try:
+   899:                             from scripts.ui.pane_parts import header_bar as _hb
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 904
+--------------------------------------------------------------------------------
+   899:                             from scripts.ui.pane_parts import header_bar as _hb
+   900:                         except Exception:
+   901:                             from ui.pane_parts import header_bar as _hb  # fallback
+   902: 
+   903:                         try:
+   904:                             _hb.set_state_dot(current_state)
+   905:                         except Exception:
+   906:                             pass
+   907: 
+   908:                     except Exception:
+   909:                         pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 911
+--------------------------------------------------------------------------------
+   906:                             pass
+   907: 
+   908:                     except Exception:
+   909:                         pass
+   910:                     refresh_ui(
+   911:                         f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   912:                         f"{_hb_text()} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   913:                         chat_text,
+   914:                         log_text,
+   915:                         _chat_dirty,
+   916:                         _log_dirty
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: current_state @ line 1007
+--------------------------------------------------------------------------------
+  1002:                     from scripts.ui.dev_tools import attach_dev_tools as _attach  # type: ignore
+  1003:                 except Exception:
+  1004:                     from ui.dev_tools import attach_dev_tools as _attach          # type: ignore
+  1005: 
+  1006:                 _attach(
+  1007:                     get_state=lambda: str(globals().get("current_state", "?")),
+  1008:                     get_queue=lambda: list(globals().get("state_queue", [])),
+  1009:                     get_last_ts=lambda: globals().get("last_update_ts", None),
+  1010:                     log_emit=_emit_to_logs,
+  1011:                     tone_for_line=_tone_for_line,
+  1012:                     badge_for_logs=_badge_for_logs,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 103
+--------------------------------------------------------------------------------
+    98: 
+    99: from collections import deque
+   100: log_buffer  = deque(maxlen=LOG_MAX_LINES)
+   101: chat_buffer = deque(maxlen=CHAT_MAX_LINES)
+   102: 
+   103: current_state = "SLEEPING"
+   104: 
+   105: # Persona read-outs (UI-only, read-only)
+   106: persona_tone = os.environ.get("PIPER_PERSONA_TONE", "neutral").strip().lower()
+   107: persona_sarcasm = (os.environ.get("PIPER_PERSONA_SARCASM", "off").strip().lower() in ("1","on","true","yes"))
+   108: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 210
+--------------------------------------------------------------------------------
+   205: 
+   206:     now = datetime.now()
+   207: 
+   208:     # Initialize queue with the current state and force a refresh
+   209:     if not state_queue:
+   210:         state_queue.append(current_state)
+   211:         last_display_switch = now
+   212:         _refresh_needed = True
+   213:         return
+   214: 
+   215:     head = state_queue[0]
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 217
+--------------------------------------------------------------------------------
+   212:         _refresh_needed = True
+   213:         return
+   214: 
+   215:     head = state_queue[0]
+   216: 
+   217:     # Pop head after it has been displayed for STATE_DWELL_SEC and differs from current_state
+   218:     if head != current_state:
+   219:         # Guard if last_display_switch somehow wasn't set
+   220:         last_sw = last_display_switch or now
+   221:         if (now - last_sw).total_seconds() >= STATE_DWELL_SEC:
+   222:             state_queue.popleft()
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 218
+--------------------------------------------------------------------------------
+   213:         return
+   214: 
+   215:     head = state_queue[0]
+   216: 
+   217:     # Pop head after it has been displayed for STATE_DWELL_SEC and differs from current_state
+   218:     if head != current_state:
+   219:         # Guard if last_display_switch somehow wasn't set
+   220:         last_sw = last_display_switch or now
+   221:         if (now - last_sw).total_seconds() >= STATE_DWELL_SEC:
+   222:             state_queue.popleft()
+   223:             last_display_switch = now
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 247
+--------------------------------------------------------------------------------
+   242: # -------------------------------
+   243: # Tailer → GUI ingestion
+   244: # -------------------------------
+   245: def _consume_line(line: str):
+   246:     """Ingest one log line; route to Chat or Logs; request UI refresh."""
+   247:     global last_update_ts, current_state, _chat_dirty, _log_dirty, _refresh_needed, _last_state_log, hb_seconds
+   248: 
+   249:     # Normalize
+   250:     if line.endswith("\n"):
+   251:         line = line[:-1]
+   252:     s = (line or "")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 311
+--------------------------------------------------------------------------------
+   306:             new_state = "SPEAKING"
+   307: 
+   308:     # Apply state if valid and changed (whitelist to block junk like "TE")
+   309:     if new_state:
+   310:         candidate = (new_state or "").strip().upper()
+   311:         if candidate in VALID_STATES and candidate != current_state:
+   312:             old_state = current_state
+   313:             current_state = candidate
+   314:             if not state_queue or state_queue[-1] != candidate:
+   315:                 state_queue.append(candidate)
+   316:             if not has_state_tag:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 312
+--------------------------------------------------------------------------------
+   307: 
+   308:     # Apply state if valid and changed (whitelist to block junk like "TE")
+   309:     if new_state:
+   310:         candidate = (new_state or "").strip().upper()
+   311:         if candidate in VALID_STATES and candidate != current_state:
+   312:             old_state = current_state
+   313:             current_state = candidate
+   314:             if not state_queue or state_queue[-1] != candidate:
+   315:                 state_queue.append(candidate)
+   316:             if not has_state_tag:
+   317:                 syn = f"[STATE] {old_state} -> {candidate}"
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 313
+--------------------------------------------------------------------------------
+   308:     # Apply state if valid and changed (whitelist to block junk like "TE")
+   309:     if new_state:
+   310:         candidate = (new_state or "").strip().upper()
+   311:         if candidate in VALID_STATES and candidate != current_state:
+   312:             old_state = current_state
+   313:             current_state = candidate
+   314:             if not state_queue or state_queue[-1] != candidate:
+   315:                 state_queue.append(candidate)
+   316:             if not has_state_tag:
+   317:                 syn = f"[STATE] {old_state} -> {candidate}"
+   318:                 if _last_state_log != syn:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 471
+--------------------------------------------------------------------------------
+   466:             # Maintain queued-state dwell progression
+   467:             _advance_state_if_needed()
+   468: 
+   469:             # Auto-snap from SPEAKING to SLEEPING after idle
+   470:             try:
+   471:                 if current_state == "SPEAKING" and last_update_ts:
+   472:                     idle = (datetime.now() - last_update_ts).total_seconds()
+   473:                     if idle >= SPEAKING_IDLE_SEC:
+   474:                         globals()["current_state"] = "SLEEPING"
+   475:                         globals()["_refresh_needed"] = True
+   476:             except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 474
+--------------------------------------------------------------------------------
+   469:             # Auto-snap from SPEAKING to SLEEPING after idle
+   470:             try:
+   471:                 if current_state == "SPEAKING" and last_update_ts:
+   472:                     idle = (datetime.now() - last_update_ts).total_seconds()
+   473:                     if idle >= SPEAKING_IDLE_SEC:
+   474:                         globals()["current_state"] = "SLEEPING"
+   475:                         globals()["_refresh_needed"] = True
+   476:             except Exception:
+   477:                 pass
+   478: 
+   479:             # Redraw panes only if something changed (chat/log/state/persona)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: current_state @ line 614
+--------------------------------------------------------------------------------
+   609: 
+   610:                 # e) Attach dev tools if enabled
+   611:                 try:
+   612:                     if attach_dev_tools is not None and os.getenv("PIPER_UI_DEV_INPUT", "0") == "1":
+   613:                         dev_handle = attach_dev_tools(
+   614:                             get_state=lambda: globals().get("current_state", "?"),
+   615:                             get_queue=lambda: list(globals().get("state_queue", [])),
+   616:                             get_last_ts=lambda: globals().get("last_update_ts", None),
+   617:                             log_emit=_emit_to_logs,
+   618:                             tone_for_line=_tone_for_line,
+   619:                             badge_for_logs=_badge_for_logs,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: current_state @ line 9
+--------------------------------------------------------------------------------
+     4: import argparse, os, sys, shutil
+     5: from pathlib import Path
+     6: 
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 48
+--------------------------------------------------------------------------------
+    43:     if s.startswith("? ") or "Tailing:" in s or s.startswith("[GUI]"): return False
+    44:     if "[TTS]" in s: return True
+    45:     if s.lstrip().startswith(">"): return True
+    46:     return False
+    47: 
+    48: def advance_state_queue(state_queue: Deque[str], current_state: str, last_display_switch, dwell_sec: float):
+    49:     """Advance queued transient states after dwell; returns (state_queue, last_display_switch, changed:bool)."""
+    50:     from datetime import datetime as _dt
+    51:     changed = False
+    52:     now = _dt.now()
+    53:     if not state_queue:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 54
+--------------------------------------------------------------------------------
+    49:     """Advance queued transient states after dwell; returns (state_queue, last_display_switch, changed:bool)."""
+    50:     from datetime import datetime as _dt
+    51:     changed = False
+    52:     now = _dt.now()
+    53:     if not state_queue:
+    54:         state_queue.append(current_state)
+    55:         return state_queue, now, True
+    56:     head = state_queue[0]
+    57:     if head != current_state:
+    58:         last_sw = last_display_switch or now
+    59:         if (now - last_sw).total_seconds() >= dwell_sec:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 57
+--------------------------------------------------------------------------------
+    52:     now = _dt.now()
+    53:     if not state_queue:
+    54:         state_queue.append(current_state)
+    55:         return state_queue, now, True
+    56:     head = state_queue[0]
+    57:     if head != current_state:
+    58:         last_sw = last_display_switch or now
+    59:         if (now - last_sw).total_seconds() >= dwell_sec:
+    60:             state_queue.popleft()
+    61:             return state_queue, now, True
+    62:     return state_queue, last_display_switch, changed
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 81
+--------------------------------------------------------------------------------
+    76: def consume_line(
+    77:     line: str,
+    78:     *,
+    79:     log_buffer: Deque[str],
+    80:     chat_buffer: Deque[str],
+    81:     current_state: str,
+    82:     last_update_ts,
+    83:     last_state_log: str | None,
+    84:     style_line,
+    85:     heartbeat,
+    86: ) -> Tuple[str, object, str | None, bool, bool]:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 88
+--------------------------------------------------------------------------------
+    83:     last_state_log: str | None,
+    84:     style_line,
+    85:     heartbeat,
+    86: ) -> Tuple[str, object, str | None, bool, bool]:
+    87:     """Normalize one CLI line, update buffers/state, and return:
+    88:        (current_state, last_update_ts, last_state_log, chat_dirty, log_dirty)"""
+    89:     from datetime import datetime as _dt
+    90:     chat_dirty = log_dirty = False
+    91:     if line.endswith("\n"): line = line[:-1]
+    92:     s = (line or ""); low = s.lower()
+    93: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 95
+--------------------------------------------------------------------------------
+    90:     chat_dirty = log_dirty = False
+    91:     if line.endswith("\n"): line = line[:-1]
+    92:     s = (line or ""); low = s.lower()
+    93: 
+    94:     if AVAILABLE_STATES_BANNER_RE.search(s):
+    95:         return current_state, last_update_ts, last_state_log, chat_dirty, log_dirty
+    96: 
+    97:     # Count only meaningful lines for the header heartbeat
+    98:     is_noise = ("[tail]" in low) or low.startswith("[dev][trace]") or s.startswith("[GUI]")
+    99:     if not is_noise:
+   100:         last_update_ts = _dt.now()
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 120
+--------------------------------------------------------------------------------
+   115:     # State detection
+   116:     has_state_tag = "[STATE]" in s
+   117:     new_state = detect_new_state(s)
+   118:     if new_state:
+   119:         candidate = (new_state or "").strip().upper()
+   120:         if candidate in VALID_STATES and candidate != current_state:
+   121:             old_state = current_state
+   122:             current_state = candidate
+   123:             syn = f"[STATE] {old_state} -> {candidate}"
+   124:             if not has_state_tag and (last_state_log or "") != syn:
+   125:                 try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 121
+--------------------------------------------------------------------------------
+   116:     has_state_tag = "[STATE]" in s
+   117:     new_state = detect_new_state(s)
+   118:     if new_state:
+   119:         candidate = (new_state or "").strip().upper()
+   120:         if candidate in VALID_STATES and candidate != current_state:
+   121:             old_state = current_state
+   122:             current_state = candidate
+   123:             syn = f"[STATE] {old_state} -> {candidate}"
+   124:             if not has_state_tag and (last_state_log or "") != syn:
+   125:                 try:
+   126:                     log_buffer.append(style_line(syn, tone="status"))
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 122
+--------------------------------------------------------------------------------
+   117:     new_state = detect_new_state(s)
+   118:     if new_state:
+   119:         candidate = (new_state or "").strip().upper()
+   120:         if candidate in VALID_STATES and candidate != current_state:
+   121:             old_state = current_state
+   122:             current_state = candidate
+   123:             syn = f"[STATE] {old_state} -> {candidate}"
+   124:             if not has_state_tag and (last_state_log or "") != syn:
+   125:                 try:
+   126:                     log_buffer.append(style_line(syn, tone="status"))
+   127:                 except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_ingest.py
+HIT: current_state @ line 154
+--------------------------------------------------------------------------------
+   149:         if ("[TTS]" in s) or s.lstrip().startswith(">"):
+   150:             chat_buffer.append(s.strip()); chat_dirty = True
+   151:         if any(tag in s for tag in ("[STATE]","[EVENT]","[Tail]","[GUI]","[PERSONA]","[TONE]","[SARCASM]")) or ("error" in low):
+   152:             log_buffer.append(badge_for_logs(s)); log_dirty = True
+   153: 
+   154:     return current_state, last_update_ts, last_state_log, chat_dirty, log_dirty
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\refresh_core.py
+HIT: current_state @ line 194
+--------------------------------------------------------------------------------
+   189:         adapters = build_dev_adapters(_hb, _shorten_path)
+   190: 
+   191:         lazy_mount_under_logs(LOG_SCROLL, LOG_TEXT, adapters=adapters)
+   192:     except Exception:
+   193:         pass
+   194:     # ---- Ensure state dot matches the actual current_state (UI thread safe) ----
+   195:     try:
+   196:         from scripts.ui.pane_parts import header_bar as _hb
+   197:         _name = str(globals().get("current_state", "")).strip().upper()
+   198:         if _name:
+   199:             _hb.set_state_dot(_name)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\refresh_core.py
+HIT: current_state @ line 197
+--------------------------------------------------------------------------------
+   192:     except Exception:
+   193:         pass
+   194:     # ---- Ensure state dot matches the actual current_state (UI thread safe) ----
+   195:     try:
+   196:         from scripts.ui.pane_parts import header_bar as _hb
+   197:         _name = str(globals().get("current_state", "")).strip().upper()
+   198:         if _name:
+   199:             _hb.set_state_dot(_name)
+   200:     except Exception:
+   201:         pass
+   202: 

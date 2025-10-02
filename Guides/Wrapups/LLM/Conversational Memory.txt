@@ -1,0 +1,36 @@
+## Chapter M01 — Conversational Memory v1
+**Baseline:** KGB-2025-09-28_I01_streaming_cancel_bl
+
+### M01.1 — Memory Store Scaffold
+- **Scope:** ✅ Services only
+- **Plan:** File-backed JSONL episodic store.
+- **Patch summary:** New `services/memory_store.py` with append_episode(), latest(), env-driven path.
+- **Smoke:**
+  - Appended 3 dummy episodes; latest() returned them in order.
+  - File created, JSON lines valid.
+- **KGB:** KGB-2025-09-29_M01.1_mem_store_scaffold
+
+### M01.2 — Policy v1
+- **Scope:** ✅ Services only
+- **Plan:** Deterministic summarizer (≤200 chars), conservative threshold gate.
+- **Patch summary:** New `services/memory_policy.py` with summarize_recent() + choose_write().
+- **Smoke:**
+  - Short chat → summary 25 chars → no write.
+  - Long chat → summary 185 chars → write approved.
+- **KGB:** KGB-2025-09-29_M01.2_mem_policy_v1
+
+### M01.3 — Glue Integration
+- **Scope:** ✅ UI hooks only
+- **Plan:** After assistant turn, attempt memory summarization + gated write.
+- **Patch summary:** `ui/hooks/llm_chat.py` updated with memory glue, try/except guard.
+- **Smoke:**
+  - GUI test: after long reply, `logs/memory_episodes.jsonl` appended with summary.
+  - Write skipped gracefully when policy blocked or SAFE_MODE active.
+  - GUI remained responsive, no crashes.
+- **KGB:** KGB-2025-09-29_M01.3_mem_glue_ok
+
+**Guardrail compliance:**
+- No embeddings or background daemons.
+- Writes are synchronous and fast (<100 ms).
+- State integrity: one assistant turn → at most one appended episode.
+- Confirmed memory is file-backed and path configurable via env.

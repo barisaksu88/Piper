@@ -1,0 +1,180 @@
+﻿"""B04.13b refresh core â€” extracted from ui/panes.py (behavior-preserving)."""
+from __future__ import annotations
+
+# --- imports the function relied on when refresh_ui lived in panes.py ---
+import dearpygui.dearpygui as dpg
+from scripts.ui.helpers.scroll_utils import (
+    is_at_bottom,
+    scroll_to_bottom_next_frame,
+)
+from scripts.ui.helpers.dev_controls_mount import lazy_mount_under_logs
+from scripts.ui.helpers.dev_adapters import build_dev_adapters
+from scripts.ui.helpers.layout_utils import apply_wraps_if_present, update_bottom_padding_if_present
+# Layout constants (wrap widths & bottom pads) â€” fall back to 0 if not defined
+try:
+    from scripts.ui.layout_constants import CHAT_WRAP, LOG_WRAP, CHAT_BOTTOM_PAD, LOG_BOTTOM_PAD
+except Exception:
+    CHAT_WRAP = 0
+    LOG_WRAP = 0
+    CHAT_BOTTOM_PAD = 0
+    LOG_BOTTOM_PAD = 0
+# optional component delegates
+try:
+    from scripts.ui.components.chat_pane import refresh as _chat_refresh
+except Exception:
+    _chat_refresh = None
+try:
+    from scripts.ui.components.logs_pane import refresh as _logs_refresh
+except Exception:
+    _logs_refresh = None
+
+# Refresh bridge must not own header/state
+_FORBIDDEN = ("set_state_dot", "hb_label", "set_hb_text", "[STATE]")
+
+# local copy of a tiny utility that used to live next to refresh_ui
+def first_existing_tag(candidates):
+    for t in candidates:
+        try:
+            if dpg.does_item_exist(t):
+                return t
+        except Exception:
+            pass
+    return None
+
+def refresh_ui(
+    state_text: str,
+    heartbeat_text: str,
+    chat_text: str,
+    log_text: str,
+    chat_dirty: bool,
+    log_dirty: bool
+) -> None:
+    """Update header + panes; ensure text widgets exist; handle autoscroll + badges."""
+    # ---- Resolve scroll regions & text widgets (accept legacy tag names) ----
+    def first_existing_tag(cands):
+        for t in cands:
+            try:
+                if dpg.does_item_exist(t):
+                    return t
+            except Exception:
+                pass
+        return None
+
+    # expected tags
+    CHAT_SCROLL = first_existing_tag(["chat_scroll", "chat_view"])
+    LOG_SCROLL  = first_existing_tag(["logs_scroll", "log_scroll"])
+
+    # resolve actual scroll containers once (covers alternates used in panes)
+    CHAT_SCROLL_RES = first_existing_tag(["chat_scroll", "chat_view", "chat_region"])
+    LOG_SCROLL_RES  = first_existing_tag(["logs_scroll", "log_scroll", "log_view", "logs_view", "logs_region"])
+    CHAT_TEXT   = first_existing_tag(["chat_text", "chat_buffer"])
+    LOG_TEXT    = first_existing_tag(["log_text", "logs_text", "log_buffer"])
+
+    # Create missing text widgets under their scroll parents so set_value works
+    try:
+        if CHAT_SCROLL and not CHAT_TEXT and dpg.does_item_exist(CHAT_SCROLL):
+            dpg.add_text("", parent=CHAT_SCROLL, tag="chat_text")
+            CHAT_TEXT = "chat_text"
+    except Exception:
+        pass
+    try:
+        if LOG_SCROLL and not LOG_TEXT and dpg.does_item_exist(LOG_SCROLL):
+            dpg.add_text("", parent=LOG_SCROLL, tag="log_text")
+            LOG_TEXT = "log_text"
+    except Exception:
+        pass
+
+    # ---- Autoscroll intent: remember whether user was at bottom BEFORE update ----
+    chat_was_bottom = False
+    log_was_bottom  = False
+    try:
+        if CHAT_SCROLL_RES:
+            # threshold scales so “near bottom” still counts with breathing room
+            thr = 48
+            try:
+                thr = max(48, int((dpg.get_item_height(CHAT_SCROLL_RES) or 0) * 0.20))
+            except Exception:
+                pass
+            chat_was_bottom = is_at_bottom(CHAT_SCROLL_RES, thr)
+    except Exception:
+        pass
+    try:
+        if LOG_SCROLL_RES:
+            log_was_bottom = is_at_bottom(LOG_SCROLL_RES)
+    except Exception:
+        pass
+    # ---- Apply wrap widths + ensure bottom padding spacers ----
+    try:
+        apply_wraps_if_present(["chat_text", "chat_buffer"], CHAT_WRAP)
+        apply_wraps_if_present(["log_text", "logs_text", "log_buffer"], LOG_WRAP)
+    except Exception:
+        pass
+    try:
+        # derive pads if constants are zero/missing
+        chat_pad = CHAT_BOTTOM_PAD
+        if not isinstance(chat_pad, int) or chat_pad <= 0:
+            try:
+                chat_pad = int((dpg.get_item_height(CHAT_SCROLL_RES) or 0) * 0.25) if CHAT_SCROLL_RES else 0
+            except Exception:
+                chat_pad = 0
+
+        log_pad = LOG_BOTTOM_PAD
+        if not isinstance(log_pad, int) or log_pad <= 0:
+            try:
+                log_pad = int((dpg.get_item_height(LOG_SCROLL_RES) or 0) * 0.15) if LOG_SCROLL_RES else 0
+            except Exception:
+                log_pad = 0
+
+        update_bottom_padding_if_present(["chat_scroll", "chat_view", "chat_region"], chat_pad)
+        update_bottom_padding_if_present(["logs_scroll", "log_scroll", "log_view", "logs_view", "logs_region"], log_pad)
+    except Exception:
+        pass
+
+    # ---- Write buffers when dirty (safe if widget tags are missing) ----
+    # ---- Write chat ----
+    try:
+        if chat_dirty:
+            if _chat_refresh is not None:
+                _chat_refresh(chat_text or "", chat_was_bottom)
+            elif CHAT_TEXT:
+                dpg.set_value(CHAT_TEXT, chat_text or "")
+    except Exception:
+        pass
+
+    # ---- Write logs ----
+    try:
+        if log_dirty:
+            if _logs_refresh is not None:
+                _logs_refresh(log_text or "", log_was_bottom)
+            elif LOG_TEXT:
+                dpg.set_value(LOG_TEXT, log_text or "")
+    except Exception:
+        pass
+
+    # ---- If user was already at bottom, keep them at bottom after update ----
+    try:
+        if chat_was_bottom and log_was_bottom:
+            # one callback, scroll both; avoids callback overwrite
+            scroll_to_bottom_next_frame([CHAT_SCROLL_RES, LOG_SCROLL_RES])
+        else:
+            if chat_was_bottom and CHAT_SCROLL_RES:
+                scroll_to_bottom_next_frame(CHAT_SCROLL_RES)
+            if log_was_bottom and LOG_SCROLL_RES:
+                scroll_to_bottom_next_frame(LOG_SCROLL_RES)
+    except Exception:
+        pass
+    # ---- Dev controls: lazy mount under logs (no dependencies on _hb/_shorten_path) ----
+    try:
+        try:
+            from scripts.ui.helpers.tag_utils import shorten_path as _shorten_path
+        except Exception:
+            try:
+                from ui.helpers.tag_utils import shorten_path as _shorten_path
+            except Exception:
+                _shorten_path = (lambda p: p)
+
+        adapters = build_dev_adapters(_hb, _shorten_path)
+
+        lazy_mount_under_logs(LOG_SCROLL, LOG_TEXT, adapters=adapters)
+    except Exception:
+        pass

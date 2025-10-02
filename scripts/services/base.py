@@ -1,0 +1,16 @@
+﻿# scripts/services/base.py
+# Ringâ€‘1 Services: minimal contracts (names only; no behavior).
+from __future__ import annotations
+from typing import Protocol, Optional
+
+class TTSSvc(Protocol):
+    def start(self, text: str) -> None: ...
+    def stop(self) -> None: ...
+
+class WakeSvc(Protocol):
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+
+class ASRSvc(Protocol):
+    def listen(self, timeout: Optional[float] = None) -> Optional[str]: ...
+

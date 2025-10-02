@@ -1,0 +1,48 @@
+﻿"""
+B04.7 Dev Controls lazy-mount helper (extracted from ui/panes.py).
+No behavior change; just relocation.
+"""
+from __future__ import annotations
+import os
+import dearpygui.dearpygui as dpg
+from scripts.ui.components.controls_pane import build as dev_controls_build
+import os
+
+# Only allow embedding when explicitly requested (default off).
+_DEV_EMBED = os.environ.get("PIPER_UI_DEV_EMBED", "0") == "1"
+
+def lazy_mount_under_logs(log_scroll_tag, log_text_tag, adapters=None) -> bool:
+    """
+    If PIPER_UI_DEV_INPUT is set and not mounted yet, mount dev controls
+    under the parent of Logs (scroll region preferred, else logs text).
+    Returns True if mounted this call, False otherwise.
+    """
+    # Respect global embed gate; do nothing unless enabled.
+    if not _DEV_EMBED:
+        return False
+    # Respect global embed gate; do nothing unless enabled.
+    if not os.environ.get("PIPER_UI_DEV_EMBED", "0") == "1":
+        return False
+    if not os.getenv("PIPER_UI_DEV_INPUT"):
+        return False
+    if globals().get("_B02_controls_mounted"):
+        return True
+
+    parent = None
+    if log_scroll_tag:
+        try:
+            parent = dpg.get_item_parent(log_scroll_tag)
+        except Exception:
+            parent = None
+    if not parent and log_text_tag:
+        try:
+            parent = dpg.get_item_parent(log_text_tag)
+        except Exception:
+            parent = None
+
+    if parent:
+        dev_controls_build(parent=parent, adapters=adapters)
+        globals()["_B02_controls_mounted"] = True
+        return True
+    return False
+

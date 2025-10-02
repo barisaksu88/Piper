@@ -1,0 +1,286 @@
+# C:\Piper\scripts\ui\dev_tools.py
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Callable, Iterable, Optional
+
+import dearpygui.dearpygui as dpg
+
+# Lazy import to avoid hard dependency when flag is off
+try:
+    from .ipc_child import spawn_cli
+except Exception:
+    try:
+        from ui.ipc_child import spawn_cli  # runtime path variant
+    except Exception:
+        spawn_cli = None  # type: ignore
+
+@dataclass
+class DevTools:
+    """Handle to dev-only UI + child CLI."""
+    stop_fn: Callable[[], None]
+
+    def stop(self) -> None:
+        try:
+            self.stop_fn()
+        except Exception:
+            pass
+
+# Types for callbacks we receive from the GUI entry (we don't touch its globals)
+GetStr = Callable[[], str]
+GetDeque = Callable[[], Iterable[str]]
+GetTs = Callable[[], Optional[object]]
+LogEmit = Callable[[str, str], None]  # (text, tone)
+
+def _emit_trace(log_emit: LogEmit, text: str) -> None:
+    try:
+        log_emit(text, "status")
+    except Exception:
+        pass
+
+def attach_dev_tools(
+    *,
+    get_state: GetStr,
+    get_queue: GetDeque,
+    get_last_ts: GetTs,
+    log_emit: LogEmit,
+    tone_for_line: Callable[[str], str],
+    badge_for_logs: Callable[[str], str],
+) -> Optional[DevTools]:
+    """
+    Build a single 'Dev Tools' window (tabs: Input / State / Persona) and attach CLI child.
+    Returns a DevTools handle or None if disabled/unavailable.
+    """
+    if os.getenv("PIPER_UI_DEV_INPUT", "0") != "1" or spawn_cli is None:
+        _emit_trace(log_emit, "[DEV][TRACE] Dev tools disabled or spawn_cli=None")
+        return None
+
+    cli_child = None
+
+    # ---- child attach
+    def _on_cli_line(line: str) -> None:
+        try:
+            s = badge_for_logs(line)
+        except Exception:
+            s = line
+        try:
+            log_emit(s, tone_for_line(s))
+        except Exception:
+            log_emit(s, "info")
+
+    try:
+        cli_child = spawn_cli(on_line=_on_cli_line)
+        _emit_trace(log_emit, "[DEV] Attached CLI child (IN01)")
+    except Exception as e:
+        log_emit(f"[DEV][WARN] Failed to attach CLI child: {e}", "error")
+        cli_child = None
+
+    # ----- Unified Dev Tools window with tabs
+    with dpg.window(label="Dev Tools", tag="dev_tools_win", width=420, height=200, pos=(150, 400), no_collapse=False):
+        with dpg.tab_bar(tag="dev_tabbar"):
+
+            # --- Tab 1: Input ---
+            with dpg.tab(label="Input", tag="dev_tab_input"):
+                def _dev_send_text(sender=None, app_data=None, user_data=None):
+                    # 1) Read text, ignore empties
+                    try:
+                        text = dpg.get_value("dev_input_text") or ""
+                    except Exception:
+                        text = ""
+                    if not text.strip():
+                        return
+
+                    # 2) Send to child CLI
+                    ok = False
+                    try:
+                        if cli_child is not None:
+                            ok = cli_child.write(text)
+                    except Exception:
+                        ok = False
+
+                    # 3) Echo result to Logs (so you see success/failure)
+                    log_emit(f"[DEV][Send] {'OK' if ok else 'FAIL'}: {text.strip()}", "status" if ok else "error")
+
+                    # 4) Clear input on success
+                    if ok:
+                        try:
+                            dpg.set_value("dev_input_text", "")
+                        except Exception:
+                            pass
+
+                    # 5) Optional demo sequence â€” FLAG-GATED & GUARDED to avoid collisions
+                    #    Turn ON only when you want staged hops:
+                    #    PowerShell:  $env:PIPER_UI_DEV_SEQUENCE=1
+                    #    Bash:        export PIPER_UI_DEV_SEQUENCE=1
+                    try:
+                        if os.getenv("PIPER_UI_DEV_SEQUENCE", "0") == "1":
+                            def _after_frames(n, fn):
+                                try:
+                                    dpg.set_frame_callback(dpg.get_frame_count() + int(n), lambda s=None, a=None: fn())
+                                except Exception:
+                                    pass
+
+                            cmd = (text or "").strip().lower()
+                            if ok and cmd == "wake":
+                                # Immediate hint for visibility
+                                log_emit("[STATE] SLEEPING -> WAKING", "status")
+
+                                # Only promote to LISTENING if still at WAKING
+                                def _to_listening():
+                                    try:
+                                        if (get_state() or "").upper() == "WAKING":
+                                            log_emit("[STATE] WAKING -> LISTENING", "status")
+                                    except Exception:
+                                        pass
+
+                                # Only promote to SPEAKING if still at LISTENING
+                                def _to_speaking():
+                                    try:
+                                        if (get_state() or "").upper() == "LISTENING":
+                                            log_emit("[STATE] LISTENING -> SPEAKING", "status")
+                                    except Exception:
+                                        pass
+
+                                _after_frames(21, _to_listening)  # ~0.35s
+                                _after_frames(42, _to_speaking)   # ~0.70s
+
+                            elif ok and cmd == "sleep":
+                                # Collapse to SLEEPING from whatever we are at that moment
+                                try:
+                                    cur = (get_state() or "?").upper()
+                                except Exception:
+                                    cur = "?"
+                                log_emit(f"[STATE] {cur} -> SLEEPING", "status")
+                    except Exception:
+                        # Never let the optional demo sequence break input
+                        pass
+
+                dpg.add_input_text(
+                    tag="dev_input_text",
+                    label="Send to CLI",
+                    hint="Type a command, press Enter",
+                    on_enter=True,
+                    callback=_dev_send_text,
+                    width=320,
+                )
+
+                # --- IN05: Injectors (UI-only) ---
+                def _inject_log(sender=None, app_data=None, user_data=None):
+                    try:
+                        txt = dpg.get_value("dev_input_text") or "demo log line"
+                    except Exception:
+                        txt = "demo log line"
+                    # Send directly to Logs (no Core) with a DEV prefix
+                    log_emit(f"[DEV] {txt}", "info")
+
+                def _inject_error(sender=None, app_data=None, user_data=None):
+                    # Minimal error marker; our sanitizer will add [ERR]
+                    log_emit("RuntimeError: demo error (IN05)", "error")
+                
+                def _inject_chat(sender=None, app_data=None, user_data=None):
+                    # Chat-only injection: use '>' so it routes to Chat via _consume_line, not Logs
+                    try:
+                        txt = dpg.get_value("dev_input_text") or "demo chat line"
+                    except Exception:
+                        txt = "demo chat line"
+                    log_emit(f"> {txt}", "info")
+
+                # Modern replacement for add_same_line(): group buttons horizontally
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Send", callback=_dev_send_text)
+                    dpg.add_button(label="Inj Chat (UI-only)", callback=_inject_chat)
+                    dpg.add_button(label="Inj Log [DEV]", callback=_inject_log)
+                    dpg.add_button(label="Inj Error [DEV]", callback=_inject_error)
+
+            # --- Tab 2: State ---
+            with dpg.tab(label="State", tag="dev_tab_state"):
+                dpg.add_text("State:", tag="dev_state_label")
+                dpg.add_text("Queued:", tag="dev_state_queue")
+                dpg.add_text("Last update:", tag="dev_state_age")
+                dpg.add_spacer(height=4)
+
+                # UI-only state preview dropdown that emits a control line the GUI ingests
+                try:
+                    current = (get_state() or "SLEEPING").upper()
+                except Exception:
+                    current = "SLEEPING"
+
+                try:
+                    dpg.add_combo(
+                        items=["SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"],
+                        default_value=current,
+                        label="Preview state (UI-only)",
+                        width=220,
+                        tag="dev_state_preview_combo",
+                        callback=lambda s, a, u: log_emit(
+                            f"[STATE] { (get_state() or '?').upper() } -> { str(a).upper() }",
+                            "status",
+                        ),
+                    )
+                except Exception:
+                    pass
+
+                # periodic refresher for labels
+                def _dev_state_tick():
+                    try:
+                        dpg.set_value("dev_state_label", f"State: {get_state()}")
+                    except Exception:
+                        pass
+                    try:
+                        q = list(get_queue())
+                        dpg.set_value("dev_state_queue", "Queued: " + (" / ".join(q) if q else "-"))
+                    except Exception:
+                        pass
+                    try:
+                        ts = get_last_ts()
+                        if ts is None:
+                            age = "-"
+                        else:
+                            from datetime import datetime as _dt
+                            age = f"{int((_dt.now()-ts).total_seconds())}s ago"
+                        dpg.set_value("dev_state_age", f"Last update: {age}")
+                    except Exception:
+                        pass
+                    try:
+                        dpg.set_frame_callback(dpg.get_frame_count() + 15, _dev_state_tick)
+                    except Exception:
+                        pass
+
+                try:
+                    dpg.set_frame_callback(dpg.get_frame_count() + 15, _dev_state_tick)
+                except Exception:
+                    pass
+
+            # --- Tab 3: Persona ---
+            with dpg.tab(label="Persona", tag="dev_tab_persona"):
+                dpg.add_combo(
+                    items=["neutral", "friendly", "professional", "playful", "serious"],
+                    default_value="neutral",
+                    label="Tone",
+                    width=220,
+                    callback=lambda s, a, u: log_emit(
+                        f"[PERSONA] tone={a} sarcasm={'on' if dpg.get_value('dev_persona_sarcasm') else 'off'}",
+                        "status",
+                    ),
+                    tag="dev_persona_tone",
+                )
+                dpg.add_checkbox(
+                    label="Sarcasm",
+                    default_value=False,
+                    tag="dev_persona_sarcasm",
+                    callback=lambda s, a, u: log_emit(
+                        f"[PERSONA] tone={dpg.get_value('dev_persona_tone')} sarcasm={'on' if a else 'off'}",
+                        "status",
+                    ),
+                )
+
+    # stop/cleanup
+    def _stop():
+        try:
+            if cli_child is not None:
+                cli_child.stop()
+        except Exception:
+            pass
+
+    return DevTools(stop_fn=_stop)

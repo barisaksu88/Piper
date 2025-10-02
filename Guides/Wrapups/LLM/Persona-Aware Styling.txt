@@ -1,0 +1,60 @@
+Compliance Block
+
+Chapter: LLM08
+Rail: LLM08.1 — Style Hook in Streaming
+Scope: ✅
+Plan: Route provider output through services.llm_style.apply_style() for both single-shot and streaming; guard errors.
+Patch summary:
+
+services/llm_style.py: kept legacy PIPER_LLM_STYLE (plain/pilot/snark); added persona knobs; never raises.
+
+services/llm_client.py: calls apply_style() for generate() and for each streamed chunk; styles timeout fallback; resolves persona from env.
+
+ui/hooks/llm_chat.py: header stamped; no styling logic inside.
+Smoke:
+
+Echo + default env → unchanged text.
+
+Force style error → stream continues raw with one error log.
+KGB: KGB-2025-09-28_LLM08.1_style_stream
+Notes/Parking: none.
+
+Chapter: LLM08
+Rail: LLM08.2 — Env-Driven Persona/Tone
+Scope: ✅
+Plan: Wire PIPER_PERSONA_TONE and PIPER_PERSONA_SARCASM; env wins over caller persona.
+Patch summary:
+
+_resolve_persona_env() in client; _coalesce_persona() in style.
+Smoke:
+
+PIPER_PERSONA_SARCASM=1 → streamed chunks and single-shot replies include 😏.
+KGB: KGB-2025-09-28_LLM08.2_env_style
+Notes/Parking: “tone” reserved for LLM09 richer transforms.
+
+Chapter: LLM08
+Rail: LLM08.3 — Robustness
+Scope: ✅
+Plan: Ensure style failures never break streaming; log once on first chunk; continue raw.
+Patch summary: try/except around all style calls; timeout fallback also styled with guard.
+Smoke:
+
+Monkeypatched style to raise → stream outputs raw text; [ERR] style hook failed (first chunk): kaboom logged once.
+KGB: KGB-2025-09-28_LLM08.3_style_robust
+Notes/Parking: none.
+
+Final acceptance gates
+
+llm_client.py calls apply_style() in both paths ✅
+
+llm_style.py contract present; accepts persona/env ✅
+
+ui/hooks/llm_chat.py contract present; no styling ✅
+
+Env smokes demonstrate toggle ✅
+
+Grep checks:
+
+UI calls to apply_style → 0 hits
+
+Subprocess usage inside llm_style.py → 0 hits

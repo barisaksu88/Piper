@@ -1,0 +1,27 @@
+﻿# scripts/services/wake/porcupine_adapter.py
+# Ring-1 (Services): Wake adapter STUB for Porcupine.
+# Names/shape only; NOT wired. Safe to import anywhere.
+
+from __future__ import annotations
+from pathlib import Path
+
+class WakeSvc:
+    """Minimal interface surface (matching your 'base.py' suggestion)."""
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+
+def _ppn_ok() -> tuple[bool, str]:
+    p = PORCUPINE_PPN
+    if p is None:
+        return False, "No .ppn file found under assets/wake"
+    if not isinstance(p, Path):
+        return False, f"Invalid .ppn ref: {p!r}"
+    if not p.exists():
+        return False, f".ppn not found at {p}"
+    return True, f"ppn={p.name}"
+
+# Importâ€‘time sanity note (prints once if imported directly)
+_ok, _msg = _ppn_ok()
+print(f"[WAKE] porcupine_adapter stub ready ({'OK' if _ok else 'MISSING'}: {_msg})")
+
+__all__ = ["WakeSvc"]

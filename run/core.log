@@ -1,0 +1,2164 @@
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> I don't know that command. Try 'help'.
+> I don't know that command. Try 'help'.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 00:39.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 00:42.
+> Core version LL-R03.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Today is 2025-09-22.
+> The time is 01:24.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> I don't know that command. Try 'help'.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> I don't know that command. Try 'help'.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> The time is 01:41.
+> Today is 2025-09-22.
+> Core version LL-R03.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] ? -> LISTENING
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> I don't know that command. Try 'help'.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> demo chat line
+> demo chat line
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[DEV][Send] OK: help
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> WAKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> demo chat line
+> dghsh
+[DEV] dghsh
+RuntimeError: demo error (IN05)
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> I don't know that command. Try 'help'.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> wake
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+RuntimeError: demo error (IN05)
+[DEV] demo log line
+> demo chat line
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 01:07.
+> Today is 2025-09-24.
+> Core version LL-R03.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> sdagasd
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] sdagasd
+[DEV] sdagasd
+[DEV] sdagasd
+[DEV] sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+> sdagasd
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=neutral sarcasm=off
+[PERSONA] tone=neutral sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> THINKING
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> demo chat line
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 03:53.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[STATE] ? -> THINKING
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+> demo chat line
+[STATE] ? -> WAKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[STATE] ? -> LISTENING
+[STATE] ? -> SLEEPING
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 18:33.
+> Today is 2025-09-24.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[STATE] ? -> SPEAKING
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> I don't know that command. Try 'help'.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> Piper CLI - Core LL-R03. SAFE_MODE is ON.
+> The time is 19:11.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] demo log line
+[DEV] demo log line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+> demo chat line
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> gfdh
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> WAKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> WAKING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> gfdh
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> gfdh
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[STATE] ? -> THINKING
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=playful sarcasm=on
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+[DEV] gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[STATE] ? -> LISTENING
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> gfdh
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> gfdh
+[DEV] gfdh
+> gfdh
+[DEV] gfdh
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> I don't know that command. Try 'help'.
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=professional sarcasm=on
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+RuntimeError: demo error (IN05)
+[STATE] ? -> WAKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=playful sarcasm=on
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+[DEV] Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+RuntimeError: demo error (IN05)
+> Hello sir![TTS] Going to sleep.Hello sir!You: wrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrapwrap
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+> wake
+[STATE] ? -> LISTENING
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> demo chat line
+[STATE] ? -> THINKING
+[PERSONA] tone=playful sarcasm=on
+[PERSONA] tone=playful sarcasm=off
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=friendly sarcasm=off
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[STATE] ? -> WAKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=neutral sarcasm=off
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+RuntimeError: demo error (IN05)
+> demo chat line
+> demo chat line
+> demo chat line
+[DEV] demo log line
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> demo chat line
+[DEV] demo log line
+RuntimeError: demo error (IN05)
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake -> (LISTENING) -> type a command.
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> WAKING
+> demo chat line
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+> demo chat line
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[STATE] ? -> LISTENING
+[STATE] ? -> LISTENING
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> WAKING
+[STATE] ? -> THINKING
+[STATE] ? -> LISTENING
+[STATE] ? -> WAKING
+[STATE] ? -> THINKING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[STATE] ? -> THINKING
+[STATE] ? -> SPEAKING
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+> wake
+[DEV] wake
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[DEV] wake
+RuntimeError: demo error (IN05)
+> wake
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+[TTS] Going to sleep.
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[DEV] demo log line
+[STATE] ? -> LISTENING
+[PERSONA] tone=friendly sarcasm=off
+[PERSONA] tone=friendly sarcasm=on
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=off
+[PERSONA] tone=professional sarcasm=on
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+RuntimeError: demo error (IN05)
+[STATE] ? -> LISTENING
+[PERSONA] tone=professional sarcasm=on

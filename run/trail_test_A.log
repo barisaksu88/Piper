@@ -1,0 +1,1081 @@
+﻿✓ [STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING.
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake → (LISTENING) → type a command.
+> ✓ ✓ Going to sleep.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Hello sir!
+> The time is 23:30.
+> ✓ ✓ Going to sleep.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake → (LISTENING) → type a command.
+> Hello sir!
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake → (LISTENING) → type a command.
+> ✔ ✔ Bye.
+python : Traceback (most recent call last):
+At line:1 char:1
++ python -u -m scripts.entries.app_cli_entry 2>&1 | ForEach-Object {
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteE 
+   xception
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Python310\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Python310\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Piper\scripts\entries\app_cli_entry.py", line 111, in <module>
+    main()
+  File "C:\Piper\scripts\entries\app_cli_entry.py", line 108, in main
+    cm.run()
+  File "C:\Piper\scripts\entries\app_cli_entry.py", line 77, in _run_with_prompt
+    _cb(self._say, self._version)  # type: ignore[attr-defined]
+  File "C:\Piper\scripts\core\core_commands.py", line 13, in core_banner
+    say(f"[STATE] available_states={'|'.join(AVAILABLE_STATES)}", "status")
+  File "C:\Piper\scripts\entries\app_cli_entry.py", line 40, in _say
+    sys.stdout.write(out + "\n")
+  File "C:\Python310\lib\encodings\cp1254.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 0: character maps to
+ <undefined>
+✓ [STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING.
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+[EVENT] Tick 1.
+[STATE] SPEAKING -> LISTENING.
+> WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_#1
+[EVENT] Tick 2.
+[STATE] LISTENING -> SPEAKING.
+> WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_#2
+[EVENT] Tick 3.
+[STATE] SPEAKING -> LISTENING.
+> WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_#3
+[EVENT] Tick 4.
+[STATE] LISTENING -> SPEAKING.
+> WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_#4
+[EVENT] Tick 5.
+[STATE] SPEAKING -> LISTENING.
+> WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_WrapCheck_#5
+Traceback: DummyError_5.
+> Wrapped chat line demo.
+[STATE] LISTENING
+Traceback: DummyError_X
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Autoscroll probe #1
+> Autoscroll probe #2
+> Autoscroll probe #3
+> 
+✓ [STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING.
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake → (LISTENING) → type a command.
+> Hello sir!
+> ✓ ✓ Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> ✓ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake → (LISTENING) → type a command.
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> ✓ Going to sleep.
+> ✔ Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> ✓ Going to sleep.
+> Hello sir!
+> ✔ Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> ✔ Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> ✔ Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+✓ Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ÔåÆ (LISTENING) ÔåÆ type a command.
+> The time is 02:02.
+> I don't know that command. Try 'help'.
+> Today is 2025-09-06.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> 
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> The time is 22:58.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ÔåÆ (LISTENING) ÔåÆ type a command.
+> Core version LL-R03.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ÔåÆ (LISTENING) ÔåÆ type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Ô£ö Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ÔåÆ (LISTENING) ÔåÆ type a command.
+> The time is 23:37.
+> Ô£ö Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ÔåÆ (LISTENING) ÔåÆ type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+Ô£ô Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ├óÔÇáÔÇÖ (LISTENING) ├óÔÇáÔÇÖ type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ├óÔÇáÔÇÖ (LISTENING) ├óÔÇáÔÇÖ type a command.
+> Piper CLI ├óÔé¼ÔÇ£ Core LL-R03. SAFE_MODE is ON.
+> The time is 01:04.
+> Today is 2025-09-12.
+> Core version LL-R03.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ├óÔÇáÔÇÖ (LISTENING) ├óÔÇáÔÇÖ type a command.
+> ├ó┼ôÔÇØ Bye.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ├óÔÇáÔÇÖ (LISTENING) ├óÔÇáÔÇÖ type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+[STATE] available_states=SLEEPING|WAKING|LISTENING|THINKING|SPEAKING
+Piper is ready. Type 'wake' to greet or 'help' for commands.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> Commands: wake, sleep, about, time, date, version, help, exit.
+Flow: wake ├óÔÇáÔÇÖ (LISTENING) ├óÔÇáÔÇÖ type a command.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SLEEPING -> WAKING
+Hello sir!
+> [STATE] SPEAKING -> SLEEPING
+├ó┼ôÔÇ£ Going to sleep.
+> ├ó┼ôÔÇØ Bye.

@@ -1,0 +1,126 @@
+﻿# C:\Piper\scripts\services\persona_adapter.py
+# PV09 Persona/Voice ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ runtime profile save/load (export/import)
+from __future__ import annotations
+import sys, time
+
+# Try both import paths; this module never writes to personality.py
+def _import_persona():
+    try:
+        import personality as p; return p
+    except Exception:
+        try:
+            import personality as p; return p
+        except Exception:
+            return None
+
+personality = _import_persona()
+
+# -------- Defaults (safe fallbacks) --------
+_DEFAULT_GREETING = "Hello sir!"
+_DEFAULT_MAX_LEN  = 280
+_DEFAULT_TONE_PRESETS = {
+    "greet":      {"prefix": "",    "suffix": "", "end": "!"},
+    "info":       {"prefix": "",    "suffix": "", "end": "."},
+    "status":     {"prefix": "Ã¢Å“â€œ ",  "suffix": "", "end": "."},
+    "about":      {"prefix": "",    "suffix": "", "end": "."},
+    "confirm":    {"prefix": "Ã¢Å“â€œ ",  "suffix": "", "end": "."},
+    "thinking":   {"prefix": "Ã¢â‚¬Â¦ ",  "suffix": "", "end": "Ã¢â‚¬Â¦"},
+    "error":      {"prefix": "(!) ","suffix": "", "end": "."},
+    "error_hard": {"prefix": "Ã¢Å“â€“ ",  "suffix": "", "end": "."},
+    "neutral":    {"prefix": "",    "suffix": "", "end": "."},
+}
+
+# -------- Runtime overrides (None = follow personality.py) --------
+_runtime = {"sarcasm": None, "max_len": None, "tones": {}}
+
+# -------- Small helpers --------
+def _get_attr(name: str, default):
+    return getattr(personality, name, default) if personality else default
+
+def _persona_sarcasm_default() -> bool:
+    return bool(_get_attr("SARCASM", False))
+
+# -------- Compat shims (used by rehydrate) --------
+def set_greeting(v: str) -> None:
+    global _DEFAULT_GREETING
+    try: _DEFAULT_GREETING = str(v) if v is not None else _DEFAULT_GREETING
+    except Exception: pass
+
+def set_max_len_default(v: int) -> None:
+    global _DEFAULT_MAX_LEN
+    try:
+        v = int(v)
+        if v > 0: _DEFAULT_MAX_LEN = v
+    except Exception: pass
+
+def set_sarcasm_default(flag: bool) -> None:  # unused on purpose, no-op, API compat
+    return None
+
+def set_tones_default(presets: dict) -> None:
+    global _DEFAULT_TONE_PRESETS
+    try:
+        if isinstance(presets, dict):
+            merged = dict(_DEFAULT_TONE_PRESETS)
+            for k, cfg in presets.items():
+                if isinstance(cfg, dict):
+                    merged[k] = {**merged.get(k, {}), **cfg}
+            _DEFAULT_TONE_PRESETS = merged
+    except Exception: pass
+
+def _rehydrate_from_persona(mod) -> None:
+    try:
+        if hasattr(mod, "GREETING"): set_greeting(mod.GREETING)
+        if hasattr(mod, "MAX_LEN"): set_max_len_default(int(mod.MAX_LEN))
+        elif hasattr(mod, "MAX_RESPONSE_CHARS"): set_max_len_default(int(mod.MAX_RESPONSE_CHARS))
+        if hasattr(mod, "SARCASM"): set_sarcasm_default(bool(mod.SARCASM))
+        if hasattr(mod, "TONES"): set_tones_default(dict(mod.TONES))
+        elif hasattr(mod, "TONE_PRESETS"): set_tones_default(dict(mod.TONE_PRESETS))
+    except Exception:
+        pass
+
+# -------- Public API: reload --------
+_last_loaded_at = 0.0
+_last_load_error = None
+def set_runtime_sarcasm(value: bool | None): _runtime["sarcasm"] = value
+def set_runtime_max_len(value: int | None):
+    if value is None: _runtime["max_len"] = None; return
+    try: _runtime["max_len"] = max(10, int(value))
+    except Exception: pass
+def _get_base_tone_presets() -> dict:
+    presets = _get_attr("TONE_PRESETS", None) or _get_attr("TONES", None)
+    if not isinstance(presets, dict):
+        return dict(_DEFAULT_TONE_PRESETS)
+    merged = dict(_DEFAULT_TONE_PRESETS)
+    for k, v in presets.items():
+        if isinstance(v, dict):
+            merged[k] = {**merged.get(k, {}), **v}
+    return merged
+
+def _get_tone_presets() -> dict:
+    base = _get_base_tone_presets()
+    for tone, cfg in _runtime.get("tones", {}).items():
+        if isinstance(cfg, dict):
+            base[tone] = {**base.get(tone, {}), **cfg}
+    return base
+def _apply_style(text: str, tone: str, sarcasm: bool) -> str:
+    if not text: return text
+    t = str(text).strip()
+    p = _get_tone_presets().get((tone or "neutral").lower(), _get_tone_presets()["neutral"])
+    if p.get("end") and not t.endswith((".", "!", "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦")): t += p["end"]
+    if p.get("prefix"): t = f"{p['prefix']}{t}"
+    if p.get("suffix"): t = f"{t}{p['suffix']}"
+    if sarcasm:
+        aside = " (obviously)."
+        if len(t) + len(aside) <= max_len(): t += aside
+    return t
+
+def style_line(text: str, tone: str = "neutral", sarcasm: bool | None = None) -> str:
+    if sarcasm is None:
+        sarcasm = _runtime["sarcasm"] if _runtime["sarcasm"] is not None else _persona_sarcasm_default()
+    styled, limit = _apply_style(text, tone, sarcasm), max_len()
+    if len(styled) <= limit: return styled
+    ellipsis = "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦"
+    return styled[: max(0, limit - len(ellipsis))] + ellipsis
+
+
+

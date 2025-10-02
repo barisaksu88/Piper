@@ -1,0 +1,31 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: _pending_state_for_ui @ line 342
+--------------------------------------------------------------------------------
+   337:                 log_buffer.append(syn)
+   338:                 _log_dirty = True
+   339: 
+   340:             # Mark repaint and hand off the new state to the UI thread
+   341:             # UI-thread: apply pending state to dot + label once
+   342:             pending = globals().pop("_pending_state_for_ui", None)
+   343:             if pending:
+   344:                 current_state = str(pending)  # <-- make the closure var current
+   345:                 try:
+   346:                     try:
+   347:                         from scripts.ui.pane_parts import header_bar as _hb
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: _pending_state_for_ui @ line 9
+--------------------------------------------------------------------------------
+     4: import argparse, os, sys, shutil
+     5: from pathlib import Path
+     6: 
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]

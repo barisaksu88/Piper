@@ -1,0 +1,71 @@
+PIPER — RERAIL 2 WRAP-UP (Phase B04 → handoff to RERAIL 3)
+
+------------------------------------------------------------
+1. Overall Progress
+------------------------------------------------------------
+- GUI opens cleanly without runtime crashes.
+- CLI continues to function.
+- Import sanity tests all green except parked TTS modules.
+- File splitting progressed (Phase B04). Several helpers extracted from `panes.py`:
+  - `viewport_utils.py`
+  - `theme_utils.py`
+  - `tag_utils.py`
+  - `layout_constants.py` (now holds AVATAR constants)
+- Avatar, logs, chat windows all render in GUI (though avatar zoom & scroll issues remain).
+- Dev Tools window opens when `PIPER_UI_DEV_INPUT=1` is set.
+
+------------------------------------------------------------
+2. What Worked
+------------------------------------------------------------
+- Splitting oversized modules: `panes.py` and `app_gui_entry.py` shrinking in scope.
+- Constants consolidation: avatar sizes centralized in `layout_constants.py`.
+- Chat and log panes now render correctly after `_ensure_sink` was reintroduced properly.
+- Dev Tools toggle functional again.
+- Heartbeat wiring moved from `panes` into `gui_loop`, though updates are not fully live.
+
+------------------------------------------------------------
+3. What Didn’t Work / Issues Hit
+------------------------------------------------------------
+- Multiple patch scripts introduced syntax errors or broke imports (`try:` blocks, bad rewires).
+- Avatar panel still zoomed in and scrollable, despite constants centralization.
+- Header bar regressions: state dot, tone/sarcasm, and heartbeat updates are frozen or missing.
+- Some duplicate imports (`dearpygui`) inside def-blocks needed cleanup.
+- Autoscroll for chat/logs unreliable.
+- Layout misalignment after some patches (right pane split lost balance once).
+
+------------------------------------------------------------
+4. Parked Items
+------------------------------------------------------------
+- Avatar panel: zoom/fit, scroll removal, alignment with chat pane.
+- Header bar: tone/sarcasm updates not live, heartbeat frozen at “0s ago”.
+- Autoscrolling for chat/logs still glitchy.
+- General layout polish for right-hand panes after split.
+- TTS adapters (`tts_pyttsx3`, etc.) still unresolved — expected in Phase D.
+
+------------------------------------------------------------
+5. Rails Status
+------------------------------------------------------------
+- Phase B (Solid Base — Modularization) nearly complete.
+  • B04.22g finished constants consolidation for avatar.
+  • Chat/log render is restored → major milestone.
+- Next Rail: Phase C (Prompt Seam in Core).
+  • Goal: unify prompts/formatting so CLI & GUI are consistent.
+  • Expected short and safe step compared to B04.
+
+------------------------------------------------------------
+6. Key Lessons
+------------------------------------------------------------
+- Automated patch scripts caused drift; manual checking against mirror files works best.
+- Centralizing constants (like avatar) is safer long-term than repeating values.
+- Mirrors on Google Drive now serve as the main source of truth for consistency.
+- Rerail 3 should start with a checkpoint (KGB snapshot) to avoid regression.
+
+------------------------------------------------------------
+7. Suggested First Steps for Rerail 3
+------------------------------------------------------------
+- Snapshot current working state (tag KGB-2025-09-xx_R2_wrapup).
+- Begin Phase C: hook CLI/GUI prompts via `cli_prompt` service.
+- Keep parked items listed for later phases (unpark when rails say so).
+
+------------------------------------------------------------
+End of RERAIL 2 Wrap-up.

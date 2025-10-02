@@ -1,0 +1,604 @@
+﻿# DEV NOTE — B04 size cap
+# Target size ≤ 150 lines before Phase H closure.
+# No behavior changes here; only refactors and module peels count toward cap.
+
+# DEV NOTE (B04 Size Target): keep this file ≤150 lines by delegating to ui/dpg_app.py and ui/pane_parts/*. 
+# Do not add new logic here; only thin entry glue and argument parsing may remain.
+# KGB target: KGB-2025-08-29_RERAIL2_B04_size_note_app_gui_entry
+
+# LAYOUT/LOOK Rails – LL-R03 thin bootstrap
+# - Theme lives in ui/theme.py
+# - Tailer lives in ui/tailer.py
+# - Panes (init_ui / refresh_ui ) live in ui/panes.py
+# - This file wires them together + keeps minimal GUI-specific state
+
+from __future__ import annotations
+# --- DEV INPUT (IN01) imports: safe when flag is off
+import os
+import re
+from collections import deque
+from datetime import datetime
+import dearpygui.dearpygui as dpg
+# Heartbeat shim: prefer scripts.ui path, fallback to ui.*
+# Single-authority header module (no fallbacks, no bridge)
+from scripts.ui.pane_parts import header_bar as _hb
+from pathlib import Path
+from scripts.ui.layout_constants import L
+from scripts.ui.helpers.gui_loop import update_panes as _update_panes
+
+# -------------------------------
+# Config (UI-only)
+# -------------------------------
+LOG_PATH = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+TAIL_FROM_START = os.environ.get("PIPER_UI_TAIL_FROM_START", "0") == "1"
+POLL_INTERVAL_SEC = float(os.environ.get("PIPER_UI_POLL_SEC", "0.25"))
+SPEAKING_IDLE_SEC = float(os.environ.get("PIPER_UI_SPEAKING_IDLE_SEC", "3.5"))
+# -------------------------------
+# Buffers & State (UI-only)
+# -------------------------------
+LOG_MAX_LINES = 1200
+CHAT_MAX_LINES = 600
+
+from collections import deque
+log_buffer  = deque(maxlen=LOG_MAX_LINES)
+chat_buffer = deque(maxlen=CHAT_MAX_LINES)
+
+current_state = "SLEEPING"
+# -- event-driven header label publisher (no per-frame writes)
+# -- event-driven header label publisher (single authority, no bridge)
+def _publish_header_labels(*, tone_text: str | None = None, sarcasm_text: str | None = None):
+    try:
+        state_txt   = str(globals().get('current_state', '') or '')
+        hb_txt      = ""  # owned by heartbeat singleton elsewhere
+        tone_txt    = (tone_text or "").strip()
+        sarcasm_txt = (sarcasm_text or "").strip()
+        # ensure the rightmost separator never dangles by always giving tail text
+        log_path    = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+        tail_txt    = f"Tailing: {Path(log_path).name}" if log_path else ""
+
+        _hb.refresh(
+            state_text=state_txt,
+            heartbeat_text=hb_txt,
+            tone_text=tone_txt,
+            sarcasm_text=sarcasm_txt,
+            tailing_text=tail_txt,
+            state_name=globals().get("current_state", None),
+        )
+        _hb.set_state_dot((globals().get("current_state", "") or "").strip().upper())
+    except Exception:
+        pass
+# Single authority funnel for header dot updates (keeps entry glue thin)
+def _publish_state(name: str) -> None:
+    try:
+        _hb.set_state_dot((name or "").strip().upper())
+    except Exception:
+        pass
+    # also nudge a repaint when state changes
+    globals()["_refresh_needed"] = True
+
+# Persona read-outs (UI-only, read-only)
+persona_tone = os.environ.get("PIPER_PERSONA_TONE", "neutral").strip().lower()
+persona_sarcasm = (os.environ.get("PIPER_PERSONA_SARCASM", "off").strip().lower() in ("1","on","true","yes"))
+
+# State & timing
+state_queue = deque()
+last_update_ts: datetime | None = None
+
+# Heartbeat start instant (for the header ticker only)
+heartbeat_start_ts: datetime | None = None
+
+# Render tick nudge
+_refresh_needed = False
+
+# -------------------------------
+# Classifiers (robust parsing)
+# -------------------------------
+AVAILABLE_STATES_BANNER_RE = re.compile(r"\[STATE\].*available_states=", re.IGNORECASE)
+STATE_RE = re.compile(
+    r"\[STATE\]\s*(?:([A-Za-z_]+)\s*(?:→|->)\s*([A-Za-z_]+)|([A-Za-z_]+))",
+    re.IGNORECASE
+)
+# Valid Piper states (whitelist to avoid parsing junk like "[STATE]TE]")
+VALID_STATES = {"SLEEPING", "WAKING", "LISTENING", "THINKING", "SPEAKING"}
+STATE_WORD_RE = re.compile(r"\b(sleeping|waking|listening|thinking|speaking)\b", re.IGNORECASE)
+SLEEP_HINT_RE = re.compile(
+    r"(going to sleep|back to sleep|piper is (now )?sleeping|^sleep$|sleeping\.\.\.)",
+    re.IGNORECASE,
+)
+# Persona toggle lines (from CLI/log)
+PERSONA_RE  = re.compile(r"\[PERSONA\].*?\btone\s*=\s*([A-Za-z]+).*?\bsarcasm\s*=\s*(on|off|true|false|1|0)", re.IGNORECASE)
+TONE_RE     = re.compile(r"\[TONE\]\s*([A-Za-z]+)", re.IGNORECASE)
+SARCASM_RE  = re.compile(r"\[SARCASM\]\s*(on|off|true|false|1|0)", re.IGNORECASE)
+
+# -------------------------------
+# UI refresh scheduling
+# -------------------------------
+def schedule_recurring_update():
+    """Frame tick: handle dwell/snap + repaint panes when needed.
+    NOTE: Do NOT touch hb_label here; the heartbeat singleton owns it.
+    """
+    frames_per_tick = max(1, int(POLL_INTERVAL_SEC * 60))  # ~every POLL_INTERVAL_SEC
+
+    def _tick(sender=None, app_data=None):
+        try:
+            # Auto-snap from SPEAKING to SLEEPING after idle
+            try:
+                if current_state == "SPEAKING" and last_update_ts:
+                    idle = (datetime.now() - last_update_ts).total_seconds()
+                    if idle >= SPEAKING_IDLE_SEC:
+                        globals()["current_state"] = "SLEEPING"
+                        globals()["_refresh_needed"] = True
+            except Exception:
+                pass
+            # Auto-advance: if we've been WAKING for a moment, move to LISTENING
+            try:
+                import time as _t
+                last = globals().get("_last_state_change_ts", 0.0)
+                if current_state == "WAKING":
+                    if last and (_t.time() - last) >= 0.6:
+                        globals()["current_state"] = "LISTENING"
+                        globals()["_last_state_change_ts"] = _t.time()
+                        _publish_state("LISTENING")
+
+            except Exception:
+                pass
+            # Redraw panes only if something changed (chat/log/state/persona)
+            if _refresh_needed:
+                _update_panes()
+
+            # DO NOT call set_hb_text() or set_value("hb_label", ...) here.
+            # The heartbeat singleton updates the label independently.
+
+        except Exception:
+            pass
+        finally:
+            # Re-arm next tick
+            try:
+                dpg.set_frame_callback(dpg.get_frame_count() + frames_per_tick, _tick)
+            except Exception:
+                pass
+
+    # Kick off the loop once
+    try:
+        dpg.set_frame_callback(dpg.get_frame_count() + 1, _tick)
+    except Exception:
+        pass
+# -------------------------------
+# Bootstrap
+# -------------------------------
+def run() -> None:
+    """
+    RERAIL 3 — Behavior-preserving GUI entry that *owns* the DPG lifecycle.
+    - Prints banner
+    - Ensures logfile exists
+    - Builds panes via init_ui(log_path)
+    - Mounts Dev Tools when PIPER_UI_DEV_INPUT=1
+    - Starts a UTF-8 tailer thread for core.log
+    - Schedules Dear PyGui frame callbacks to push Chat/Logs + heartbeat
+    - Shows viewport and starts the main loop
+    """
+    import os, io, threading, time, traceback
+    from collections import deque
+    from datetime import datetime
+    from pathlib import Path
+
+    print("[GUI] Starting Piper GUI (LL-R03).")
+
+    # ---- Config from env ----
+    log_path = os.environ.get("PIPER_CORE_LOG", r"C:\Piper\run\core.log")
+    tail_from_start = os.environ.get("PIPER_UI_TAIL_FROM_START", "0") == "1"
+    # Suppress boot noise (DEV/available_states/ready) for the first second
+    _boot_suppress_deadline = datetime.now().timestamp() + float(os.environ.get("PIPER_UI_SUPPRESS_BOOT_SEC", "1.0"))
+    poll_sec = float(os.environ.get("PIPER_UI_POLL_SEC", "0.25"))
+    dev_input_enabled = os.environ.get("PIPER_UI_DEV_INPUT", "0") == "1"
+    # Prefer separate Dev window; disallow embedded unless explicitly re-enabled.
+    os.environ.setdefault("PIPER_UI_DEV_EMBED", "0")
+
+    p = Path(log_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        p.write_text("[GUI] Tailing created. Start CLI to feed logs.\n", encoding="utf-8")
+
+    # ---- Imports (robust paths) ----
+    try:
+        from scripts.ui.panes import init_ui, refresh_ui  # no fallback
+
+        # Dev Tools mounters (we'll try multiple names)
+
+        # BEGIN DEV_TOOLS MOUNTERS (stay in entry until I07)
+        mounters = []
+        for modname, sym in [
+            ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+            ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+            ("scripts.ui.dev_tools", "attach_dev_tools"),
+            ("ui.dev_tools", "attach_dev_tools"),
+            ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+            ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+        ]:
+            try:
+                mod = __import__(modname, fromlist=[sym])
+                fn = getattr(mod, sym, None)
+                if callable(fn):
+                    mounters.append(fn)
+            except Exception:
+                pass
+        # END DEV_TOOLS MOUNTERS
+
+        import dearpygui.dearpygui as dpg
+    except Exception:
+        traceback.print_exc()
+        raise
+
+    # ---- Buffers & state (UI-local) ----
+    LOG_MAX, CHAT_MAX = 1200, 600
+    log_buffer, chat_buffer = deque(maxlen=LOG_MAX), deque(maxlen=CHAT_MAX)
+    last_update_ts: datetime | None = None
+    _refresh_needed = False
+    _chat_dirty = False
+    _log_dirty = False
+
+    def _classify_and_buffer(line: str):
+        nonlocal last_update_ts, _refresh_needed, _chat_dirty, _log_dirty
+        global persona_tone, persona_sarcasm
+        s = line.rstrip("\r\n")
+        if not s:
+            return
+        # Normalize CLI-formatted structured lines: "> [STATE] ..." -> "[STATE] ..."
+        raw = s.lstrip()
+        if raw.startswith("> ["):
+            s = raw[2:].lstrip()
+            raw = s
+
+        # Drop early boot noise in logs for the first second (keeps panes clean at launch)
+        now_ts = datetime.now().timestamp()
+        if now_ts < _boot_suppress_deadline:
+            low = s.lower()
+            if s.startswith("[dev]") or "available_states=" in low or "piper is ready" in low:
+                # allow spoken/chat lines through if any (we only suppress loggy boot chatter)
+                # Chat-only lines unless they are structured bracketed events like [STATE]
+                is_spoken = ((s.startswith("> ") and not s.startswith("> [")) or s.startswith("[TTS]") or s.lower().startswith("hello"))
+                if not is_spoken:
+                    return
+
+        # Chat-only lines: start with "> " or carry [TTS]
+        is_spoken = s.startswith("> ") or s.startswith("[TTS]") or s.lower().startswith("hello")
+
+        # Status/error-ish lines that belong in Logs
+        low = s.lower()
+        is_status = ("[STATE]" in s) or ("[EVT]" in s) or ("[GUI]" in s) \
+                    or ("[PERSONA]" in s) or ("[TONE]" in s) or ("[SARCASM]" in s)
+        is_error  = ("[ERR]" in s) or ("error" in low) or ("traceback" in low)
+                # --- STATE updates -------------------------------------------------
+        # Accept either "[STATE] A -> B" or "[STATE] B"
+        if "[STATE]" in s:
+            try:
+                import re as _re
+                m = _re.search(r"\[STATE\]\s*(?:[A-Z]+\s*->\s*)?([A-Z]+)", s)
+                if m:
+                    new_state = (m.group(1) or "").strip().upper()
+                    if new_state:
+                        # Record and publish the new state
+                        globals()["current_state"] = new_state
+                        _publish_state(new_state)
+            except Exception:
+                pass
+
+        # Update header persona vars when persona directives arrive
+        # Persona toggles (Dev Tools path): mirror tailer’s logic
+        if "[PERSONA]" in s or "[TONE]" in s or "[SARCASM]" in s:
+            try:
+                pm = re.search(r"\[PERSONA\].*?\btone\s*=\s*([A-Za-z]+).*?\bsarcasm\s*=\s*(on|off|true|false|1|0)", s, re.IGNORECASE)
+                if pm:
+                    t  = pm.group(1).strip().lower()
+                    sv = pm.group(2).strip().lower()
+                    if t:
+                        globals()["persona_tone"] = t
+                    globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+                    _refresh_needed = True
+                    _publish_header_labels(tone_text=t, sarcasm_text=("on" if (sv in ("on","true","1","yes")) else "off"))
+                else:
+                    tm = re.search(r"\[TONE\]\s*([A-Za-z]+)", s, re.IGNORECASE)
+                    if tm:
+                        globals()["persona_tone"] = tm.group(1).strip().lower()
+                        _refresh_needed = True
+                        _publish_header_labels(tone_text=globals().get("persona_tone",""))
+                    sm = re.search(r"\[SARCASM\]\s*(on|off|true|false|1|0)", s, re.IGNORECASE)
+                    if sm:
+                        sv = sm.group(1).strip().lower()
+                        globals()["persona_sarcasm"] = (sv in ("on", "true", "1", "yes"))
+                        _refresh_needed = True
+                        _publish_header_labels(sarcasm_text=("on" if (sv in ("on","true","1","yes")) else "off"))
+            except Exception:
+                pass
+
+        if "[TONE]" in s:
+            import re as _re
+            m = _re.search(r"\[TONE\]\s*([A-Za-z\-]+)", s, _re.IGNORECASE)
+            if m:
+                globals()["persona_tone"] = m.group(1).strip().lower()
+                _refresh_needed = True
+
+        if "[SARCASM]" in s:
+            import re as _re
+            m = _re.search(r"\[SARCASM\]\s*(on|off|true|false|1|0)", s, _re.IGNORECASE)
+            if m:
+                val = m.group(1).strip().lower()
+                globals()["persona_sarcasm"] = (val in ("on","true","1"))
+                _refresh_needed = True
+                _publish_header_labels(sarcasm_text=("on" if globals().get("persona_sarcasm", False) else "off"))
+        # --- State detection from logs (mirror of top-level logic) ---
+        try:
+            ns = None
+            m = STATE_RE.search(s)
+            if m:
+                if m.group(2):      # OLD -> NEW
+                    ns = m.group(2)
+                elif m.group(3):    # NEW
+                    ns = m.group(3)
+            else:
+                mw = STATE_WORD_RE.search(s)
+                if mw:
+                    ns = mw.group(1)
+                elif SLEEP_HINT_RE.search(s):
+                    ns = "SLEEPING"
+                elif s.lstrip().startswith(">"):
+                    ns = "SPEAKING"
+
+            if ns:
+                cand = (ns or "").strip().upper()
+                if cand in VALID_STATES and cand != globals().get("current_state"):
+                    globals()["current_state"] = cand
+                    _hb.set_state_dot(current_state)
+
+                    globals()["_refresh_needed"] = True
+        except Exception:
+            pass
+
+        if is_spoken:
+            chat_buffer.append(s); _chat_dirty = True
+
+        # Only log status/error lines, or non-chat leftovers
+        if (is_status or is_error) or (not is_spoken):
+            log_buffer.append(s); _log_dirty = True
+
+        last_update_ts = datetime.now()
+        _refresh_needed = True
+
+    # ---- UTF-8 tailer thread ----
+    _tailer_stop = False
+    def _tailer():
+        try:
+            with io.open(p, "r", encoding="utf-8", errors="replace", newline="") as f:
+                if not tail_from_start:
+                    f.seek(0, os.SEEK_END)
+                while not _tailer_stop:
+                    pos = f.tell()
+                    line = f.readline()
+                    if not line:
+                        time.sleep(poll_sec)
+                        f.seek(pos)
+                        continue
+                    _classify_and_buffer(line)
+        except Exception:
+            traceback.print_exc()
+
+    # ---- Heartbeat text ----
+    def _hb_text() -> str:
+        try:
+            if last_update_ts:
+                secs = max(0, int((datetime.now() - last_update_ts).total_seconds()))
+                return f"last change = {secs} seconds ago"
+        except Exception:
+            pass
+        return "last change = 0 seconds ago"
+
+    # ---- Schedule frame ticks ----
+    def _schedule_ticks():
+        frames_per_tick = max(1, int(poll_sec * 60))
+        def _tick(sender=None, app_data=None):
+            nonlocal _refresh_needed, _chat_dirty, _log_dirty
+            try:
+                # ... inside _schedule_ticks()._tick() ...
+                if _refresh_needed:
+                    chat_text = "\n".join(map(str, chat_buffer))
+                    log_text  = "\n".join(map(str, log_buffer))
+
+                    # single, authoritative header update (no fallbacks, no duplicates)
+                    try:
+                        tail_txt = f"Tailing: {Path(LOG_PATH).name}" if LOG_PATH else ""
+                        _hb.refresh(
+                            state_text=str(current_state),
+                            heartbeat_text=_hb_text(),
+                            tone_text=f"Tone: {persona_tone}",
+                            sarcasm_text=f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+                            tailing_text=tail_txt,
+                            state_name=current_state,
+                        )
+                        _hb.set_state_dot(str(current_state).strip().upper())
+                    except Exception:
+                        pass
+
+                    refresh_ui(
+                        f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+                        f"{_hb_text()} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}",
+                        chat_text,
+                        log_text,
+                        _chat_dirty,
+                        _log_dirty
+                    )
+                try:
+                    import dearpygui.dearpygui as dpg
+                    if dpg.does_item_exist("hb_label"):
+                        dpg.set_value("hb_label", _hb_text())
+                except Exception:
+                    pass    
+            finally:
+                _chat_dirty = _log_dirty = False
+                _refresh_needed = False
+                try:
+                    dpg.set_frame_callback(dpg.get_frame_count() + frames_per_tick, _tick)
+                except Exception:
+                    pass
+        try:
+            dpg.set_frame_callback(dpg.get_frame_count() + 1, _tick)
+        except Exception:
+            pass
+
+    # ---- Dear PyGui lifecycle (owned here) ----
+
+    # BEGIN BOOTSTRAP BLOCK (to be peeled into ui/dpg_app.py)
+    # FENCE: first create_context (to peel later)
+    try:
+        # FENCE: second create_context (to peel later)
+        dpg.create_context()
+        try:
+            from scripts.ui.theme_utils import apply_theme_if_enabled as _apply_theme
+            _apply_theme()
+        except Exception:
+            pass
+
+        # Build UI
+        init_ui(str(p))
+
+        # -- Lock root windows (no global scroll); keep scroll only in child panes (chat/logs)
+        try:
+            import dearpygui.dearpygui as dpg
+            _allow_scroll_tags = {"chat_child", "logs_child", "chat", "logs"}  # tolerate older tag names
+
+            def _lock_root_scrollbars():
+                for item in dpg.get_all_items():
+                    try:
+                        t = dpg.get_item_type(item)  # e.g., "mvAppItemType::Window", "mvAppItemType::ChildWindow"
+                        alias = dpg.get_item_alias(item) or str(item)
+                    except Exception:
+                        continue
+                    # Lock only top-level windows; do NOT touch child windows (they should scroll)
+                    if isinstance(t, str) and "Window" in t and "ChildWindow" not in t:
+                        if alias not in _allow_scroll_tags:
+                            try:
+                                dpg.configure_item(item, no_scrollbar=True)
+                            except Exception:
+                                pass
+
+            _lock_root_scrollbars()
+        except Exception:
+            pass
+        # -------- Dev Tools (separate window preferred; fallback to embedded) --------
+        if dev_input_enabled:
+            def _append_utf8_line_to_log(line: str):
+                import io
+                with io.open(p, "a", encoding="utf-8", newline="\n", errors="replace") as f:
+                    f.write((line or "").rstrip("\r\n") + "\n")
+
+            # Adapters expected by KGB dev_tools.attach_dev_tools
+            def _emit_to_logs(text: str, tone: str = "info"):
+                # Route through your existing parser -> same badges/flow as CLI
+                try:
+                    s = (text or "").rstrip("\n")
+                    if not s:
+                        return
+                    _classify_and_buffer(s)
+                except Exception:
+                    # last-ditch: drop raw text to logs
+                    log_buffer.append(str(text))
+                    globals()["_log_dirty"] = True
+                    globals()["_refresh_needed"] = True
+
+            def _tone_for_line(line: str) -> str:
+                low = (line or "").lower()
+                if "[state]" in low:
+                    return "status"
+                if "[event]" in low or "[tts]" in low:
+                    return "info"
+                if "error" in low or "[err]" in low or "traceback" in low:
+                    return "error"
+                return "info"
+
+            def _badge_for_logs(line: str) -> str:
+                import re
+                s = (line or "").strip()
+                s = re.sub(r"\[state\]", "[STATE]", s, flags=re.IGNORECASE)
+                s = re.sub(r"\[event\]", "[EVT]", s, flags=re.IGNORECASE)
+                s = re.sub(r"\[tts\]", "[TTS]", s, flags=re.IGNORECASE)
+                s = re.sub(r"\[err\]", "[ERR]", s, flags=re.IGNORECASE)
+                return s
+
+            # Prefer the separate “Dev Tools” window (KGB API)
+            mounted = False
+            try:
+                try:
+                    from scripts.ui.dev_tools import attach_dev_tools as _attach  # type: ignore
+                except Exception:
+                    from ui.dev_tools import attach_dev_tools as _attach          # type: ignore
+
+                _attach(
+                    get_state=lambda: str(globals().get("current_state", "?")),
+                    get_queue=lambda: list(globals().get("state_queue", [])),
+                    get_last_ts=lambda: globals().get("last_update_ts", None),
+                    log_emit=_emit_to_logs,
+                    tone_for_line=_tone_for_line,
+                    badge_for_logs=_badge_for_logs,
+                )
+                mounted = True
+                _emit_to_logs("[DEV][TRACE] dev_tools window mounted.", "status")
+            except Exception as e:
+                _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+
+            # Fallback: embedded controls if window API is absent
+            if not mounted:
+                for modname, sym in [
+                    ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+                    ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+                    ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+                    ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+                ]:
+                    try:
+                        mod = __import__(modname, fromlist=[sym])
+                        fn  = getattr(mod, sym, None)
+                        if callable(fn):
+                            try:
+                                fn(log_writer=_append_utf8_line_to_log, log_path=str(p))
+                            except TypeError:
+                                try: fn(str(p))
+                                except TypeError: fn()
+                            _emit_to_logs("[DEV][TRACE] embedded dev controls mounted.", "status")
+                            break
+                    except Exception:
+                        pass
+    # ---------------------------------------------------------------------------
+        # Start tailer
+
+        # BEGIN TAILER_START (stay in entry until I07)
+        threading.Thread(target=_tailer, name="PiperTailer", daemon=True).start()
+        # END TAILER_START
+
+        # Ticks
+
+        # BEGIN TICK_SCHEDULER (stay in entry until I07)
+        _schedule_ticks()
+        # END TICK_SCHEDULER
+        
+# AFTER (bookend — delegate to dpg_app; keep fences + structure)
+        # BEGIN VIEWPORT_CREATE (peeled → dpg_app)
+        # END VIEWPORT_CREATE
+        # BEGIN VIEWPORT_DECORATE (peeled → dpg_app)
+        # END VIEWPORT_DECORATE
+        # BEGIN DPG_SETUP (peeled → dpg_app)
+        # END DPG_SETUP
+        # BEGIN DPG_SHOW (peeled → dpg_app)
+        # END DPG_SHOW
+        # BEGIN DPG_START (peeled → dpg_app)
+        # END DPG_START
+        
+        # DELEGATE — drive event loop from dpg_app
+        from scripts.ui.dpg_app import run as dpg_run              # ★ new (no DpgConfig)
+        dpg_run(drive_event_loop=True)                   # ★ new
+    finally:
+        # BEGIN DPG_DESTROY (peeled → dpg_app)
+        pass  # ★ keep structure to avoid SyntaxError
+        # END DPG_DESTROY
+def main():
+    run()
+
+if __name__ == "__main__":
+    main()

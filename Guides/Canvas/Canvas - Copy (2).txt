@@ -1,0 +1,361 @@
+Piper - Living Context
+
+Last updated: 2025-09-06 (rev D)
+
+🔝 Always-Read Section
+
+Rules
+
+Refresh & Memory
+
+Canvas First → Before every reply, re-read this top section (down to Usage).
+
+User is the architect; ChatGPT is the railmaster/developer. Provide plain-English, step-by-step guidance and drive the rails without asking “what next?”.
+
+If any instruction conflicts, this section overrides chat history.
+
+Maintain state across replies (Rails, Known Issues, KGB, Architecture, Call Graph).
+
+ChatGPT updates Canvas only for rails progress, KGB title, and callgraph.
+
+Development Flow
+
+Stay on rails; off-rail requests = PARKED.
+
+One change → smoke test → KGB tag. Tiny scope: plan → patch → smoke → tag → next.
+
+Tag format: KGB-YYYY-MM-DD_<RAIL><step>_<slug>
+
+If a step fails twice → REVERT to last KGB snapshot and PARK it.
+
+No piling changes or “fix-the-fix” loops.
+
+Layout constants live in ui/layout_constants.py. All geometry/theme numbers must come from there.
+
+Edits: full-script if ≤200 lines, full-function if >200 lines. Warn if file >300 lines or function >50 lines.
+
+Prefer components (ui/components/*) and thin entries (<150 lines).
+
+File Safety
+
+Never modify logic/personality.py (user-owned).
+
+Prefer undo/backup; keep changes atomic and auditable.
+
+Mirroring & Anchors
+
+Follow mirroring rules; anchors are permanent unless explicitly removed.
+
+If asked to bypass mirroring/anchors, confirm with the user.
+
+Response Discipline
+
+Every response must follow the Step Response Template structure and any updates applied to the Canvas  so the user can confirm.
+
+Step Response Template
+
+Canvas: confirm if Always Read part read and any other section
+Chapter: <name> | Ring: <Core/Services/UI> | Scope: ✅/🟨/🛑
+Plan: ie one tiny change only
+Patch: (full file or full function; exact locations if needed)
+Smoke (≤3 lines): run → expect → pass condition
+KGB: tag on pass / revert+park on fail
+Parking: list any out-of-scope or failing items carried forward
+Compliance: rings clean; invariants honored; SAFE_MODE; no drift
+Examined: scripts that were fully read in Drive/Dropbox mirrors top-to-bottom
+Idiotproofed: user edits in scripts confirmed by re-open/re-read
+Guardrail: append one-liner — "If this correction does not fix the issue, [revert/maintain]."
+
+Mirrored Files Rule
+
+Mirrors are the only Truth = .txt mirrors (Drive + Dropbox).
+
+Always Check: never as user to check, never assume, never say "if it exist"
+
+Fail Rule: if both mirrors fail → only say: > Need Drive/Dropbox access to continue.
+
+Example:
+
+Drive/Dropbox examined: entries/_app_gui_entry_impl, ui/panes
+
+Idiotproofed: ui/layout_constants (viewport size update)
+
+Folder Layout & Architecture (scripts only)
+
+├── common/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── logging.py
+│   ├── types.py
+│   └── utils.py
+├── core/
+│   ├── __init__.py
+│   ├── bg_poller.py
+│   ├── bridge.py
+│   ├── core_app.py
+│   ├── core_commands.py
+│   ├── core_machine.py
+│   ├── event_queue.py
+│   ├── events.py
+│   ├── flags.py
+│   ├── poll_helpers.py
+│   ├── router.py
+│   ├── startup.py
+│   ├── state_defs.py
+│   ├── timers.py
+│   └── transition_plan.py
+├── entries/
+│   ├── __init__.py
+│   ├── _app_gui_entry_impl.py
+│   ├── _app_gui_entry_impl_backup.py
+│   ├── app_cli_entry.py
+│   ├── app_gui_entry.py
+│   ├── app_wake_entry.py
+├── services/
+│   ├── adapters/
+│   │   └── mock_asr_wake.py
+│   ├── asr/
+│   │   ├── __init__.py
+│   │   └── vosk_adapter.py
+│   ├── memory/
+│   │   ├── __init__.py
+│   ├── persona/
+│   │   ├── __init__.py
+│   ├── tts/
+│   │   ├── __init__.py
+│   │   ├── speak_once.py
+│   │   └── tts_manager.py
+│   ├── wake/
+│   │   ├── __init__.py
+│   │   └── porcupine_adapter.py
+│   ├── __init__.py
+│   ├── asr_vosk.py
+│   ├── base.py
+│   ├── cli_prompt.py
+│   ├── persona_adapter.py
+│   └── wake_porcupine.py
+├── ui/
+│   ├── components/
+│   │   ├── __init__.py
+│   │   ├── chat_pane.py
+│   │   ├── controls_pane.py
+│   │   ├── logs_pane.py
+│   │   └── status_pane.py
+│   ├── helpers/
+│   │   ├── avatar_fix.py
+│   │   ├── chatlog_writer.py
+│   │   ├── dev_adapters.py
+│   │   ├── dev_controls_mount.py
+│   │   ├── gui_ingest.py
+│   │   ├── gui_loop.py
+│   │   ├── header_bridge.py
+│   │   ├── header_utils.py
+│   │   ├── init_core.py
+│   │   ├── layout_utils.py
+│   │   ├── refresh_core.py
+│   │   ├── scroll_utils.py
+│   │   ├── sink_utils.py
+│   │   ├── state_dot.py
+│   │   ├── tag_utils.py
+│   │   ├── theme_utils.py
+│   │   └── viewport_utils.py
+│   ├── pane_parts/
+│   │   ├── __init__.py
+│   │   ├── avatar_pane.py
+│   │   ├── chat_pane.py
+│   │   ├── header_bar.py
+│   │   └── logs_pane.py
+│   ├── __init__.py
+│   ├── _panes_impl.py
+│   ├── dev_tools.py
+│   ├── dpg_app.py
+│   ├── heartbeat.py
+│   ├── ipc_child.py
+│   ├── layout_constants.py
+│   ├── panes.py
+│   ├── state_header.py
+│   ├── tailer.py
+│   └── theme.py
+
+KGB
+
+Latest realized snapshot tag: KGB-2025-09-06_HDR-MR6_entry-caller-swap
+
+Drives \piper guides
+
+Key Files.txt = File role map (GUI orchestration, state dot, hb text, layout const, scroll, avatar).
+
+Anchor.txt = Project rails/constitution (rules, chapters, invariants, runbook).
+
+CLI+GUI Trailing & Testing Guide.txt = 2-terminal run instructions + trailing mechanics + smoke/fix.
+
+State Color Coding Guide.txt = State→color map + dwell + code snippet + smoke test.
+
+
+
+Call Graph
+
+entries.app_cli_entry → core.core_machine, services.cli_prompt, logic.command_handler
+
+entries.app_gui_entry → ui.piper_gui, ui.heartbeat, core.core_machine
+
+core.core_machine → logic.wake_cycle, services.tts_manager, services.asr_manager, core.state_signals
+
+ui.piper_gui → services.cli_prompt, core.state_signals, ui.avatar_manager
+
+logic.wake_cycle → services.asr_manager, services.tts_manager
+
+logic.command_handler → services.tts_manager, core.state_signals
+
+ui.heartbeat → core.state_signals
+
+Index (Read Every Time)
+
+Current Rails
+
+Roadmap, update with progress.
+
+Parked
+
+Deferred items or paused experiments.
+
+Known Issues
+
+List of active bugs or broken features.
+
+  
+
+Usage
+
+Enforce Rules every reply.
+
+Check Index chapters if relevant (Rails, Known Issues, etc.).
+
+Keep non-essential sections untouched unless explicitly updated.
+
+After code changes: update Call Graph, Rails, Known Issues, Parked, and KGB.
+
+If inconsistencies are found between project mirrors and this canvas, they must be called out and corrected immediately.
+
+Guides are external; always pull them from Drive/Dropbox mirrors if needed
+
+⬇️ Read-When-Needed Section
+
+Current Rails (extended)
+
+Step 1 — Freeze the truth ✅
+
+Tag a KGB snapshot (no code change): KGB-2025-09-03_CLEAN_START (done)
+
+Step 2 — Header authority 🟨
+
+Keep one place that sets the dot and label: ui/pane_parts/header_bar.py.
+
+All other modules must call header_bar.set_state_dot(name) and never recolor directly.
+
+we are here
+
+Targets to prune (Ctrl+F tokens):
+
+set_hb_text(
+
+apply_header_updates(
+
+state_dot_circle / *_label direct updates
+
+push_theme_color / mvThemeCol_ near state names
+
+duplicate STATE_COLOR_MAP definitions
+
+Decision rules:
+
+If a caller writes header/dot directly → route to _hb.set_state_dot(name) (no direct writes).
+
+If a file defines its own state color map → delete and import from pane_parts.header_bar.
+
+If a helper is a header text shim (e.g., set_hb_text) → defang to no-op or remove, depending on call sites.
+
+Working excerpt anchors (for quick location in ``):
+
+def apply_header_updates — header mutation hub
+
+set_hb_text( — legacy text path
+
+state_dot_circle — direct color writes
+
+_avatar_post_layout_fix and avatar_pane.post_layout_fix — duplicate avatar scalers (links to Known Issues)
+
+_chat_stick_frames / _logs_stick_frames — autoscroll paths (links to Known Issues)
+
+Micro-steps queue (inside Step 2):
+
+2.a Defang set_hb_text wherever it still routes to panes (we already no-oped gui_loop; next: listed callers above). (N/A — no ** in ** body; wrapper only re-exports)
+
+2.b Replace direct header/dot writes with _hb.set_state_dot(name). (done)
+
+2.c Remove duplicate STATE_COLOR_MAP outside header_bar. (done)
+
+2.d Leave avatar/autoscroll fixes unmodified here; they’re addressed under Known Issues. (parked)
+
+2.e Heartbeat-only shim restored in _panes_impl.py. (done — MR5)
+
+2.f Swap remaining callers in entries off ui.panes.set_hb_text. (done — MR6)
+
+2.g If no more callers import set_hb_text via ui.panes, drop the re-export in ui/panes.py; otherwise, list remaining files and swap them. (next)
+
+KGB placeholder for this step: KGB-YYYY-MM-DD_HDR-MR7_panes-reexport-drop
+
+Step 3 — Tail classifier (PARKED)
+
+Keep state detection in entries/_app_gui_entry_impl.py (_classify_and_buffer).
+
+It writes current_state and queues logs once.
+
+No recolor; only calls header_bar.set_state_dot(name).
+
+Step 4 — Refresh bridge (PARKED)
+
+ui/helpers/refresh_core.py only pushes strings & buffers to widgets.
+
+It may mount Dev pane, but no state parsing.
+
+Step 5 — Purge duplicates (PARKED)
+
+Remove extra set_state_dot / color maps outside header_bar.
+
+Remove duplicate persona tone/sarcasm parsing outside classifier.
+
+Remove duplicate [STATE] … formatting elsewhere.
+
+Step 6 — Re-smoke (PARKED)
+
+CLI + GUI smoke: ensure chat/log only once, header text+dot update, auto-advance works.
+
+Parked (extended)
+
+Auto-advance WAKING → LISTENING dwell (~0.6s). (To be tackled in Step 3)
+
+Header dedupe (legacy vs *_label tag updates). (To be tackled in Step 5)
+
+_app_gui_entry_impl.py size cut (target ≤150 lines). (To be tackled after Step 6, once all steps are finished)
+
+Known Issues (extended)
+
+Avatar scale is wrong (zoomed-in).
+
+Symptom: avatar appears cropped/zoomed.
+
+Status: Open. Address under Step 5 (duplicate purge / single scaler path) and ui/helpers/avatar_fix.py.
+
+Wake transition not happening consistently.
+
+Symptom: WAKING does not reliably auto-advance to LISTENING after dwell.
+
+Status: Open. Parked for Step 3 (Tail classifier / dwell enforcement).
+
+Autoscroll sometimes doesn’t stick.
+
+Symptom: Chat/Logs panes stop following the latest line.
+
+Status: Open. Parked to end-of-rails pass; likely in ui/helpers/scroll_utils.py with pane glue.
+

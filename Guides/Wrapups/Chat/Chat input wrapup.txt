@@ -1,0 +1,77 @@
+## Accomplished
+- **CI01 – Reserve input bar (layout only):** Input area reserved within left chat column using `ui/layout_constants.py` for all sizing. Theme applied via `__chat_input_theme`.
+- **CI02 – Input + Send (no routing):** Enter-to-send implemented (no button needed). Field width driven by constants: `LEFT_W - PAD - L.SPACE.PAD - L.SPACE.GAP`. Copy Chat button works. Input box styling matches theme.
+- **CI03 – Local echo:** On Enter, GUI appends `You: …` with reliable newline separation and sticky focus (robust next-frame fallback). Chat text wrapping tuned to constant-driven width.
+- **Autoscroll & Breathing room:** On every append, scroll snaps to bottom (via `ui/helpers/scroll_utils.py`). Bottom spacer keeps content clear of the input bar with **breathing room = 2×INPUT_H + small**.
+- **IB01 – Bridge stub:** `services/input_bridge_cli.py` created/refactored. Default **attach** mode (send-only; do not consume stdin). Optional **embedded** mode via `PIPER_UI_EMBED_CLI=1` spins reader thread. Event-driven error callback `on_error(exc)` and `last_error` tracking added.
+- **IB02 – GUI → bridge.send:** After local echo, GUI forwards the message to the bridge in **attach** mode.
+- **IB03 – Robustness (final design):** Removed polling-based banner (false positives). Added **event-driven inline banner** (to the right of **Copy Chat**) shown only when `on_error` fires; **Retry** restarts bridge and hides banner. `PIPER_BRIDGE_TEST_FAIL=1` provides deterministic banner test.
+- **Refactor to avoid monolith:** `_panes_impl.py` reduced to thin composer (≤150 lines). New pane modules: `ui/pane_parts/chat_column.py` and `ui/pane_parts/logs_avatar_column.py`. Header and theming delegated to existing helpers.
+- **Scroll utilities:** `ui/helpers/scroll_utils.py` now houses: `is_at_bottom`, a more robust `scroll_to_bottom_next_frame` (immediate + retries), breathing-room helpers, and a convenience combo `apply_autoscroll_and_breathing`.
+- **Compatibility:** `refresh_ui` kept as a stub (import compatibility). No Dev Tools coupling required to complete CI/IB rails.
+
+## Failed
+- **Polling-based IB03 banner:** Initial health poller produced false positives (banner appearing at startup or minutes later). We removed it in favor of event-driven errors.
+- **Overlaying GUI-only lines against canonical refresh:** Attempts to preserve GUI-only “You:” lines across backend refreshes proved brittle and regressed wrapping; parked in favor of Option A.
+- **Autoscroll (early attempts):** First versions didn’t consistently snap; resolved by moving logic into `scroll_utils` and sequencing breathing room before scroll bumps.
+
+## Issues (Open)
+- **Dev Tools parked:** Trailing and “Inject Chat/Log” are intentionally disconnected. `refresh_ui` remains a no-op. Canonical chat/log state is not wired—GUI is the sole input and display source.
+- **Logs QA:** “Copy Logs” not meaningfully testable yet (log area remains empty without a state source). No hardcoded sample left in tree (kept clean).
+- **Attach-mode real error paths are hard to trigger:** Banner validated via `PIPER_BRIDGE_TEST_FAIL=1`; real attach errors (stdout failures) are rare. Embedded-mode error handling exists but is not exercised in current flow.
+- **No LLM wired:** Outside the scope of Chat Input rails; planned next chapter.
+- **Autoscroll scope:** Only the chat pane uses the helper today; logs pane will need the same treatment once it receives content.
+
+## Rules / Preferences / Corrections (from this thread)
+- **Rails adherence:**
+  - Chat Input rails only (CI01–CI03, IB01–IB03). LLM work is **out of scope** for this chapter.
+  - **One change per step;** snapshot on pass; revert on 2× fail; no layout drift.
+- **Invariants:**
+  - All layout from `ui/layout_constants.py` (no hardcoded magic numbers in code paths, except temporary debugging you asked for).
+  - `personality.py` is **read-only**.
+  - Dev/Mission-Control tools are **separate**; **attach mode is the source of truth**.
+- **Design decisions:**
+  - **Option A (lean):** GUI is the only input path; Dev Tools parked until we introduce a canonical state. `refresh_ui` retained as shim only.
+  - **Autoscroll policy:** Always snap to bottom on new lines; **no badge**, no pause logic.
+  - **Breathing room:** Bottom spacer sized to **2×INPUT_H + small**.
+  - **Focus:** After Enter, input retains focus reliably (multi-API + next-frame fallback).
+  - **Wrapping:** Chat wraps at constant-driven width (`LEFT_W - PAD - L.SPACE.PAD - L.SPACE.GAP`). No horizontal overflow.
+  - **Banner placement:** IB03 banner must be **inline** to the right of **Copy Chat**, not below (to avoid layout break).
+  - **Width math:** Prefer constant expressions over literals. The historical hardcoded **748** replaced with `LEFT_W - PAD - L.SPACE.PAD - L.SPACE.GAP`.
+  - **Fixed-size GUI:** No resize calibration; viewport is fixed by choice.
+  - **CLI overwrite behavior accepted:** GUI local-echo lines may be overwritten by canonical refresh (when we re-enable it). This is **acceptable** until a true state source exists.
+- **Code hygiene:**
+  - `_panes_impl.py` stays ≤150 lines; composition only.
+  - Autoscroll/breathing concentrated in `ui/helpers/scroll_utils.py` (no ad hoc logic in panes).
+  - Event-driven errors preferred over polling for IB03.
+- **User prefs (tone/ops):**
+  - Keep chat lean; no extra buttons (Enter is send).
+  - No `Esc` to clear input (not a habit).
+  - Stick to Option A until explicitly asked to reintroduce Dev Tools.
+
+## Environment Changes / Runbook Notes
+- **Modes:**
+  - **Attach (default):** `PIPER_UI_EMBED_CLI` unset or ≠ `1`. Bridge is **send-only**; we don’t read stdin.
+  - **Embedded (opt-in):** `PIPER_UI_EMBED_CLI=1` → starts reader thread; `on_line` invoked for stdin lines.
+- **Testing IB03 banner:** `PIPER_BRIDGE_TEST_FAIL=1` triggers a synthetic error on `start()`, showing the inline banner. Clear the env and relaunch to return to normal.
+- **Heartbeat:** Header/heartbeat refreshes continue to work; unrelated to chat rails.
+
+## Handoff
+**State at exit:**
+- Chat Input rails are **complete** with accepted behavior and clean structure. GUI input is stable, wraps correctly, autoscrolls, and keeps focus. IB03 robustness is event-driven and testable via env.
+
+**Recommended next focus (next thread):**
+1. **LLM integration (next chapter, outside CI rails):**  
+   - *LLM01:* `services/llm_client.py` stub (`generate(prompt, *, persona) -> str`).  
+   - *LLM02:* Hook GUI submit → `llm_client.generate` → append `Assistant:`.  
+   - *LLM03:* Error handling / timeouts.  
+   - *LLM04:* Real provider (env-driven), optional streaming later.
+2. **Canonical state + `refresh_ui` (unpark Dev Tools):**  
+   - Choose source (in-proc store or JSONL at `log_path`).  
+   - Implement `refresh_ui(state)` to paint chat/log; re-enable Dev Tools trailing/inject if desired.
+3. **Logs pane QA:**  
+   - Feed sample/real logs; verify wrap, Copy Logs, and apply autoscroll + breathing helpers.
+4. **(Optional) IB03 hardening:**  
+   - Add a “fatal only” gate or backoff to banner logic if external tooling is noisy; keep event-driven path.
+5. **(Optional) UX touches:**  
+   - Minor theme polish; optional shortcuts; no new buttons required.

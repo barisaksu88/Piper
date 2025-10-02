@@ -1,0 +1,43 @@
+Provider / Core
+
+PIPER_LLM_PROVIDER → selects backend (echo, stub, llamacpp).
+
+PIPER_LLM_TIMEOUT_MS → max ms per call (single or stream, sliding).
+
+Streaming / Cancel
+
+(implicit) cancel token passed from UI, no env.
+
+Persona / Style
+
+PIPER_PERSONA_TONE → "formal", "casual", etc.
+
+PIPER_PERSONA_SARCASM → 1/0 sarcasm toggle.
+
+Memory (M01 / M02)
+
+PIPER_MEM_EPISODES → path for memory JSONL file.
+
+PIPER_MEM_SUMMARY_TURNS → how many turns to include in summaries.
+
+PIPER_MEM_SUMMARY_MAX → max chars in a summary (default 200).
+
+PIPER_MEM_MINLEN → min summary length to allow write (default 50).
+
+PIPER_MEM_WRITE → 0 disables memory writes.
+
+PIPER_MEM_AVG_CHARS_PER_TOKEN → chars-per-token heuristic (default 4).
+
+PIPER_MEM_RECALL → 1 enables recall injection into prompt.
+
+PIPER_MEM_BUDGET_TOKENS → recall budget (default 256).
+
+UI / Mission Control
+
+PIPER_CORE_LOG → log file path for GUI tailer.
+
+PIPER_UI_TAIL_FROM_START → 1 = load logs from file start.
+
+PIPER_UI_POLL_SEC → tail poll interval seconds.
+
+PIPER_GUI_DEBUG_CHAT → 1 enables chat debug prints.

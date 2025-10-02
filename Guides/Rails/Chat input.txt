@@ -1,0 +1,132 @@
+🟦 New Chapter Rails — “CHAT INPUT (USER)” + “INPUT BRIDGE”
+
+Goal: A permanent chat box below Chat in Piper’s main GUI that sends text to Piper’s CLI/ Core—no dev labels, no special flags.
+
+Rings:
+
+CIxx: UI only (Dear PyGui layout & events)
+
+IBxx: Services bridge to CLI stdin (no model logic changes)
+
+Baseline KGB: your latest stable (fill in)
+SAFE_MODE: ON (no mic/model changes)
+No drift: If a step touches the wrong ring, PARK it.
+
+Thread Anchor (paste at top of new thread)
+
+Chapter: CHAT INPUT (USER) → then INPUT BRIDGE
+
+Step: CI01
+
+Invariants:
+
+All geometry from ui/layout_constants.py (no new literals).
+
+personality.py is read-only.
+
+Dev/Mission-Control tools remain separate; this is a user chat box.
+
+Runbook: 2-terminal attach is the source of truth. Embedded CLI is opt-in via env (PIPER_UI_EMBED_CLI=1).
+
+Guardrails: one change per step; snapshot after pass; revert & PARK on 2× fail.
+
+No drift.
+
+Phase 1 — CI: Chat Input UI (UI ring only)
+CI01 — Reserve the input bar (layout only)
+
+Change: In ui/layout_constants.py add (if missing): INPUT_HEIGHT, INPUT_PAD_Y, SEND_BTN_WIDTH, INPUT_MAXLEN.
+Reserve a bottom container under the Chat pane (no widgets yet).
+
+Smoke: GUI identical except a slim empty bar under Chat. Autoscroll unaffected.
+KGB: KGB-YYYY-MM-DD_CI01_input_bar_reserved
+
+CI02 — Add the input & send button (no routing yet)
+
+Change: Add InputText + Send in that bar.
+
+Enter triggers the same handler as the button.
+
+Disable Send on empty/whitespace; clear box + refocus after click/Enter.
+
+Smoke: Typing toggles button enabled; Enter = click; no changes to Chat/Logs.
+KGB: KGB-YYYY-MM-DD_CI02_input_widget_basic
+
+CI03 — Local echo polish (UI-only)
+
+Change: On Send, append > You: … to Chat pane (not Logs). No routing to Piper yet.
+Enforce INPUT_MAXLEN, trim whitespace, 150 ms debounce, keep focus.
+
+Smoke: “hello” appears once in Chat; Logs unchanged; autoscroll smooth.
+KGB: KGB-YYYY-MM-DD_CI03_local_echo
+
+Phase 2 — IB: Input Bridge to Piper CLI (Services ring)
+
+We will reuse the known-good stdin pipeline already proven in Mission Control: spawn/attach a background app_cli_entry and write lines to its stdin; tee stdout into run\core.log which the GUI already tails. (You have this working in mission_control.py as start_cli_bg() + send_cli_command(); we’ll formalize it as a Service and call it from the GUI.) 
+
+mission_control
+
+IB01 — Introduce a Services bridge (new module)
+
+Change: Add services/input_bridge_cli.py with:
+
+ensure_cli_running() → launches python -u -m scripts.entries.app_cli_entry with stdin=PIPE, stdout teed to run\core.log (hidden window), environment set for UTF-8/PYTHONPATH.
+
+send(line: str) → ensures CLI is running, writes line + \n to stdin, flushes; returns True/False.
+
+Safe no-ops if process dead; never blocks UI.
+
+Smoke: From a tiny one-off test (or a temp script), call send("time") → CLI responds in core.log. GUI displays the reply via existing tail.
+KGB: KGB-YYYY-MM-DD_IB01_bridge_module
+
+IB02 — Wire GUI send → bridge.send
+
+Change: Replace CI03’s “local echo only” handler:
+
+Still show > You: … in Chat (user feedback).
+
+Also call input_bridge_cli.send(user_line).
+
+If PIPER_UI_EMBED_CLI != "1", don’t auto-spawn—show a small banner “Attach mode active; open CLI terminal or set PIPER_UI_EMBED_CLI=1”.
+
+Smoke:
+
+Attach mode (default): Send shows > You: … but no reply (until you start Terminal A).
+
+Embedded mode: Set $env:PIPER_UI_EMBED_CLI="1" and run GUI only; Send “time” → reply appears in Chat/Logs via core.log tail.
+KGB: KGB-YYYY-MM-DD_IB02_gui_wired
+
+IB03 — Robustness & UX
+
+Change:
+
+If embedded mode and CLI not running → auto-start once (with small toast “Starting Piper CLI…”).
+
+If CLI crashes → show banner “CLI unavailable” (don’t spam restarts).
+
+Graceful shutdown: on GUI exit, try to terminate the embedded CLI.
+
+Smoke: Kill the CLI process while GUI runs; next Send shows the banner; re-send starts it (embedded mode) and line is delivered.
+KGB: KGB-YYYY-MM-DD_IB03_resilience
+
+Compliance checklist (repeat each step)
+
+CI steps modify UI files only; IB steps modify services + a small call site in UI.
+
+All geometry from ui/layout_constants.py.
+
+No edits to personality.py.
+
+One change only; smoke passed; snapshot tagged.
+
+If a smoke fails twice, revert to last KGB and PARK.
+
+Parking (explicitly out-of-scope)
+
+Model/LLM turn-taking, EOU detection, persona shaping of user text.
+
+Mic/wake integration with the chat box.
+
+Theming/blue palette (belongs to Layout/Look).
+
+Dev Agent & patch tooling.
