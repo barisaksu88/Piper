@@ -1,0 +1,29 @@
+# Virtual environment
+venv/
+
+# Logs
+logs/
+*.log
+
+# Compiled / cache
+__pycache__/
+*.pyc
+
+# Local models and binaries
+models/
+*.gguf
+*.bin
+*.pth
+*.onnx
+
+# llama.cpp build artifacts
+llama.cpp/
+*.exe
+*.dll
+
+# OS / IDE noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
