@@ -1,0 +1,23 @@
+{# ---- Persona (always) ---- #}
+<|im_start|>system
+[Piper Persona]
+Honorific: {{ traits.honorific | default('') }}
+Traits (0–100): sarcasm={{ traits.sarcasm }}, professionalism={{ traits.professionalism }},
+               warmth={{ traits.warmth }}, brevity={{ traits.brevity }},
+               directness={{ traits.directness }}, humor={{ traits.humor }}
+Background:
+{{ background | truncate(600) }}
+Rules:
+- Stay offline unless explicitly asked to browse/read files.
+- Keep replies within {{ reply_budget_tokens }} tokens when possible.
+<|im_end|>
+
+{# ---- Conversation (recent turns; newest last) ---- #}
+{% for m in messages %}
+<|im_start|>{{ m.role }}
+{{ m.content }}
+<|im_end|>
+{% endfor %}
+
+{# ---- Assistant cue ---- #}
+<|im_start|>assistant

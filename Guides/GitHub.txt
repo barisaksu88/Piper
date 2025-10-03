@@ -1,0 +1,75 @@
+Piper GitHub Export & Audit Setup (Recap)
+
+Why we did this
+
+C:\Piper is your full working folder (scripts + models + logs + llama.cpp + runtime clutter).
+
+If we pushed that whole thing to GitHub, the repo would be bloated and unmanageable.
+
+Instead, we created a clean code-only mirror (C:\Piper_repo) that contains just:
+
+scripts/ (all source code)
+
+config/ (small text configs)
+
+root files like requirements.txt, .gitignore, README.md, LICENSE, .editorconfig
+
+Heavy assets (models, binaries, logs, snapshots, run folders, llama.cpp) stay local only.
+
+What we set up
+
+Created C:\Piper_repo to hold the clean repo.
+
+Added a .gitignore so big/unwanted files never sneak in.
+
+Wrote a PowerShell helper: C:\Piper\export_and_push.ps1.
+
+Mirrors scripts/ and config/ from C:\Piper → C:\Piper_repo.
+
+Copies requirements.txt, README.md, LICENSE, .editorconfig if they exist.
+
+Excludes hidden .git folders so no nested repos.
+
+Auto-commits only if changes exist.
+
+Pushes to GitHub (barisaksu88/Piper).
+
+If remote moved, it auto-rebases then pushes.
+
+First run was:
+
+.\export_and_push.ps1 -RepoUrl "https://github.com/barisaksu88/Piper.git" -Message "init: export scripts"
+
+
+After that, just:
+
+.\export_and_push.ps1 -Message "update: <your message>"
+
+
+How audits now work
+
+You keep developing in C:\Piper as normal.
+
+Whenever you want me to review:
+
+.\export_and_push.ps1 -Message "update: <what you changed>"
+
+
+Repo updates.
+
+You say: “audit the repo” → I pull the latest commit and give you diff-based patches.
+
+Important GitHub rule: I can only fetch files from raw URLs you paste at least once in the thread (e.g.
+https://raw.githubusercontent.com/barisaksu88/Piper/main/scripts/entries/app_gui_entry.py).
+After that, I can revisit freely in that thread. If you start a new thread, you’ll need to paste one raw link again.
+
+Current state
+
+Repo at https://github.com/barisaksu88/Piper
+ is public and synced with C:\Piper_repo.
+
+.gitignore, README.md, LICENSE, .editorconfig are set up.
+
+Export script is working (tested, pushes successfully).
+
+Next step: paste one raw file link (e.g. app_gui_entry.py) so I can open it and begin the first audit pass.

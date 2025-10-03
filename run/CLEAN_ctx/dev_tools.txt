@@ -1,0 +1,346 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 59
+--------------------------------------------------------------------------------
+    54:     except Exception:
+    55:         spawn_cli = None  # type: ignore
+    56:         
+    57: # Dev tools module (flag-gated)
+    58: try:
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 62
+--------------------------------------------------------------------------------
+    57: # Dev tools module (flag-gated)
+    58: try:
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+    65: # Heartbeat singleton for header timer
+    66: try:
+    67:     from scripts.ui.heartbeat import heartbeat
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 64
+--------------------------------------------------------------------------------
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+    65: # Heartbeat singleton for header timer
+    66: try:
+    67:     from scripts.ui.heartbeat import heartbeat
+    68: except Exception:
+    69:     from ui.heartbeat import heartbeat  # fallback when running from /scripts directly
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 656
+--------------------------------------------------------------------------------
+   651:         # Dev Tools mounters (we'll try multiple names)
+   652:         mounters = []
+   653:         for modname, sym in [
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+   660:         ]:
+   661:             try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 657
+--------------------------------------------------------------------------------
+   652:         mounters = []
+   653:         for modname, sym in [
+   654:             ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   655:             ("ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+   656:             ("scripts.ui.dev_tools", "attach_dev_tools"),
+   657:             ("ui.dev_tools", "attach_dev_tools"),
+   658:             ("scripts.ui.helpers.dev_controls_mount", "mount_dev_input"),
+   659:             ("ui.helpers.dev_controls_mount", "mount_dev_input"),
+   660:         ]:
+   661:             try:
+   662:                 mod = __import__(modname, fromlist=[sym])
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 965
+--------------------------------------------------------------------------------
+   960:             def _append_utf8_line_to_log(line: str):
+   961:                 import io
+   962:                 with io.open(p, "a", encoding="utf-8", newline="\n", errors="replace") as f:
+   963:                     f.write((line or "").rstrip("\r\n") + "\n")
+   964: 
+   965:             # Adapters expected by KGB dev_tools.attach_dev_tools
+   966:             def _emit_to_logs(text: str, tone: str = "info"):
+   967:                 # Route through your existing parser -> same badges/flow as CLI
+   968:                 try:
+   969:                     s = (text or "").rstrip("\n")
+   970:                     if not s:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 1002
+--------------------------------------------------------------------------------
+   997: 
+   998:             # Prefer the separate “Dev Tools” window (KGB API)
+   999:             mounted = False
+  1000:             try:
+  1001:                 try:
+  1002:                     from scripts.ui.dev_tools import attach_dev_tools as _attach  # type: ignore
+  1003:                 except Exception:
+  1004:                     from ui.dev_tools import attach_dev_tools as _attach          # type: ignore
+  1005: 
+  1006:                 _attach(
+  1007:                     get_state=lambda: str(globals().get("current_state", "?")),
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 1004
+--------------------------------------------------------------------------------
+   999:             mounted = False
+  1000:             try:
+  1001:                 try:
+  1002:                     from scripts.ui.dev_tools import attach_dev_tools as _attach  # type: ignore
+  1003:                 except Exception:
+  1004:                     from ui.dev_tools import attach_dev_tools as _attach          # type: ignore
+  1005: 
+  1006:                 _attach(
+  1007:                     get_state=lambda: str(globals().get("current_state", "?")),
+  1008:                     get_queue=lambda: list(globals().get("state_queue", [])),
+  1009:                     get_last_ts=lambda: globals().get("last_update_ts", None),
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 1015
+--------------------------------------------------------------------------------
+  1010:                     log_emit=_emit_to_logs,
+  1011:                     tone_for_line=_tone_for_line,
+  1012:                     badge_for_logs=_badge_for_logs,
+  1013:                 )
+  1014:                 mounted = True
+  1015:                 _emit_to_logs("[DEV][TRACE] dev_tools window mounted.", "status")
+  1016:             except Exception as e:
+  1017:                 _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+  1018: 
+  1019:             # Fallback: embedded controls if window API is absent
+  1020:             if not mounted:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: dev_tools @ line 1017
+--------------------------------------------------------------------------------
+  1012:                     badge_for_logs=_badge_for_logs,
+  1013:                 )
+  1014:                 mounted = True
+  1015:                 _emit_to_logs("[DEV][TRACE] dev_tools window mounted.", "status")
+  1016:             except Exception as e:
+  1017:                 _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+  1018: 
+  1019:             # Fallback: embedded controls if window API is absent
+  1020:             if not mounted:
+  1021:                 for modname, sym in [
+  1022:                     ("scripts.ui.helpers.dev_controls_mount", "lazy_mount_under_logs"),
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 59
+--------------------------------------------------------------------------------
+    54:     except Exception:
+    55:         spawn_cli = None  # type: ignore
+    56:         
+    57: # Dev tools module (flag-gated)
+    58: try:
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 62
+--------------------------------------------------------------------------------
+    57: # Dev tools module (flag-gated)
+    58: try:
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+    65: # Heartbeat singleton for header timer
+    66: try:
+    67:     from scripts.ui.heartbeat import heartbeat
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 64
+--------------------------------------------------------------------------------
+    59:     from scripts.ui.dev_tools import attach_dev_tools
+    60: except Exception:
+    61:     try:
+    62:         from ui.dev_tools import attach_dev_tools
+    63:     except Exception:
+    64:         attach_dev_tools = None  # type: ignore
+    65: # Heartbeat singleton for header timer
+    66: try:
+    67:     from scripts.ui.heartbeat import heartbeat
+    68: except Exception:
+    69:     from ui.heartbeat import heartbeat  # fallback when running from /scripts directly
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 612
+--------------------------------------------------------------------------------
+   607:                 except Exception:
+   608:                     pass
+   609: 
+   610:                 # e) Attach dev tools if enabled
+   611:                 try:
+   612:                     if attach_dev_tools is not None and os.getenv("PIPER_UI_DEV_INPUT", "0") == "1":
+   613:                         dev_handle = attach_dev_tools(
+   614:                             get_state=lambda: globals().get("current_state", "?"),
+   615:                             get_queue=lambda: list(globals().get("state_queue", [])),
+   616:                             get_last_ts=lambda: globals().get("last_update_ts", None),
+   617:                             log_emit=_emit_to_logs,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 613
+--------------------------------------------------------------------------------
+   608:                     pass
+   609: 
+   610:                 # e) Attach dev tools if enabled
+   611:                 try:
+   612:                     if attach_dev_tools is not None and os.getenv("PIPER_UI_DEV_INPUT", "0") == "1":
+   613:                         dev_handle = attach_dev_tools(
+   614:                             get_state=lambda: globals().get("current_state", "?"),
+   615:                             get_queue=lambda: list(globals().get("state_queue", [])),
+   616:                             get_last_ts=lambda: globals().get("last_update_ts", None),
+   617:                             log_emit=_emit_to_logs,
+   618:                             tone_for_line=_tone_for_line,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 621
+--------------------------------------------------------------------------------
+   616:                             get_last_ts=lambda: globals().get("last_update_ts", None),
+   617:                             log_emit=_emit_to_logs,
+   618:                             tone_for_line=_tone_for_line,
+   619:                             badge_for_logs=_badge_for_logs,
+   620:                         )
+   621:                         _emit_to_logs("[DEV][TRACE] PIPER_UI_DEV_INPUT=1  dev_tools=ok.", "status")
+   622:                     else:
+   623:                         _emit_to_logs(f"[DEV][TRACE] PIPER_UI_DEV_INPUT={os.getenv('PIPER_UI_DEV_INPUT','<unset>')}  dev_tools=None.", "status")
+   624:                 except Exception as e:
+   625:                     _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+   626: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 623
+--------------------------------------------------------------------------------
+   618:                             tone_for_line=_tone_for_line,
+   619:                             badge_for_logs=_badge_for_logs,
+   620:                         )
+   621:                         _emit_to_logs("[DEV][TRACE] PIPER_UI_DEV_INPUT=1  dev_tools=ok.", "status")
+   622:                     else:
+   623:                         _emit_to_logs(f"[DEV][TRACE] PIPER_UI_DEV_INPUT={os.getenv('PIPER_UI_DEV_INPUT','<unset>')}  dev_tools=None.", "status")
+   624:                 except Exception as e:
+   625:                     _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+   626: 
+   627:                 # f) UI ready
+   628:                 globals()["_UI_READY"] = True
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: dev_tools @ line 625
+--------------------------------------------------------------------------------
+   620:                         )
+   621:                         _emit_to_logs("[DEV][TRACE] PIPER_UI_DEV_INPUT=1  dev_tools=ok.", "status")
+   622:                     else:
+   623:                         _emit_to_logs(f"[DEV][TRACE] PIPER_UI_DEV_INPUT={os.getenv('PIPER_UI_DEV_INPUT','<unset>')}  dev_tools=None.", "status")
+   624:                 except Exception as e:
+   625:                     _emit_to_logs(f"[DEV][WARN] attach_dev_tools failed: {e}", "error")
+   626: 
+   627:                 # f) UI ready
+   628:                 globals()["_UI_READY"] = True
+   629: 
+   630:             # schedule for frame 1 (first frame after current)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: dev_tools @ line 12
+--------------------------------------------------------------------------------
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+    14: ]
+    15: 
+    16: def _read_text(p: Path) -> str:
+    17:     # resilient reader for mixed encodings
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: dev_tools @ line 1
+--------------------------------------------------------------------------------
+     1: # C:\Piper\scripts\ui\dev_tools.py
+     2: from __future__ import annotations
+     3: 
+     4: import os
+     5: from dataclasses import dataclass
+     6: from typing import Callable, Iterable, Optional
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: dev_tools @ line 46
+--------------------------------------------------------------------------------
+    41:         log_emit(text, "status")
+    42:     except Exception:
+    43:         pass
+    44: 
+    45: 
+    46: def attach_dev_tools(
+    47:     *,
+    48:     get_state: GetStr,
+    49:     get_queue: GetDeque,
+    50:     get_last_ts: GetTs,
+    51:     log_emit: LogEmit,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\dev_tools.py
+HIT: dev_tools @ line 84
+--------------------------------------------------------------------------------
+    79:     except Exception as e:
+    80:         log_emit(f"[DEV][WARN] Failed to attach CLI child: {e}", "error")
+    81:         cli_child = None
+    82: 
+    83:     # ----- Unified Dev Tools window with tabs
+    84:     with dpg.window(label="Dev Tools", tag="dev_tools_win", width=420, height=200, pos=(150, 400), no_collapse=False):
+    85:         with dpg.tab_bar(tag="dev_tabbar"):
+    86: 
+    87:             # --- Tab 1: Input ---
+    88:             with dpg.tab(label="Input", tag="dev_tab_input"):
+    89:                 def _dev_send_text(sender=None, app_data=None, user_data=None):

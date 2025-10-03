@@ -1,2 +1,41 @@
-# Auto detect text files and perform LF normalization
+# --- Global defaults ---
+# Auto-detect text files and normalize line endings
 * text=auto
+
+# --- Python ---
+*.py     text diff=python
+*.toml   text
+*.ini    text
+*.md     text
+*.txt    text
+*.jinja  text
+*.yml    text
+*.yaml   text
+
+# --- Logs & data (treat as text, but normalize) ---
+*.log    text
+*.json   text
+*.csv    text
+
+# --- Images / binaries (never auto-convert line endings, no diffs) ---
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.dll    binary
+*.exe    binary
+*.pyd    binary
+*.whl    binary
+
+# --- Models / artifacts (binary, do not diff) ---
+*.gguf   binary
+*.bin    binary
+*.pth    binary
+*.onnx   binary
+
+# --- OS / IDE noise (optional safety net) ---
+*.db     binary
+*.sqlite binary
+*.DS_Store binary
+Thumbs.db binary

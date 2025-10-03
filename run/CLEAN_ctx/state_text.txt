@@ -1,0 +1,654 @@
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: state_text @ line 464
+--------------------------------------------------------------------------------
+   459:             return default
+   460: 
+   461:     # Use provided args if 6 were passed, otherwise pull from globals
+   462:     if len(args) >= 6:
+   463:         # Compose authoritative header every time (persona/state are module globals)
+   464:         state_text = f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}"
+   465:         # dev-only trace + repaint nudge
+   466:         log_buffer.append(f"[DEV][TRACE] header_now tone={persona_tone} sarcasm={'on' if persona_sarcasm else 'off'}"); _log_dirty = True; _refresh_needed = True
+   467:     else:
+   468:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   469:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: state_text @ line 468
+--------------------------------------------------------------------------------
+   463:         # Compose authoritative header every time (persona/state are module globals)
+   464:         state_text = f"State: {current_state} · Tone: {persona_tone} · Sarcasm: {'on' if persona_sarcasm else 'off'}"
+   465:         # dev-only trace + repaint nudge
+   466:         log_buffer.append(f"[DEV][TRACE] header_now tone={persona_tone} sarcasm={'on' if persona_sarcasm else 'off'}"); _log_dirty = True; _refresh_needed = True
+   467:     else:
+   468:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   469:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+   470:         chat_text  = _choose("chat_buffer", "_chat_text", "CHAT_BUFFER", default=[])
+   471:         log_text   = _choose("log_buffer", "_log_text", "LOG_BUFFER", default=[])
+   472:         chat_dirty = True
+   473:         log_dirty  = True
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: state_text @ line 483
+--------------------------------------------------------------------------------
+   478:         chat_text = "\n".join(map(str, chat_text))
+   479:     if isinstance(log_text, (list, tuple, deque)):
+   480:         log_text = "\n".join(map(str, log_text))
+   481: 
+   482:     try:
+   483:         _refresh_ui(state_text, hb_text, chat_text, log_text, bool(chat_dirty), bool(log_dirty))
+   484:     except Exception:
+   485:         pass
+   486: 
+   487: def _set_hb_text(text: str):
+   488:     """Local passthrough to header heartbeat label."""
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl.py
+HIT: state_text @ line 879
+--------------------------------------------------------------------------------
+   874:                             if hasattr(_hb, "set_state"):
+   875:                                 _hb.set_state(current_state)
+   876:                             elif hasattr(_hb, "refresh_state"):
+   877:                                 _hb.refresh_state(current_state)
+   878:                             elif hasattr(_hb, "refresh"):
+   879:                                 # Some builds accept state_text as first arg in refresh
+   880:                                 _hb.refresh(f"State: {current_state}", _hb_text(),
+   881:                                             f"Tone: {persona_tone}",
+   882:                                             f"Sarcasm: {'on' if persona_sarcasm else 'off'}",
+   883:                                             "")
+   884:                         except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: state_text @ line 396
+--------------------------------------------------------------------------------
+   391:                 return _g.get(n)
+   392:         return default
+   393: 
+   394:     # Use provided args if 6 were passed, otherwise pull from globals
+   395:     if len(args) >= 6:
+   396:         state_text, hb_text, chat_text, log_text, chat_dirty, log_dirty = args[:6]
+   397:     else:
+   398:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   399:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+   400:         chat_text  = _choose("chat_buffer", "_chat_text", "CHAT_BUFFER", default=[])
+   401:         log_text   = _choose("log_buffer", "_log_text", "LOG_BUFFER", default=[])
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: state_text @ line 398
+--------------------------------------------------------------------------------
+   393: 
+   394:     # Use provided args if 6 were passed, otherwise pull from globals
+   395:     if len(args) >= 6:
+   396:         state_text, hb_text, chat_text, log_text, chat_dirty, log_dirty = args[:6]
+   397:     else:
+   398:         state_text = _choose("_state_text", "STATE_TEXT", default="")
+   399:         hb_text    = _choose("_hb_text", "HB_TEXT", default="")
+   400:         chat_text  = _choose("chat_buffer", "_chat_text", "CHAT_BUFFER", default=[])
+   401:         log_text   = _choose("log_buffer", "_log_text", "LOG_BUFFER", default=[])
+   402:         chat_dirty = True
+   403:         log_dirty  = True
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\entries\_app_gui_entry_impl_backup.py
+HIT: state_text @ line 413
+--------------------------------------------------------------------------------
+   408:         chat_text = "\n".join(map(str, chat_text))
+   409:     if isinstance(log_text, (list, tuple, deque)):
+   410:         log_text = "\n".join(map(str, log_text))
+   411: 
+   412:     try:
+   413:         _refresh_ui(state_text, hb_text, chat_text, log_text, bool(chat_dirty), bool(log_dirty))
+   414:     except Exception:
+   415:         pass
+   416: 
+   417: def _set_hb_text(text: str):
+   418:     """Local passthrough to header heartbeat label."""
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\tools\clean_inventory.py
+HIT: state_text @ line 8
+--------------------------------------------------------------------------------
+     3: from __future__ import annotations
+     4: import argparse, os, sys, shutil
+     5: from pathlib import Path
+     6: 
+     7: NEEDLES = [
+     8:     "set_state_dot","update_state_dot","state_dot_circle","state_label","state_text",
+     9:     "current_state","_pending_state_for_ui","_waking_seen_ts","VALID_STATES",
+    10:     "STATE_RE","STATE_WORD_RE","SLEEP_HINT_RE",
+    11:     "refresh_ui","apply_header_updates","header_bridge",
+    12:     "dev_tools","dev_controls_mount",
+    13:     "persona_tone","persona_sarcasm",
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_text @ line 229
+--------------------------------------------------------------------------------
+   224:         w,_ = dpg.get_item_rect_size("logs_scroll")
+   225:         dpg.configure_item("log_text", wrap=max(0, int(w - PAD)))
+   226:     except Exception:
+   227:         pass
+   228: 
+   229: def _update_state_dot(state_text: str):
+   230:     global _last_state, _last_change
+   231:     now = time.time()
+   232:     if state_text != _last_state:
+   233:         _last_state, _last_change = state_text, now
+   234:     show_state = _last_state if (now - _last_change) < _DWELL_SEC and _last_state else state_text
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_text @ line 232
+--------------------------------------------------------------------------------
+   227:         pass
+   228: 
+   229: def _update_state_dot(state_text: str):
+   230:     global _last_state, _last_change
+   231:     now = time.time()
+   232:     if state_text != _last_state:
+   233:         _last_state, _last_change = state_text, now
+   234:     show_state = _last_state if (now - _last_change) < _DWELL_SEC and _last_state else state_text
+   235:     color = STATE_COLORS.get(show_state, _DEFAULT_DOT)
+   236:     try:
+   237:         dpg.configure_item("state_dot_circle", fill=color)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_text @ line 233
+--------------------------------------------------------------------------------
+   228: 
+   229: def _update_state_dot(state_text: str):
+   230:     global _last_state, _last_change
+   231:     now = time.time()
+   232:     if state_text != _last_state:
+   233:         _last_state, _last_change = state_text, now
+   234:     show_state = _last_state if (now - _last_change) < _DWELL_SEC and _last_state else state_text
+   235:     color = STATE_COLORS.get(show_state, _DEFAULT_DOT)
+   236:     try:
+   237:         dpg.configure_item("state_dot_circle", fill=color)
+   238:     except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_text @ line 234
+--------------------------------------------------------------------------------
+   229: def _update_state_dot(state_text: str):
+   230:     global _last_state, _last_change
+   231:     now = time.time()
+   232:     if state_text != _last_state:
+   233:         _last_state, _last_change = state_text, now
+   234:     show_state = _last_state if (now - _last_change) < _DWELL_SEC and _last_state else state_text
+   235:     color = STATE_COLORS.get(show_state, _DEFAULT_DOT)
+   236:     try:
+   237:         dpg.configure_item("state_dot_circle", fill=color)
+   238:     except Exception:
+   239:         pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\_panes_impl.py
+HIT: state_text @ line 241
+--------------------------------------------------------------------------------
+   236:     try:
+   237:         dpg.configure_item("state_dot_circle", fill=color)
+   238:     except Exception:
+   239:         pass
+   240:     try:
+   241:         dpg.set_value("state_label", f"State: {state_text}")
+   242:     except Exception:
+   243:         pass
+   244: 
+   245: # ---------- Public API ----------
+   246: def init_ui(log_path: str) -> None:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 17
+--------------------------------------------------------------------------------
+    12: def build_dev_adapters(_hb, _shorten_path):
+    13:     """
+    14:     Returns callbacks for the Dev Pane that update header labels and panes visually.
+    15:     This mirrors the previous _get_dev_controls_adapters() in ui/panes.py.
+    16:     """
+    17:     def _refresh_header_visual(state_text: Optional[str] = None):
+    18:         try:
+    19:             current_tone = globals().get("current_tone", "neutral")
+    20:             sarcasm_on = bool(globals().get("sarcasm_on", False))
+    21:             log_path = globals().get("_LOG_PATH")
+    22:             state_text_effective = state_text if state_text is not None else globals().get("_last_state_text", "SLEEPING")
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 22
+--------------------------------------------------------------------------------
+    17:     def _refresh_header_visual(state_text: Optional[str] = None):
+    18:         try:
+    19:             current_tone = globals().get("current_tone", "neutral")
+    20:             sarcasm_on = bool(globals().get("sarcasm_on", False))
+    21:             log_path = globals().get("_LOG_PATH")
+    22:             state_text_effective = state_text if state_text is not None else globals().get("_last_state_text", "SLEEPING")
+    23: 
+    24:             state_str, tone_str, sarcasm_str, tailing_str = compose_header_strings(
+    25:                 state_text=state_text_effective,
+    26:                 current_tone=current_tone,
+    27:                 sarcasm_on=sarcasm_on,
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 25
+--------------------------------------------------------------------------------
+    20:             sarcasm_on = bool(globals().get("sarcasm_on", False))
+    21:             log_path = globals().get("_LOG_PATH")
+    22:             state_text_effective = state_text if state_text is not None else globals().get("_last_state_text", "SLEEPING")
+    23: 
+    24:             state_str, tone_str, sarcasm_str, tailing_str = compose_header_strings(
+    25:                 state_text=state_text_effective,
+    26:                 current_tone=current_tone,
+    27:                 sarcasm_on=sarcasm_on,
+    28:                 log_path=log_path,
+    29:                 shorten_path_fn=_shorten_path
+    30:             )
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 34
+--------------------------------------------------------------------------------
+    29:                 shorten_path_fn=_shorten_path
+    30:             )
+    31: 
+    32:             if (_hb is not None) and hasattr(_hb, "refresh"):
+    33:                 _hb.refresh(
+    34:                     state_text=state_str,
+    35:                     heartbeat_text=globals().get("_last_hb_text", ""),
+    36:                     tone_text=tone_str,
+    37:                     sarcasm_text=sarcasm_str,
+    38:                     tailing_text=tailing_str,
+    39:                 )
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 43
+--------------------------------------------------------------------------------
+    38:                     tailing_text=tailing_str,
+    39:                 )
+    40: 
+    41:             # Try header's own dot setter if present
+    42:             try:
+    43:                 if _hb is not None and hasattr(_hb, "set_state_dot") and state_text_effective is not None:
+    44:                     _hb.set_state_dot(state_text_effective)
+    45:             except Exception:
+    46:                 pass
+    47: 
+    48:             globals()["_last_state_text"] = state_text_effective
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 44
+--------------------------------------------------------------------------------
+    39:                 )
+    40: 
+    41:             # Try header's own dot setter if present
+    42:             try:
+    43:                 if _hb is not None and hasattr(_hb, "set_state_dot") and state_text_effective is not None:
+    44:                     _hb.set_state_dot(state_text_effective)
+    45:             except Exception:
+    46:                 pass
+    47: 
+    48:             globals()["_last_state_text"] = state_text_effective
+    49:         except Exception:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\dev_adapters.py
+HIT: state_text @ line 48
+--------------------------------------------------------------------------------
+    43:                 if _hb is not None and hasattr(_hb, "set_state_dot") and state_text_effective is not None:
+    44:                     _hb.set_state_dot(state_text_effective)
+    45:             except Exception:
+    46:                 pass
+    47: 
+    48:             globals()["_last_state_text"] = state_text_effective
+    49:         except Exception:
+    50:             pass
+    51: 
+    52:     def on_set_state(name: str):
+    53:         try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_loop.py
+HIT: state_text @ line 16
+--------------------------------------------------------------------------------
+    11:     from ui.panes import refresh_ui, set_hb_text  # type: ignore
+    12: 
+    13: # The update function mirrors the old signature expectations from app_gui_entry.
+    14: # in scripts/ui/helpers/gui_loop.py
+    15: def update_panes(
+    16:     state_text=None, 
+    17:     hb_text=None, 
+    18:     chat_text=None, 
+    19:     log_text=None, 
+    20:     chat_dirty=None, 
+    21:     log_dirty=None
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_loop.py
+HIT: state_text @ line 27
+--------------------------------------------------------------------------------
+    22: ):
+    23:     """Refresh UI panes. If arguments are None, fall back to globals."""
+    24:     from scripts.ui import panes
+    25: 
+    26:     # Use globals if args not passed
+    27:     if state_text is None:
+    28:         state_text = globals().get("_state_text", "")
+    29:     if hb_text is None:
+    30:         hb_text = globals().get("_hb_text", "")
+    31:     if chat_text is None:
+    32:         chat_text = globals().get("_chat_text", [])
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_loop.py
+HIT: state_text @ line 28
+--------------------------------------------------------------------------------
+    23:     """Refresh UI panes. If arguments are None, fall back to globals."""
+    24:     from scripts.ui import panes
+    25: 
+    26:     # Use globals if args not passed
+    27:     if state_text is None:
+    28:         state_text = globals().get("_state_text", "")
+    29:     if hb_text is None:
+    30:         hb_text = globals().get("_hb_text", "")
+    31:     if chat_text is None:
+    32:         chat_text = globals().get("_chat_text", [])
+    33:     if log_text is None:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\gui_loop.py
+HIT: state_text @ line 40
+--------------------------------------------------------------------------------
+    35:     if chat_dirty is None:
+    36:         chat_dirty = globals().get("_chat_dirty", False)
+    37:     if log_dirty is None:
+    38:         log_dirty = globals().get("_log_dirty", False)
+    39: 
+    40:     panes.refresh_ui(state_text, hb_text, chat_text, log_text, chat_dirty, log_dirty)
+    41:     
+    42: def set_heartbeat_text(text: str) -> None:
+    43:     """Thin wrapper so callers don't import panes directly."""
+    44:     try:
+    45:         from scripts.ui.panes import set_hb_text as _set
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_bridge.py
+HIT: state_text @ line 7
+--------------------------------------------------------------------------------
+     2: B04.8 Header bridge — tiny wrapper around header bar refresh.
+     3: Keeps panes.py slim. No new literals.
+     4: """
+     5: from __future__ import annotations
+     6: 
+     7: def apply_header_updates(hb_module, state_text: str, heartbeat_text: str,
+     8:                          tone_text: str, sarcasm_text: str, tailing_text: str) -> None:
+     9:     """Call header bar's refresh() if present, guarded."""
+    10:     try:
+    11:         if hb_module is not None and hasattr(hb_module, "refresh"):
+    12:             hb_module.refresh(
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_bridge.py
+HIT: state_text @ line 13
+--------------------------------------------------------------------------------
+     8:                          tone_text: str, sarcasm_text: str, tailing_text: str) -> None:
+     9:     """Call header bar's refresh() if present, guarded."""
+    10:     try:
+    11:         if hb_module is not None and hasattr(hb_module, "refresh"):
+    12:             hb_module.refresh(
+    13:                 state_text=state_text,
+    14:                 heartbeat_text=heartbeat_text,
+    15:                 tone_text=tone_text,
+    16:                 sarcasm_text=sarcasm_text,
+    17:                 tailing_text=tailing_text,
+    18:             )
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_utils.py
+HIT: state_text @ line 13
+--------------------------------------------------------------------------------
+     8: 
+     9: import dearpygui.dearpygui as dpg
+    10: 
+    11: 
+    12: def compose_header_strings(
+    13:     state_text: str,
+    14:     current_tone: Optional[str],
+    15:     sarcasm_on: bool,
+    16:     log_path: Optional[str],
+    17:     shorten_path_fn=None
+    18: ) -> Tuple[str, str, str, str]:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_utils.py
+HIT: state_text @ line 23
+--------------------------------------------------------------------------------
+    18: ) -> Tuple[str, str, str, str]:
+    19:     """
+    20:     Returns (state_str, tone_str, sarcasm_str, tailing_str) exactly like panes.py did.
+    21:     shorten_path_fn: optional callable for displaying the tailed log path.
+    22:     """
+    23:     state_str = f"State: {state_text}"
+    24:     tone_str = f"Tone: {str(current_tone or 'neutral')}"
+    25:     sarcasm_str = "Sarcasm: on" if bool(sarcasm_on) else "Sarcasm: off"
+    26:     tailing_str = f"Tailing: {shorten_path_fn(log_path)}" if (log_path and callable(shorten_path_fn)) else ""
+    27:     return state_str, tone_str, sarcasm_str, tailing_str
+    28: 
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_utils.py
+HIT: state_text @ line 30
+--------------------------------------------------------------------------------
+    25:     sarcasm_str = "Sarcasm: on" if bool(sarcasm_on) else "Sarcasm: off"
+    26:     tailing_str = f"Tailing: {shorten_path_fn(log_path)}" if (log_path and callable(shorten_path_fn)) else ""
+    27:     return state_str, tone_str, sarcasm_str, tailing_str
+    28: 
+    29: 
+    30: # If your panes.py had a private _update_state_dot(state_text), move that logic here:
+    31: def update_state_dot(state_text: str) -> None:
+    32:     """
+    33:     Update the small state indicator dot in the header/status bar.
+    34:     This is a straight move from panes.py (same semantics).
+    35:     """
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_utils.py
+HIT: state_text @ line 31
+--------------------------------------------------------------------------------
+    26:     tailing_str = f"Tailing: {shorten_path_fn(log_path)}" if (log_path and callable(shorten_path_fn)) else ""
+    27:     return state_str, tone_str, sarcasm_str, tailing_str
+    28: 
+    29: 
+    30: # If your panes.py had a private _update_state_dot(state_text), move that logic here:
+    31: def update_state_dot(state_text: str) -> None:
+    32:     """
+    33:     Update the small state indicator dot in the header/status bar.
+    34:     This is a straight move from panes.py (same semantics).
+    35:     """
+    36:     try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\header_utils.py
+HIT: state_text @ line 48
+--------------------------------------------------------------------------------
+    43:         if not DOT:
+    44:             return
+    45: 
+    46:         # Map state text to a DearPyGui color; keep same mapping you already use.
+    47:         # (Example: SLEEPING gray, WAKING yellow, LISTENING blue, THINKING purple, SPEAKING green)
+    48:         st = (state_text or "").upper()
+    49:         color = (128, 128, 128, 255)  # default gray
+    50:         if "WAKING" in st:
+    51:             color = (255, 200, 0, 255)
+    52:         elif "LISTENING" in st:
+    53:             color = (64, 128, 255, 255)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\refresh_core.py
+HIT: state_text @ line 64
+--------------------------------------------------------------------------------
+    59:             dpg.add_text("", parent=LOG_SCROLL, tag="log_text")
+    60:     except Exception:
+    61:         pass
+    62: 
+    63: def refresh_ui(
+    64:     state_text: str,
+    65:     heartbeat_text: str,
+    66:     chat_text: str,
+    67:     log_text: str,
+    68:     chat_dirty: bool,
+    69:     log_dirty: bool
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\refresh_core.py
+HIT: state_text @ line 206
+--------------------------------------------------------------------------------
+   201:         pass
+   202: 
+   203: 
+   204:     # ---- Header state/tone/etc. text (bridge takes composed strings elsewhere) ----
+   205:     try:
+   206:         apply_header_updates(state_text=state_text,
+   207:                              heartbeat_text=heartbeat_text,
+   208:                              tailing_text="")  # tailing handled elsewhere; keep stable
+   209:     except Exception:
+   210:         pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\state_dot.py
+HIT: state_text @ line 8
+--------------------------------------------------------------------------------
+     3: import dearpygui.dearpygui as dpg
+     4: 
+     5: # Known/legacy tag names we may find for the status dot
+     6: _DOT_TAGS = ("state_dot_circle", "state_dot", "status_dot")
+     7: 
+     8: def update_state_dot(state_text: str) -> None:
+     9:     """
+    10:     Update the header status dot color based on state_text.
+    11:     Safe no-op if no dot exists.
+    12:     """
+    13:     try:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\state_dot.py
+HIT: state_text @ line 10
+--------------------------------------------------------------------------------
+     5: # Known/legacy tag names we may find for the status dot
+     6: _DOT_TAGS = ("state_dot_circle", "state_dot", "status_dot")
+     7: 
+     8: def update_state_dot(state_text: str) -> None:
+     9:     """
+    10:     Update the header status dot color based on state_text.
+    11:     Safe no-op if no dot exists.
+    12:     """
+    13:     try:
+    14:         # resolve dot tag
+    15:         dot = None
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\helpers\state_dot.py
+HIT: state_text @ line 27
+--------------------------------------------------------------------------------
+    22:                 pass
+    23:         if not dot:
+    24:             return
+    25: 
+    26:         # pick a color; keep your existing mapping simple/neutral
+    27:         st = (state_text or "").lower()
+    28:         if "listening" in st:
+    29:             col = (80, 160, 255, 255)   # blue-ish
+    30:         elif "thinking" in st or "processing" in st:
+    31:             col = (255, 205, 80, 255)   # yellow-ish
+    32:         elif "speaking" in st or "talking" in st:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_text @ line 47
+--------------------------------------------------------------------------------
+    42:             dpg.add_spacer(width=12); dpg.add_text("·"); dpg.add_spacer(width=8)
+    43:             dpg.add_text(f"Tailing: {str(log_path) if log_path else ''}", tag="tailing_label")
+    44:     except Exception:
+    45:         pass
+    46: 
+    47: def refresh(state_text: str,
+    48:             heartbeat_text: str,
+    49:             tone_text: str,
+    50:             sarcasm_text: str,
+    51:             tailing_text: str,
+    52:             state_name: str | None = None) -> None:
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_text @ line 55
+--------------------------------------------------------------------------------
+    50:             sarcasm_text: str,
+    51:             tailing_text: str,
+    52:             state_name: str | None = None) -> None:
+    53:     """
+    54:     Update header labels AND recolor the state dot.
+    55:     If state_name is not provided, derive it from state_text.
+    56:     """
+    57:     import dearpygui.dearpygui as dpg
+    58: 
+    59:     # --- keep your existing label updates exactly as they are ---
+    60:     try: dpg.set_value("state_label", state_text)
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_text @ line 60
+--------------------------------------------------------------------------------
+    55:     If state_name is not provided, derive it from state_text.
+    56:     """
+    57:     import dearpygui.dearpygui as dpg
+    58: 
+    59:     # --- keep your existing label updates exactly as they are ---
+    60:     try: dpg.set_value("state_label", state_text)
+    61:     except Exception: pass
+    62:     try: dpg.set_value("heartbeat_text", heartbeat_text)
+    63:     except Exception: pass
+    64:     try: dpg.set_value("tone_text", tone_text)
+    65:     except Exception: pass
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_text @ line 75
+--------------------------------------------------------------------------------
+    70: 
+    71:     # --- NEW: normalize the state name and force dot recolor every refresh ---
+    72:     if state_name is None or not str(state_name).strip():
+    73:         # derive from "State: WAKING · ..."
+    74:         try:
+    75:             _raw = (state_text or "")
+    76:             _after_colon = _raw.split(":", 1)[-1]
+    77:             _first_field = _after_colon.split("·", 1)[0]
+    78:             name = _first_field.strip().upper()
+    79:         except Exception:
+    80:             name = ""
+
+--------------------------------------------------------------------------------
+FILE: C:\Piper\scripts\ui\pane_parts\header_bar.py
+HIT: state_text @ line 92
+--------------------------------------------------------------------------------
+    87:     except Exception:
+    88:         pass
+    89:     """Update header labels; inputs are already composed strings."""
+    90:     try:
+    91:         if dpg.does_item_exist("state_label"):
+    92:             dpg.set_value("state_label", state_text)
+    93:         if dpg.does_item_exist("hb_label"):
+    94:             dpg.set_value("hb_label", heartbeat_text)
+    95:         if dpg.does_item_exist("tone_label"):
+    96:             dpg.set_value("tone_label", tone_text)
+    97:         if dpg.does_item_exist("sarcasm_label"):

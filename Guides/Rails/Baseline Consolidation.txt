@@ -1,0 +1,274 @@
+
+Piper — Baseline Consolidation (No ENVs · Single Config · ChatML+Jinja · Running Memory Only)
+
+Chapter: BC01
+Baseline to modify: KGB-2025-09-28_I01_streaming_cancel_bl
+Goal: A consistent Piper using one config file, one prompt template, and running memory only (no recall/capsules/persona envs).
+Scope: Services + provider + config + template. No GUI feature adds. UI may receive comment headers only.
+
+Contracts (must be present as top-of-file headers)
+
+A) scripts/services/config_loader.py (new)
+
+# CONTRACT — Single Config Loader
+# - load_config(path=None) -> dict; defaults to C:\Piper\config\piper.toml
+# - Only source of truth for runtime knobs (no envs).
+# - Optional escape hatch: PIPER_CONFIG path (dev only).
+# - Validates & clamps: context_size, threads, ngl, temperature, top_k, top_p.
+# - No UI imports; no network; no background threads.
+
+
+B) scripts/services/llm_client.py (unified, the only client)
+
+# CONTRACT — Client (Unified)
+# - generate(...) and stream_generate(...): build prompt via ChatML Jinja.
+# - Persona from persona_source; recent-turns only; NO recall/capsule.
+# - Bind provider args (model path, context_size, threads, ngl, temps) from config.
+# - Log rendered prompt (truncated) to prompt_log.
+# - Cancel/stop preserved from I01. No env reads.
+
+
+C) scripts/services/providers/llamacpp.py
+
+# CONTRACT — llama.cpp Adapter
+# - Accept argv from client/config: --context-size, --threads, --ngl, temperature, top_k, top_p.
+# - Start/iterate/stop stable on Windows.
+# - No UI imports; no persona/memory logic.
+
+
+D) scripts/services/persona_source.py
+
+# CONTRACT — Persona (Single Source)
+# - Load background.md + traits.ini into dict {background:str, traits:dict}.
+# - No env or YAML unless legacy flag is enabled via config.
+
+
+E) scripts/ui/hooks/llm_chat.py
+
+# CONTRACT — UI Glue Only
+# - Calls llm_client.*; no provider calls; no persona/memory logic.
+# - No subprocess; no services.providers imports.
+
+Files to add / ensure exist
+
+C:\Piper\config\piper.toml (see template below)
+
+C:\Piper\config\hermes3_chatml.jinja (see template below)
+
+C:\Piper\config\persona_background.md (starter; can be empty)
+
+C:\Piper\config\persona_traits.ini (starter; see below)
+
+C:\Piper\logs\rendered_prompt.log (auto-created; append, truncate lines >16k chars)
+
+piper.toml (starter)
+[model]
+path = "C:\\Piper\\models\\Hermes-3-Llama-3.1-8B-Q5_K_M.gguf"
+context_size = 16384
+threads = 12
+ngl = 35
+temperature = 0.8
+top_k = 40
+top_p = 0.95
+
+[prompt]
+template = "C:\\Piper\\config\\hermes3_chatml.jinja"
+reply_reserve_tokens = 1000
+
+[persona]
+background_file = "C:\\Piper\\config\\persona_background.md"
+traits_file     = "C:\\Piper\\config\\persona_traits.ini"
+
+[memory]
+mode = "running_only"    # hard requirement for BC01
+
+[paths]
+log_dir = "C:\\Piper\\logs"
+prompt_log = "C:\\Piper\\logs\\rendered_prompt.log"
+
+[features]
+use_legacy_envs = false  # must stay false in BC01
+
+persona_traits.ini (starter)
+[traits]
+sarcasm = 40
+professionalism = 30
+warmth = 60
+brevity = 40
+directness = 70
+humor = 35
+honorific = sir
+
+hermes3_chatml.jinja (minimal, running memory only)
+{# ---- Persona (always) ---- #}
+<|im_start|>system
+[Piper Persona]
+Honorific: {{ traits.honorific | default('') }}
+Traits (0–100): sarcasm={{ traits.sarcasm }}, professionalism={{ traits.professionalism }},
+               warmth={{ traits.warmth }}, brevity={{ traits.brevity }},
+               directness={{ traits.directness }}, humor={{ traits.humor }}
+Background:
+{{ background | truncate(600) }}
+Rules:
+- Stay offline unless explicitly asked to browse/read files.
+- Keep replies within {{ reply_budget_tokens }} tokens when possible.
+<|im_end|>
+
+{# ---- Conversation (recent turns; newest last) ---- #}
+{% for m in messages %}
+<|im_start|>{{ m.role }}
+{{ m.content }}
+<|im_end|>
+{% endfor %}
+
+{# ---- Assistant cue ---- #}
+<|im_start|>assistant
+
+Rails (do in order; one change → smoke → KGB; on 2× fail → revert & PARK)
+BC01.1 — Config Loader + Startup Summary
+
+Plan: Add config_loader.py; replace env reads everywhere with config fields; print startup summary once.
+
+Changes:
+
+New scripts/services/config_loader.py with load_config().
+
+llm_client and llamacpp consume config dict; no direct env usage.
+
+On startup, print summary: model path, ctx, threads, ngl, template path, persona files, flags.
+
+Smoke:
+
+Edit piper.toml (context_size or ngl), restart → summary reflects changes.
+
+No envs influence behavior when [features].use_legacy_envs=false.
+
+Tag: KGB-YYYY-MM-DD_BC01.1_config_loader
+
+BC01.2 — Unify Client & Kill Recall
+
+Plan: Keep one client at scripts/services/llm_client.py; disable all recall/capsule paths.
+
+Changes:
+
+Remove/retire any duplicate client modules.
+
+In unified client, drop imports/paths to memory_store/memory_policy.
+
+Ensure mode="running_only" is enforced from config.
+
+Smoke:
+
+Grep shows memory_store/memory_policy unused by client.
+
+Normal chat works; no memory preamble present in rendered prompt.
+
+Tag: KGB-YYYY-MM-DD_BC01.2_unify_client_no_recall
+
+BC01.3 — Adopt ChatML+Jinja + Prompt Logging
+
+Plan: Route prompt assembly through hermes3_chatml.jinja; log final rendered prompt every turn.
+
+Changes:
+
+llm_client.generate/stream_generate: render template with:
+
+background, traits from persona_source
+
+messages = recent turns (running memory only; newest last)
+
+reply_budget_tokens = prompt.reply_reserve_tokens
+
+Append rendered prompt to paths.prompt_log (truncate very long lines; add turn separator).
+
+No memory capsule in BC01.
+
+Smoke:
+
+Start a chat; rendered_prompt.log shows ChatML blocks exactly as template; includes persona; shows last turns; no capsule.
+
+Streaming still functions; cancel/stop still clean.
+
+Tag: KGB-YYYY-MM-DD_BC01.3_template_logging
+
+BC01.4 — Provider Arg Plumbing (ctx/threads/ngl/temps)
+
+Plan: Ensure provider argv mirrors config.
+
+Changes:
+
+llamacpp.py builds argv: --context-size, --threads, --ngl, temperature/top_k/top_p as supported by your build.
+
+Client passes config values through.
+
+Smoke:
+
+Run and inspect process args (or verbose logs) → flags match TOML values.
+
+GPU utilization increases when ngl > 0; CPU load drops.
+
+Tag: KGB-YYYY-MM-DD_BC01.4_provider_argv
+
+BC01.5 — Namespace Hygiene & Legacy Off
+
+Plan: Normalize imports and kill envs.
+
+Changes:
+
+All code imports scripts.services.llm_client (UI hook included).
+
+[features].use_legacy_envs=false enforced; if someone flips it true, log one [WARN] legacy env override enabled.
+
+Smoke:
+
+Grep: UI has no services.providers imports; client has no env reads.
+
+Flip use_legacy_envs=true → one-time WARN printed; envs can override (dev only).
+
+Tag: KGB-YYYY-MM-DD_BC01.5_namespace_legacy
+
+Acceptance Gates (what I’ll check to bless)
+
+No env behavior when use_legacy_envs=false.
+
+One client module in use; UI imports it; streaming + cancel OK.
+
+No reference to memory_store/policy in client; running memory only.
+
+Rendered prompt log exists and matches the Jinja template; includes persona block; shows recent turns; no memory capsule.
+
+Provider argv reflects TOML (ctx, threads, ngl, temps).
+
+Layout constants file remains the single source of truth (no numbers sneak into hooks).
+
+Compliance Block (post per rail)
+Chapter: BC01
+Rail: BC01.1 / .2 / .3 / .4 / .5
+Scope: ✅
+Plan: (1–3 lines)
+Patch summary: (files changed; brief)
+Smoke: (bullet results)
+KGB: (new tag)
+Notes/Parking: (if any)
+
+What I need from you up front (once the thread starts)
+
+Create these files if missing:
+
+C:\Piper\config\piper.toml
+
+C:\Piper\config\hermes3_chatml.jinja
+
+C:\Piper\config\persona_background.md
+
+C:\Piper\config\persona_traits.ini
+
+Confirm intended defaults:
+
+model.path (your Hermes-3 GGUF file path)
+
+context_size (recommend 16384)
+
+threads (12) and ngl (≈35 for 4070S)
+
+Ensure C:\Piper\logs exists (writeable).
