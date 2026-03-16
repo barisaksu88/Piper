@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Piper",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python app.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Piper Harness Shell",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\piper_harness.py shell",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Piper Harness Once",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\piper_harness.py once \"${input:piperHarnessText}\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "Dump Piper Harness State",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\piper_harness.py dump --json",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run File Chaos Test",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\file_chaos_test.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "Benchmark Piper Models",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\benchmark_models.py auto",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Resource Monitor",
+      "type": "shell",
+      "command": ".venv\\Scripts\\python scripts\\resource_monitor.py",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "piperHarnessText",
+      "type": "promptString",
+      "description": "Text to send to Piper through the CLI harness"
+    }
+  ]
+}
