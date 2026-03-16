@@ -1,0 +1,232 @@
+{
+  "results": [
+    {
+      "label": "q25",
+      "model_path": "C:\\Piper\\models\\llama\\qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf",
+      "mmproj_path": null,
+      "boot_ok": true,
+      "boot_seconds": 4.546,
+      "boot_status": "ready",
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.093,
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 36,
+            "total_tokens": 38
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 36,
+            "prompt_ms": 45.31,
+            "prompt_per_token_ms": 1.2586111111111111,
+            "prompt_per_second": 794.5265945707349,
+            "predicted_n": 2,
+            "predicted_ms": 26.807,
+            "predicted_per_token_ms": 13.4035,
+            "predicted_per_second": 74.60737866975045
+          }
+        },
+        {
+          "name": "route_chat_json",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.173,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 49,
+            "total_tokens": 55
+          },
+          "timings": {
+            "cache_n": 24,
+            "prompt_n": 25,
+            "prompt_ms": 36.464,
+            "prompt_per_token_ms": 1.4585599999999999,
+            "prompt_per_second": 685.6077226853884,
+            "predicted_n": 6,
+            "predicted_ms": 116.278,
+            "predicted_per_token_ms": 19.37966666666667,
+            "predicted_per_second": 51.60047472436746
+          }
+        },
+        {
+          "name": "task_event_split",
+          "passed": true,
+          "observed": "{\"bucket\":\"event\"}",
+          "latency_s": 0.167,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 52,
+            "total_tokens": 58
+          },
+          "timings": {
+            "cache_n": 30,
+            "prompt_n": 22,
+            "prompt_ms": 33.893,
+            "prompt_per_token_ms": 1.5405909090909091,
+            "prompt_per_second": 649.1015843979583,
+            "predicted_n": 6,
+            "predicted_ms": 114.393,
+            "predicted_per_token_ms": 19.0655,
+            "predicted_per_second": 52.45076184731583
+          }
+        }
+      ]
+    },
+    {
+      "label": "q6",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q6_K.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+      "boot_ok": true,
+      "boot_seconds": 3.558,
+      "boot_status": "ready",
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.08,
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 40.193,
+            "prompt_per_token_ms": 2.1154210526315786,
+            "prompt_per_second": 472.71913019680045,
+            "predicted_n": 2,
+            "predicted_ms": 16.591,
+            "predicted_per_token_ms": 8.2955,
+            "predicted_per_second": 120.54728467241274
+          }
+        },
+        {
+          "name": "route_chat_json",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.141,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 32,
+            "total_tokens": 38
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 32,
+            "prompt_ms": 37.638,
+            "prompt_per_token_ms": 1.1761875,
+            "prompt_per_second": 850.2045804771774,
+            "predicted_n": 6,
+            "predicted_ms": 69.674,
+            "predicted_per_token_ms": 11.612333333333334,
+            "predicted_per_second": 86.1153371415449
+          }
+        },
+        {
+          "name": "task_event_split",
+          "passed": true,
+          "observed": "{\"bucket\":\"event\"}",
+          "latency_s": 0.148,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 35,
+            "total_tokens": 41
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 35,
+            "prompt_ms": 36.107,
+            "prompt_per_token_ms": 1.0316285714285713,
+            "prompt_per_second": 969.3411249896143,
+            "predicted_n": 6,
+            "predicted_ms": 65.263,
+            "predicted_per_token_ms": 10.877166666666668,
+            "predicted_per_second": 91.93570629606361
+          }
+        }
+      ]
+    },
+    {
+      "label": "q8",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q8_0.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+      "boot_ok": true,
+      "boot_seconds": 4.543,
+      "boot_status": "ready",
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.099,
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 41.128,
+            "prompt_per_token_ms": 2.1646315789473682,
+            "prompt_per_second": 461.97237891460804,
+            "predicted_n": 2,
+            "predicted_ms": 20.75,
+            "predicted_per_token_ms": 10.375,
+            "predicted_per_second": 96.3855421686747
+          }
+        },
+        {
+          "name": "route_chat_json",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.157,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 32,
+            "total_tokens": 38
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 32,
+            "prompt_ms": 37.503,
+            "prompt_per_token_ms": 1.17196875,
+            "prompt_per_second": 853.2650721275631,
+            "predicted_n": 6,
+            "predicted_ms": 85.835,
+            "predicted_per_token_ms": 14.305833333333332,
+            "predicted_per_second": 69.90155530960564
+          }
+        },
+        {
+          "name": "task_event_split",
+          "passed": true,
+          "observed": "{\"bucket\":\"event\"}",
+          "latency_s": 0.163,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 35,
+            "total_tokens": 41
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 35,
+            "prompt_ms": 40.14,
+            "prompt_per_token_ms": 1.1468571428571428,
+            "prompt_per_second": 871.9481813652217,
+            "predicted_n": 6,
+            "predicted_ms": 78.936,
+            "predicted_per_token_ms": 13.156,
+            "predicted_per_second": 76.01094557616295
+          }
+        }
+      ]
+    }
+  ]
+}

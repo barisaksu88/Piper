@@ -1,0 +1,298 @@
+﻿"""core/boot.py
+
+Handles initialization of the LLM server.
+"""
+
+import os
+import subprocess
+import time
+import threading
+from collections.abc import Callable, Sequence
+import psutil
+import urllib.request
+import urllib.error
+from pathlib import Path
+from urllib.parse import urlparse
+from config import CFG, data_debug_path
+
+
+PostBootTask = tuple[str, Callable[[], object]]
+
+class BootManager:
+    def __init__(
+        self,
+        ui_queue,
+        post_boot_tasks: Sequence[PostBootTask] | None = None,
+        background_boot_tasks: Sequence[PostBootTask] | None = None,
+    ):
+        self.process = None
+        self.ready = False
+        self.server_ready = False
+        self.brain_ready = False
+        self.ui_queue = ui_queue
+        self.post_boot_tasks = list(post_boot_tasks or [])
+        self.background_boot_tasks = list(background_boot_tasks or [])
+        self._server_log_handle = None
+
+    def pause_server(self):
+        """Stops the LLM server to free VRAM."""
+        if self.process and self.process.poll() is None:
+            print("[Boot] Pausing LLM Server...")
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=10)
+                print("[Boot] Server Paused.")
+            except Exception as e:
+                print(f"[Boot] Error pausing: {e}")
+            finally:
+                self._close_server_log_handle()
+
+    def resume_server(self):
+        """Restarts the server."""
+        if not (self.process and self.process.poll() is None):
+            print("[Boot] Resuming LLM Server...")
+            self.run_sequence(run_post_boot_tasks=False) # Restarts logic
+            
+    def log(self, message: str):
+        print(message)
+        if self.ui_queue:
+            self.ui_queue.put(("boot_log", message))
+
+    @staticmethod
+    def _normalize_pathish(value: object) -> str:
+        return str(value or "").strip().replace("\\", "/").lower()
+
+    def _target_server_port(self) -> str:
+        parsed = urlparse(str(getattr(CFG, "LLAMA_SERVER_URL", "http://127.0.0.1:8080")))
+        return str(parsed.port or 8080)
+
+    @staticmethod
+    def _cmdline_value(cmdline: list[str], flag: str) -> str:
+        lowered = [str(part or "").strip().lower() for part in cmdline]
+        try:
+            idx = lowered.index(flag.lower())
+        except ValueError:
+            return ""
+        if idx + 1 >= len(cmdline):
+            return ""
+        return str(cmdline[idx + 1] or "").strip()
+
+    def _is_managed_llama_server(self, proc_info: dict) -> bool:
+        proc_name = str(proc_info.get("name") or "").strip().lower()
+        cmdline = [str(part or "").strip() for part in (proc_info.get("cmdline") or []) if str(part or "").strip()]
+        if "llama-server" not in proc_name and not any("llama-server" in part.lower() for part in cmdline):
+            return False
+
+        port = self._cmdline_value(cmdline, "--port")
+        if port != self._target_server_port():
+            return False
+
+        model_arg = self._normalize_pathish(self._cmdline_value(cmdline, "-m"))
+        target_model = self._normalize_pathish(getattr(CFG, "MODEL_PATH", ""))
+        target_model_name = Path(str(getattr(CFG, "MODEL_PATH", ""))).name.lower()
+        if not model_arg or not target_model_name:
+            return False
+        if model_arg != target_model and not model_arg.endswith("/" + target_model_name):
+            return False
+
+        exe_name = Path(str(getattr(CFG, "LLAMA_SERVER_EXE", ""))).name.lower()
+        if exe_name and cmdline:
+            first = self._normalize_pathish(cmdline[0])
+            if not first.endswith("/" + exe_name) and Path(cmdline[0]).name.lower() != exe_name:
+                return False
+        return True
+
+    def _kill_orphans(self):
+        self.log("[Boot] Checking for orphan server processes...")
+        killed_any = False
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if not self._is_managed_llama_server(proc.info):
+                    continue
+                self.log(f"[Boot] Killing orphan server PID {proc.info['pid']}")
+                proc.kill()
+                killed_any = True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError):
+                continue
+        if killed_any:
+            time.sleep(1)
+
+    def _wait_for_server(self):
+        self.log("Starting LLM Server...")
+        try:
+            req = urllib.request.Request(f"{CFG.LLAMA_SERVER_URL}/health", method='GET')
+            with urllib.request.urlopen(req, timeout=1) as resp:
+                if resp.status == 200:
+                    self.log("Using existing LLM server.")
+                    self.server_ready = True
+                    return True
+        except Exception:
+            pass
+
+        self._kill_orphans()
+
+        if not hasattr(CFG, 'LLAMA_SERVER_EXE') or not CFG.LLAMA_SERVER_EXE.exists():
+            self.log(f"FATAL: Server binary not found at {CFG.LLAMA_SERVER_EXE}")
+            self.server_ready = False
+            return False
+
+        if not hasattr(CFG, 'MODEL_PATH') or not CFG.MODEL_PATH.exists():
+            self.log(f"FATAL: Model file not found at {CFG.MODEL_PATH}")
+            self.server_ready = False
+            return False
+
+        cmd = [
+            str(CFG.LLAMA_SERVER_EXE),
+            "-m", str(CFG.MODEL_PATH),
+            "--port", "8080",
+            "--ctx-size", str(CFG.CONTEXT_SIZE),
+            "-ngl", str(getattr(CFG, "LLAMA_SERVER_GPU_LAYERS", 99)),
+            "--host", "127.0.0.1"
+        ]
+        reasoning_budget = getattr(CFG, "LLAMA_SERVER_REASONING_BUDGET", -1)
+        if reasoning_budget is not None:
+            cmd.extend(["--reasoning-budget", str(reasoning_budget)])
+        mmproj_path = getattr(CFG, "MMPROJ_PATH", None)
+        if mmproj_path and Path(mmproj_path).exists():
+            cmd.extend(["--mmproj", str(mmproj_path)])
+            self.log(f"Using multimodal projector: {mmproj_path}")
+
+        try:
+            log_path = data_debug_path(CFG.DATA_DIR, "llama_server.log")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._server_log_handle = open(log_path, "a", encoding="utf-8", errors="replace")
+            popen_kwargs = {
+                "stdout": self._server_log_handle,
+                "stderr": subprocess.STDOUT,
+            }
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            self.process = subprocess.Popen(cmd, **popen_kwargs)
+            self.log(f"Server PID {self.process.pid} launched.")
+        except Exception as e:
+            self._close_server_log_handle()
+            self.log(f"FATAL: Server failed to start: {e}")
+            self.server_ready = False
+            return False
+        
+        self.log("Waiting for server health check...")
+        start_time = time.time()
+        timeout_s = float(getattr(CFG, "LLAMA_SERVER_HEALTH_TIMEOUT_S", 120.0))
+        last_progress_log = 0.0
+        while time.time() - start_time < timeout_s:
+            if self.process.poll() is not None:
+                self._close_server_log_handle()
+                self.log(f"FATAL: Server crashed with code {self.process.returncode}")
+                return False
+            try:
+                req = urllib.request.Request(f"{CFG.LLAMA_SERVER_URL}/health", method='GET')
+                with urllib.request.urlopen(req, timeout=1) as resp:
+                    if resp.status == 200:
+                        self.log("Server Health Check: OK")
+                        self.server_ready = True
+                        return True
+                    if resp.status == 503 and (time.time() - last_progress_log) >= 10:
+                        self.log("Server is still loading the model...")
+                        last_progress_log = time.time()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 503 and (time.time() - last_progress_log) >= 10:
+                    self.log("Server is up but still loading the model...")
+                    last_progress_log = time.time()
+                time.sleep(0.5)
+            except Exception:
+                if (time.time() - last_progress_log) >= 10:
+                    self.log("Waiting for model load...")
+                    last_progress_log = time.time()
+                time.sleep(0.5)
+        self.log(f"FATAL: Server health check timed out after {int(timeout_s)}s")
+        self.server_ready = False
+        return False
+
+    def _close_server_log_handle(self) -> None:
+        if self._server_log_handle is not None:
+            try:
+                self._server_log_handle.close()
+            except Exception:
+                pass
+            self._server_log_handle = None
+
+    def _init_brain(self):
+        self.log("Initializing Vector Brain...")
+        try:
+            from memory.brain import get_brain
+            get_brain(CFG.DATA_DIR)
+            self.log("Brain Model Loaded.")
+            self.brain_ready = True
+            return True
+        except Exception as e:
+            self.log(f"FATAL: Brain failed: {e}")
+            self.brain_ready = False
+            return False
+
+    def _run_post_boot_tasks(self) -> None:
+        for label, callback in self.post_boot_tasks:
+            self._run_named_task(label, callback)
+
+    def _run_named_task(self, label: str, callback: Callable[[], object]) -> None:
+        self.log(label)
+        try:
+            result = callback()
+            if isinstance(result, str) and result.strip():
+                self.log(result.strip())
+            else:
+                self.log(f"{label} OK")
+        except Exception as exc:
+            self.log(f"{label} FAILED: {exc}")
+
+    def _start_background_boot_tasks(self) -> None:
+        for label, callback in self.background_boot_tasks:
+            threading.Thread(
+                target=self._run_named_task,
+                args=(label, callback),
+                daemon=True,
+            ).start()
+
+    def run_sequence(self, *, run_post_boot_tasks: bool = True):
+        self.ready = False
+        self.server_ready = False
+        self.brain_ready = False
+        
+        server_thread = threading.Thread(target=self._wait_for_server)
+        brain_thread = threading.Thread(target=self._init_brain)
+        post_boot_thread = None
+        
+        server_thread.start()
+        if run_post_boot_tasks and self.post_boot_tasks:
+            post_boot_thread = threading.Thread(target=self._run_post_boot_tasks)
+            post_boot_thread.start()
+        if run_post_boot_tasks and self.background_boot_tasks:
+            self._start_background_boot_tasks()
+        brain_thread.start()
+        
+        server_thread.join()
+        brain_thread.join()
+        if post_boot_thread is not None:
+            post_boot_thread.join()
+        
+        process_running = self.process and self.process.poll() is None
+        if self.server_ready and self.brain_ready and (process_running or self.process is None):
+            self.log("System Ready.")
+            self.ready = True
+            if self.ui_queue:
+                self.ui_queue.put(("boot_ready", ""))
+        else:
+            self.log("System Failed.")
+
+    def shutdown(self):
+        if self.process and self.process.poll() is None:
+            print("[System] Terminating LLM Server...")
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except Exception:
+                try: self.process.kill()
+                except Exception:
+                    pass
+            finally:
+                self._close_server_log_handle()
+                self.process = None

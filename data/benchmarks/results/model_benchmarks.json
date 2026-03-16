@@ -1,0 +1,215 @@
+{
+  "updated_at_epoch_s": 1773095800,
+  "results": [
+    {
+      "name": "Qwen3.5-4B-Q8_0.gguf",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q8_0.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+      "source": "local",
+      "size_bytes": 4482403488,
+      "log_path": "C:\\Projects\\Piper\\data\\benchmarks\\logs\\Qwen3.5-4B-Q8_0.log",
+      "boot_ok": true,
+      "boot_seconds": 4.565,
+      "boot_status": "ready",
+      "ctx_size": 8192,
+      "gpu_layers": 99,
+      "reasoning_budget": 0,
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.079,
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 38.379,
+            "prompt_per_token_ms": 2.0199473684210525,
+            "prompt_per_second": 495.0624039188098,
+            "predicted_n": 2,
+            "predicted_ms": 18.029,
+            "predicted_per_token_ms": 9.0145,
+            "predicted_per_second": 110.93238671030008
+          }
+        },
+        {
+          "name": "route_chat_json",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.14,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 32,
+            "total_tokens": 38
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 32,
+            "prompt_ms": 34.139,
+            "prompt_per_token_ms": 1.06684375,
+            "prompt_per_second": 937.3443861858871,
+            "predicted_n": 6,
+            "predicted_ms": 72.909,
+            "predicted_per_token_ms": 12.1515,
+            "predicted_per_second": 82.29436695058223
+          }
+        },
+        {
+          "name": "task_event_split",
+          "passed": true,
+          "observed": "{\"bucket\":\"event\"}",
+          "latency_s": 0.145,
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 35,
+            "total_tokens": 41
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 35,
+            "prompt_ms": 33.162,
+            "prompt_per_token_ms": 0.9474857142857143,
+            "prompt_per_second": 1055.4248839032628,
+            "predicted_n": 6,
+            "predicted_ms": 71.478,
+            "predicted_per_token_ms": 11.912999999999998,
+            "predicted_per_second": 83.94191219675984
+          }
+        }
+      ],
+      "score": 1196.553,
+      "log_tail": "sk, is_child = 0\nslot update_slots: id  2 | task 10 | new prompt, n_ctx_slot = 8192, n_keep = 0, task.n_tokens = 35\nslot update_slots: id  2 | task 10 | n_past = 9, slot.prompt.tokens.size() = 37, seq_id = 2, pos_min = 36, n_swa = 1\nslot update_slots: id  2 | task 10 | forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)\nslot update_slots: id  2 | task 10 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  2 | task 10 | init sampler, took 0.00 ms, tokens: text = 35, total = 35\nslot update_slots: id  2 | task 10 | prompt processing done, n_tokens = 35, batch.n_tokens = 35\nslot print_timing: id  2 | task 10 | \nprompt eval time =      33.16 ms /    35 tokens (    0.95 ms per token,  1055.42 tokens per second)\n       eval time =      71.48 ms /     6 tokens (   11.91 ms per token,    83.94 tokens per second)\n      total time =     104.64 ms /    41 tokens\nslot      release: id  2 | task 10 | stop processing: n_tokens = 40, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /v1/chat/completions 127.0.0.1 200\n"
+    },
+    {
+      "name": "Qwen_Qwen3.5-9B-Q6_K.gguf",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen_Qwen3.5-9B-Q6_K.gguf",
+      "mmproj_path": null,
+      "source": "local",
+      "size_bytes": 7690921056,
+      "log_path": "C:\\Projects\\Piper\\data\\benchmarks\\logs\\Qwen_Qwen3.5-9B-Q6_K.log",
+      "boot_ok": true,
+      "boot_seconds": 4.576,
+      "boot_status": "ready",
+      "ctx_size": 8192,
+      "gpu_layers": 99,
+      "reasoning_budget": -1,
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": false,
+          "observed": "ERROR: HTTP Error 500: Internal Server Error",
+          "latency_s": 0.376,
+          "usage": {},
+          "timings": {}
+        },
+        {
+          "name": "route_chat_json",
+          "passed": false,
+          "observed": "ERROR: HTTP Error 500: Internal Server Error",
+          "latency_s": 0.644,
+          "usage": {},
+          "timings": {}
+        },
+        {
+          "name": "task_event_split",
+          "passed": false,
+          "observed": "ERROR: HTTP Error 500: Internal Server Error",
+          "latency_s": 0.662,
+          "usage": {},
+          "timings": {}
+        }
+      ],
+      "score": -1.0,
+      "log_tail": "pos_min = 60, n_swa = 1\nslot update_slots: id  2 | task 52 | forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)\nslot update_slots: id  2 | task 52 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  2 | task 52 | init sampler, took 0.00 ms, tokens: text = 33, total = 33\nslot update_slots: id  2 | task 52 | prompt processing done, n_tokens = 33, batch.n_tokens = 33\nslot print_timing: id  2 | task 52 | \nprompt eval time =      42.95 ms /    33 tokens (    1.30 ms per token,   768.42 tokens per second)\n       eval time =     564.83 ms /    32 tokens (   17.65 ms per token,    56.65 tokens per second)\n      total time =     607.78 ms /    65 tokens\nslot      release: id  2 | task 52 | stop processing: n_tokens = 64, truncated = 0\nsrv  update_slots: all slots are idle\nsrv          stop: cancel task, id_task = 52\nsrv  update_slots: all slots are idle\nsrv    operator(): got exception: {\"error\":{\"code\":500,\"message\":\"Failed to parse input at pos 127: \",\"type\":\"server_error\"}}\nsrv  log_server_r: done request: POST /v1/chat/completions 127.0.0.1 500\n"
+    }
+  ],
+  "winner": {
+    "name": "Qwen3.5-4B-Q8_0.gguf",
+    "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q8_0.gguf",
+    "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+    "source": "local",
+    "size_bytes": 4482403488,
+    "log_path": "C:\\Projects\\Piper\\data\\benchmarks\\logs\\Qwen3.5-4B-Q8_0.log",
+    "boot_ok": true,
+    "boot_seconds": 4.565,
+    "boot_status": "ready",
+    "ctx_size": 8192,
+    "gpu_layers": 99,
+    "reasoning_budget": 0,
+    "cases": [
+      {
+        "name": "exact_ok",
+        "passed": true,
+        "observed": "OK",
+        "latency_s": 0.079,
+        "usage": {
+          "completion_tokens": 2,
+          "prompt_tokens": 19,
+          "total_tokens": 21
+        },
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 19,
+          "prompt_ms": 38.379,
+          "prompt_per_token_ms": 2.0199473684210525,
+          "prompt_per_second": 495.0624039188098,
+          "predicted_n": 2,
+          "predicted_ms": 18.029,
+          "predicted_per_token_ms": 9.0145,
+          "predicted_per_second": 110.93238671030008
+        }
+      },
+      {
+        "name": "route_chat_json",
+        "passed": true,
+        "observed": "{\"decision\":\"CHAT\"}",
+        "latency_s": 0.14,
+        "usage": {
+          "completion_tokens": 6,
+          "prompt_tokens": 32,
+          "total_tokens": 38
+        },
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 32,
+          "prompt_ms": 34.139,
+          "prompt_per_token_ms": 1.06684375,
+          "prompt_per_second": 937.3443861858871,
+          "predicted_n": 6,
+          "predicted_ms": 72.909,
+          "predicted_per_token_ms": 12.1515,
+          "predicted_per_second": 82.29436695058223
+        }
+      },
+      {
+        "name": "task_event_split",
+        "passed": true,
+        "observed": "{\"bucket\":\"event\"}",
+        "latency_s": 0.145,
+        "usage": {
+          "completion_tokens": 6,
+          "prompt_tokens": 35,
+          "total_tokens": 41
+        },
+        "timings": {
+          "cache_n": 0,
+          "prompt_n": 35,
+          "prompt_ms": 33.162,
+          "prompt_per_token_ms": 0.9474857142857143,
+          "prompt_per_second": 1055.4248839032628,
+          "predicted_n": 6,
+          "predicted_ms": 71.478,
+          "predicted_per_token_ms": 11.912999999999998,
+          "predicted_per_second": 83.94191219675984
+        }
+      }
+    ],
+    "score": 1196.553,
+    "log_tail": "sk, is_child = 0\nslot update_slots: id  2 | task 10 | new prompt, n_ctx_slot = 8192, n_keep = 0, task.n_tokens = 35\nslot update_slots: id  2 | task 10 | n_past = 9, slot.prompt.tokens.size() = 37, seq_id = 2, pos_min = 36, n_swa = 1\nslot update_slots: id  2 | task 10 | forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)\nslot update_slots: id  2 | task 10 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  2 | task 10 | init sampler, took 0.00 ms, tokens: text = 35, total = 35\nslot update_slots: id  2 | task 10 | prompt processing done, n_tokens = 35, batch.n_tokens = 35\nslot print_timing: id  2 | task 10 | \nprompt eval time =      33.16 ms /    35 tokens (    0.95 ms per token,  1055.42 tokens per second)\n       eval time =      71.48 ms /     6 tokens (   11.91 ms per token,    83.94 tokens per second)\n      total time =     104.64 ms /    41 tokens\nslot      release: id  2 | task 10 | stop processing: n_tokens = 40, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /v1/chat/completions 127.0.0.1 200\n"
+  }
+}

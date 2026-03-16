@@ -1,0 +1,262 @@
+{
+  "models": {
+    "qwen2.5-14b": {
+      "model_path": "C:\\Piper\\models\\llama\\qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf",
+      "mmproj_path": null,
+      "reasoning_budget": -1,
+      "boot_ok": true,
+      "boot_seconds": 5.168,
+      "boot_status": "ready",
+      "cases": {
+        "route_event_add": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Create an event for Sarah's birthday tomorrow\",\n    \"context\": [\n      \"Sarah's birthday is tomorrow\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Add an event for Sarah's birthday\",\n        \"stage_type\": \"TASK_EVENT_WORK\",\n        \"success_condition\": \"Event is created for tomorrow with Sarah's birthday\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Create an event for Sarah's birthday tomorrow",
+              "context": [
+                "Sarah's birthday is tomorrow"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Add an event for Sarah's birthday",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "Event is created for tomorrow with Sarah's birthday"
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Add an event for Sarah's birthday is on tomorrow",
+              "context": [
+                "Sarah's birthday is tomorrow"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Schedule the event 'Sarah's birthday is' for tomorrow",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "Event is created once with the requested date"
+                }
+              ]
+            }
+          }
+        },
+        "route_schedule_correction": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Update the user's schedule to reflect that tomorrow is off\",\n    \"context\": [\n      \"User mentioned that tomorrow is off\",\n      \"User has an early work schedule and a daughter with a school routine\",\n      \"User has a pending dentist appointment\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Remove the user's work schedule for tomorrow\",\n        \"stage_type\": \"TASK_EVENT_WORK\",\n        \"success_condition\": \"The work schedule for tomorrow is removed\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update the user's schedule to reflect that tomorrow is off",
+              "context": [
+                "User mentioned that tomorrow is off",
+                "User has an early work schedule and a daughter with a school routine",
+                "User has a pending dentist appointment"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Remove the user's work schedule for tomorrow",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "The work schedule for tomorrow is removed"
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "CHAT"
+          }
+        },
+        "route_task_complete": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Update the task status to completed\",\n    \"context\": [\n      \"User bought the milk\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Mark the task to buy milk as completed\",\n        \"stage_type\": \"TASK_EVENT_WORK\",\n        \"success_condition\": \"The task is marked as completed\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update the task status to completed",
+              "context": [
+                "User bought the milk"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Mark the task to buy milk as completed",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "The task is marked as completed"
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Complete the task 'milk'",
+              "context": [
+                "User bought the milk"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Mark the task 'milk' as completed and archive it",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "Active task is removed from the list and the completion is archived as memory",
+                  "allowed_tools": [
+                    "COMPLETE_TASK"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "knowledge_additive_vehicle": {
+          "raw": "{\"facts\": {\"Vehicle\": {\"value\": \"BMW, a motorcycle\", \"ttl\": \"forever\"}}}",
+          "parsed": {
+            "facts": {
+              "Vehicle": {
+                "value": "BMW, a motorcycle",
+                "ttl": "forever"
+              }
+            }
+          }
+        },
+        "knowledge_correction_no_false_fact": {
+          "raw": "{\"facts\": {}}",
+          "parsed": {
+            "facts": {}
+          }
+        },
+        "freeform_architecture": {
+          "raw": "- Prompt building should stay pure and receive preassembled context.\n- Directly accessing memory stores can complicate the system.\n- Preassembled context ensures clarity and modularity."
+        }
+      },
+      "log_path": "/mnt/c/Projects/Piper/data/model_benchmark_logs/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.qualcmp.log",
+      "log_tail": "B5C82190:     353 tokens, checkpoints:  0,    66.193 MiB\nsrv  get_availabl: prompt cache update took 18.85 ms\nslot launch_slot_: id  2 | task -1 | sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist \nslot launch_slot_: id  2 | task 352 | processing task, is_child = 0\nslot update_slots: id  2 | task 352 | new prompt, n_ctx_slot = 8192, n_keep = 0, task.n_tokens = 71\nslot update_slots: id  2 | task 352 | n_tokens = 24, memory_seq_rm [24, end)\nslot init_sampler: id  2 | task 352 | init sampler, took 0.01 ms, tokens: text = 71, total = 71\nslot update_slots: id  2 | task 352 | prompt processing done, n_tokens = 71, batch.n_tokens = 47\nslot print_timing: id  2 | task 352 | \nprompt eval time =      40.03 ms /    47 tokens (    0.85 ms per token,  1174.00 tokens per second)\n       eval time =     815.93 ms /    37 tokens (   22.05 ms per token,    45.35 tokens per second)\n      total time =     855.97 ms /    84 tokens\nslot      release: id  2 | task 352 | stop processing: n_tokens = 107, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /v1/chat/completions 172.24.65.136 200\n"
+    },
+    "qwen3.5-4b-q6": {
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q6_K.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+      "reasoning_budget": 0,
+      "boot_ok": true,
+      "boot_seconds": 4.114,
+      "boot_status": "ready",
+      "cases": {
+        "route_event_add": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Update memory to record that Sarah's birthday is tomorrow\",\n    \"context\": [\n      \"User explicitly stated Sarah's birthday is tomorrow.\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Store the fact that Sarah's birthday is tomorrow in the user's memory\",\n        \"stage_type\": \"MEMORY_WORK\",\n        \"success_condition\": \"The memory system confirms the new fact about Sarah's birthday has been added.\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update memory to record that Sarah's birthday is tomorrow",
+              "context": [
+                "User explicitly stated Sarah's birthday is tomorrow."
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Store the fact that Sarah's birthday is tomorrow in the user's memory",
+                  "stage_type": "MEMORY_WORK",
+                  "success_condition": "The memory system confirms the new fact about Sarah's birthday has been added."
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update memory to record that Sarah's birthday is tomorrow",
+              "context": [
+                "User explicitly stated Sarah's birthday is tomorrow."
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Store the fact that Sarah's birthday is tomorrow in the user's memory",
+                  "stage_type": "MEMORY_WORK",
+                  "success_condition": "The memory system confirms the new fact about Sarah's birthday has been added."
+                }
+              ]
+            }
+          }
+        },
+        "route_schedule_correction": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Update the user's schedule to reflect that tomorrow (March 10, 2026) is off, removing any work obligations or reminders for that day.\",\n    \"context\": [\n      \"Current date is March 9, 2026.\",\n      \"Tomorrow is March 10, 2026.\",\n      \"User previously indicated they must wake early for work tomorrow, but now states tomorrow is off.\",\n      \"User has a dentist appointment logged.\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Remove work-related reminders and obligations for March 10, 2026 from the user's schedule.\",\n        \"stage_type\": \"TASK_EVENT_WORK\",\n        \"success_condition\": \"The system confirms that no work tasks or wake-up reminders exist for March 10, 2026.\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update the user's schedule to reflect that tomorrow (March 10, 2026) is off, removing any work obligations or reminders for that day.",
+              "context": [
+                "Current date is March 9, 2026.",
+                "Tomorrow is March 10, 2026.",
+                "User previously indicated they must wake early for work tomorrow, but now states tomorrow is off.",
+                "User has a dentist appointment logged."
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Remove work-related reminders and obligations for March 10, 2026 from the user's schedule.",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "The system confirms that no work tasks or wake-up reminders exist for March 10, 2026."
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "CHAT"
+          }
+        },
+        "route_task_complete": {
+          "raw": "{\n  \"decision\": \"TASK\",\n  \"card\": {\n    \"goal\": \"Update the task status for buying milk to completed\",\n    \"context\": [\n      \"User previously added a task to buy milk\",\n      \"User just confirmed they bought the milk\"\n    ],\n    \"stages\": [\n      {\n        \"stage_goal\": \"Mark the 'buy milk' task as completed in the user's task list\",\n        \"stage_type\": \"TASK_EVENT_WORK\",\n        \"success_condition\": \"The task 'buy milk' is updated to a completed state in the system\"\n      }\n    ]\n  }\n}",
+          "parsed": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Update the task status for buying milk to completed",
+              "context": [
+                "User previously added a task to buy milk",
+                "User just confirmed they bought the milk"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Mark the 'buy milk' task as completed in the user's task list",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "The task 'buy milk' is updated to a completed state in the system"
+                }
+              ]
+            }
+          },
+          "normalized": {
+            "decision": "TASK",
+            "card": {
+              "goal": "Complete the task 'milk'",
+              "context": [
+                "User previously added a task to buy milk",
+                "User just confirmed they bought the milk"
+              ],
+              "stages": [
+                {
+                  "stage_goal": "Mark the task 'milk' as completed and archive it",
+                  "stage_type": "TASK_EVENT_WORK",
+                  "success_condition": "Active task is removed from the list and the completion is archived as memory",
+                  "allowed_tools": [
+                    "COMPLETE_TASK"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "knowledge_additive_vehicle": {
+          "raw": "{\"facts\": {\"Vehicle\": \"BMW, motorcycle\"}}",
+          "parsed": {
+            "facts": {
+              "Vehicle": "BMW, motorcycle"
+            }
+          }
+        },
+        "knowledge_correction_no_false_fact": {
+          "raw": "{\"facts\": {}}",
+          "parsed": {
+            "facts": {}
+          }
+        },
+        "freeform_architecture": {
+          "raw": "*   Prompt building should stay pure to ensure reproducible, auditable logic that doesn't depend on volatile system state.\n*   Directly reading memory stores introduces hidden dependencies that break the agent's ability to reason about its own context.\n*   The agent must receive preassembled context as a structured input to maintain a clear separation between reasoning and data access."
+        }
+      },
+      "log_path": "/mnt/c/Projects/Piper/data/model_benchmark_logs/Qwen3.5-4B-Q6_K.qualcmp.log",
+      "log_tail": "v  params_from_: Chat format: peg-native\nslot get_availabl: id  1 | task -1 | selected slot by LRU, t_last = -1\nslot launch_slot_: id  1 | task -1 | sampler chain: logits -> ?penalties -> ?dry -> ?top-n-sigma -> top-k -> ?typical -> top-p -> min-p -> ?xtc -> temp-ext -> dist \nslot launch_slot_: id  1 | task 517 | processing task, is_child = 0\nslot update_slots: id  1 | task 517 | new prompt, n_ctx_slot = 8192, n_keep = 0, task.n_tokens = 54\nslot update_slots: id  1 | task 517 | n_tokens = 0, memory_seq_rm [0, end)\nslot init_sampler: id  1 | task 517 | init sampler, took 0.01 ms, tokens: text = 54, total = 54\nslot update_slots: id  1 | task 517 | prompt processing done, n_tokens = 54, batch.n_tokens = 54\nslot print_timing: id  1 | task 517 | \nprompt eval time =      36.11 ms /    54 tokens (    0.67 ms per token,  1495.47 tokens per second)\n       eval time =     851.21 ms /    75 tokens (   11.35 ms per token,    88.11 tokens per second)\n      total time =     887.32 ms /   129 tokens\nslot      release: id  1 | task 517 | stop processing: n_tokens = 128, truncated = 0\nsrv  update_slots: all slots are idle\nsrv  log_server_r: done request: POST /v1/chat/completions 172.24.65.136 200\n"
+    }
+  }
+}

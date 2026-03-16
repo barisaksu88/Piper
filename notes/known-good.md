@@ -1,0 +1,456 @@
+# Known Good
+
+## Runtime
+
+- Windows is the primary runtime.
+- `start_piper.bat` should use `.venv` when it exists.
+- Current active model is `Qwen_Qwen3.5-9B-Q6_K.gguf`.
+- The local `llama.cpp` runtime under `runtime/llama.cpp` is the intended server path.
+- Qwen/llama.cpp persona payloads must keep the only `system` message at the beginning; `[LATEST_RUNTIME_CONTEXT]` belongs inside that first system prompt, not as a trailing chat message.
+
+## Tooling
+
+- The CLI harness under `scripts/piper_harness.py` is the safest way to test the agent loop without the GUI.
+- Use isolated harness data by default so live `data/` is not mutated during debugging.
+- `FILE_WORK` now has a structured path-operation rail through `FILE_OP` for `list_tree`, `ensure_dirs`, `move_many`, `copy_many`, and `delete_many`.
+- Local checker verification now covers directory creation, file writes, JSON writes/updates, moves, copies, and deletes from actual workspace state.
+- Non-mutating file stages now prefer `FILE_OP` reads/lists and no longer need to trust `RUN_CODE` narration for directory inspection.
+- Explicit third-party import errors in `FILE_WORK` can now temporarily unlock `INSTALL_PACKAGE` for the current stage only, and the activity log shows when Piper is installing a package.
+
+## Memory
+
+- Retrieved brain memories are now rendered as age labels like `memory from 8 days ago` instead of raw dates.
+- Vector recall now queries a larger candidate pool before applying decay and trimming to final results.
+- `world_model.json` is the primary durable profile store; `knowledge.json` is a derived compatibility mirror.
+- World-model refresh now skips ordinary transient chat unless recent user turns look like actual durable profile/project/entity disclosures.
+- Meta/codelike profile entries such as `user_corrected_*` or values containing assignment/flag syntax are now rejected and scrubbed from world-model state.
+- Duplicate-label entities can now stay separate in the graph; the compatibility mirror disambiguates them with keys like `Ekin (partner)` and `Ekin (friend)` when needed.
+- File-backed workspace artifacts stored in world-model memory are now temporary by default and receive expiry on both their graph attributes and `works_on` edges.
+- Ingested documents now have a dedicated vector-memory surface and are appended to persona context as `[INGESTED DOCUMENTS]` when present.
+- Read-only questions about ingested documents now stay in `CHAT` and are answered from document memory instead of being routed into raw `FILE_WORK` PDF reads.
+- Ingested document prompt context now uses query-focused excerpts, so large PDFs surface relevant sections instead of only the opening pages.
+- Ingested-document Q&A now runs a compact `DOCUMENT_FOCUS` extraction pass before persona, and the activity pane shows the source/page/section refs used for that reply.
+- Large PDF document search now uses stronger lexical page/section matching with query normalization and section-title reranking, which surfaces content pages like `PRINCIPAL DIMENSIONS` instead of defaulting to the opening pages.
+- Persona can now request explicit vector-memory recall with `[RECALL: keywords]`; the runtime resolves it before any user-visible answer is emitted.
+- Document ingestion now supports:
+  - plain text-like files by direct UTF-8-compatible read
+  - `.docx` via direct OOXML text extraction
+  - `.pdf` via `pypdf` text extraction
+- The GUI now has an `Ingest Document` button in the `Documents` tab in addition to the `/ingest <path>` chat command.
+
+## UI
+
+- Main controls stay disabled until boot completes.
+- During active work, the main input/action controls stay disabled while `Stop` remains available.
+- Chat now shows `Thinking...` as a temporary assistant placeholder during background work and replaces it on the first streamed assistant tokens.
+- The UI now includes:
+  - a `Code` tab beside `Visual Cortex` for the latest code artefact captured from tool evidence
+  - a `Documents` tab between `Status` and `Monitor` for ingested document previews
+- `/codex` now writes a manual engineering-support snapshot to `data/debug/codex_escalations.jsonl`.
+- Automatic engineering-support briefs are also written there when Piper detects repeated verification deadlocks, planner loops, no-effect mutating file steps, or hard runtime errors.
+
+## Task/Event Semantics
+
+- Undated items belong in `tasks.json`.
+- Dated reminders, appointments, birthdays, and deadlines belong in `events.json`.
+- Direct disclosures like `I made a dentist appointment on the 24th of March at 1 p.m.` should normalize to `ADD_EVENT`.
+- Casual completion/status remarks should not create pending tasks unless there is strong evidence of an already logged task/event.
+- `CHAT` stages inside a `TASK` card are now treated as clarification pauses:
+  - they do not expose runtime tools
+  - they must hand persona a `proposal`
+  - the final stage outcome is `PAUSED / AWAITING USER INPUT`, not `SUCCESS`
+
+## File Management
+
+- Structured multi-turn file CRUD in the workspace now passes under the live `qwen3.5 q6` path.
+- Successful verified `FILE_WORK` mutations now produce deterministic user-facing replies from structured runtime evidence instead of letting persona restate stale remembered file contents.
+- Already-satisfied text-edit retries now report the current verified file state honestly instead of narrating a fresh failure.
+- Open-ended organization requests can now inspect, create destination directories, move files with `move_many`, and verify completion from actual workspace state.
+- If the user explicitly asks for a proposal first, the current file contents are inspected without mutation and the workspace stays unchanged on that turn.
+- Broad `FILE_WORK` stages no longer treat a small successful `move_many` batch as full completion when the stage says `all files`, `all entries`, or equivalent broad coverage.
+- When broad file reorganization starts looping on unchanged inspection, the runtime now pauses into a proposal/approval state instead of silently treating the loop as success.
+- Generic extension-based workspace organization now has first-class rails:
+  - `FILE_OP extension_inventory`
+  - `FILE_OP consolidate_by_extension`
+  - `FILE_OP delete_empty_dirs`
+- The live isolated harness can now take a copied `data/workspace`, consolidate files by extension into dominant destination folders, and remove empty directories without hardcoding specific filenames.
+
+## Data Layout
+
+- Live state now lives under `data/state`:
+  - `tasks.json`
+  - `events.json`
+  - `knowledge.json`
+  - `world_model.json`
+  - `memory.jsonl`
+  - `model_selection.json`
+- Runtime/debug logs now live under `data/debug`.
+- Benchmark artifacts now live under `data/benchmarks` with separate `results`, `logs`, and `scripts` folders.
+- Harness scratch inputs/results now live under `data/harness` with separate `results` and `scripts` folders.
+
+## Regression Scenarios
+
+- `File Chaos Test` is the named regression for extension-based workspace organization.
+- Command:
+  - `.venv\\Scripts\\python scripts\\file_chaos_test.py`
+- It seeds a deterministic messy isolated workspace, asks Piper to organize it naturally, and verifies the resulting filesystem state instead of trusting narration.
+- Latest passing artifact after transport hardening:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-n2y3ybxj\\data`
+- `Small FILE_WORK CRUD Smoke` is the named regression for direct create/copy/move/read/delete path tasks.
+- Command:
+  - `.venv\\Scripts\\python scripts\\file_crud_smoke_test.py --json --keep-data-copy`
+- It runs a deterministic six-turn isolated harness sequence around `text_files/harness_alpha.txt` and verifies artifact state from disk after each turn instead of trusting narration.
+- `Filename Lookup / Read Smoke` is the named regression for fuzzy workspace document lookup and follow-up recovery.
+- Command:
+  - `.venv\\Scripts\\python scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+- It seeds `workspace/grocery_list.txt`, clears isolated chat memory, then runs the four-turn grocery conversation:
+  - `Can you tell me what it says in the grocery list?`
+  - `Yes, but what's in the file?`
+  - `I think we already have a document, the naming might not be matching, please check again.`
+  - `Maybe just search for grocery?`
+- Passing artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-yfe_bo7h\\data`
+- Latest passing CRUD artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-gloygn8i\\data`
+- `FILE_WORK Content Edit Smoke` is the named regression for single-file text edits followed by an exact readback.
+- Command:
+  - `.venv\\Scripts\\python scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+- It seeds `workspace/grocery_list.txt`, removes `'eggs'`, then reads the file back and verifies both the on-disk content and the user-facing exact read response.
+- Latest passing edit artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-s68411le\\data`
+- Latest passing lookup artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-4w0ok6pl\\data`
+- Latest passing CRUD artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-r6fm03_3\\data`
+- `FILE_WORK Already-Satisfied Content Edit` now verifies from current workspace state even when the stage only names a document reference and the concrete path came from prior tool evidence.
+- Verified behavior:
+  - first removal edits `grocery_list.txt`
+  - second removal reports the target text is already absent instead of narrating failure
+  - exact read follow-up returns only the file contents
+- Latest passing edit artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-jyx6sos1\\data`
+- Latest passing lookup artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-kmh3nere\\data`
+- Latest passing CRUD artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-jz982w68\\data`
+- Revalidated on 2026-03-11 after the deterministic verified-mutation reply hardening:
+  - `scripts/file_edit_smoke_test.py --json`
+  - `scripts/file_lookup_smoke_test.py --json`
+  - `scripts/file_crud_smoke_test.py --json`
+  - `scripts/file_chaos_test.py --json`
+- `RUN_CODE` now supports executing an existing workspace Python script through `run_workspace_script("relative/path.py")`.
+- Legacy planner snippets that try `subprocess.run([sys.executable, "script.py", ...])` are auto-reinterpreted into the same supported workspace-script path.
+- `FILE_WORK` script-launch stages are no longer forced through file-checker verification; a successful launch auto-finishes the stage.
+- The `Code` tab is now an embedded interactive console, not only a readonly code viewer.
+- While an embedded code session is active:
+  - the top bar shows `CODE SESSION`
+  - the active script path is shown in grey metadata
+  - the main chat input routes directly to the running process instead of the LLM
+  - Piper auto-switches to the `Code` tab on launch
+- Verified behavior:
+  - `RUN_CODE run_workspace_script("...")` queues an embedded Code-tab session
+  - stdout prompts without trailing newlines are visible
+  - typed input is written back to the child process stdin
+  - process exit updates the tab status and re-disables the Code-tab input controls
+- Rapid stop/rerun no longer leaks stale output or duplicate inactive events from the superseded process session.
+- `Embedded Code Session Smoke` is the named regression for the in-GUI script runner.
+- Command:
+  - `.venv\\Scripts\\python scripts\\code_session_smoke_test.py --json`
+- It verifies prompt-without-newline output, stdin delivery, clean exit, and silent rerun without stale output from the superseded process.
+- `Codex Escalation Smoke` is the named regression for engineering-support sensors and brief generation.
+- Command:
+  - `.venv\\Scripts\\python scripts\\codex_escalation_smoke_test.py`
+- It verifies:
+  - automatic escalation after repeated verification-block signals
+  - manual snapshot generation
+  - `/codex <note>` command parsing
+- UI panes now use shared bottom-follow autoscroll for dynamic text:
+  - chat transcript
+  - boot log
+  - status activity pane
+  - monitor log
+  - documents pane
+  - code console
+- Event-driven speech policy now exists as a separate UI layer on top of normal reply TTS.
+  - UI combo options:
+    - `Events: Off`
+    - `Events: Important`
+    - `Events: All`
+    - `Events: Noisy`
+  - `Important` speaks high-signal events like engineering escalation, search complete, and critical errors.
+  - `All` also speaks ordinary status/activity changes.
+  - `Noisy` additionally speaks small boot/monitor-style changes and short visual notes from fresh image/screen updates so notification speech can be tested without forcing rare scenarios.
+  - Validation:
+    - `python3 -m compileall ui scripts/event_speech_policy_smoke_test.py`
+    - `python3 scripts/event_speech_policy_smoke_test.py`
+    - `.venv\\Scripts\\python.exe` import probe for `ui.controller`, `ui.layout`, `ui.controller_actions`, and `ui.controller_queue`
+- Live `VISION` mode now has its own ephemeral visual continuity memory.
+  - The main button label is now `VISION` instead of `SNAP`.
+  - Fresh live-screen frames can generate short companion-style visual comments for the status pane.
+  - Those comments are not stored in chat history, vector memory, knowledge, or world-model memory.
+  - While live vision is active, persona receives recent spoken visual comments under a dedicated `[VISION SESSION NOTES]` block alongside normal recall/context.
+  - Status can still show unsaid visual comments, but only spoken visual remarks are stored in the separate vision-session memory.
+  - Speech remains gated by meaningful change; repeated near-identical visual comments stay in status only.
+  - Viewer-assumption lines like `You look...` are now rejected from the vision-session buffer, and the live visual-commentary prompt explicitly treats captures as screen/media content rather than webcam footage.
+  - Visual-comment generation may now return `SKIP` when there is no fresh angle; the controller drops that quietly instead of emitting a repeated remark.
+  - Repetition gating now checks against the whole recent spoken-vision buffer, not just the immediately previous remark.
+  - Validation:
+    - `python3 -m compileall memory/vision_session.py core/contracts.py core/prompt_context.py core/prompt_builder.py ui app.py scripts/event_speech_policy_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/event_speech_policy_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\vision_session_memory_smoke_test.py`
+    - `.venv\\Scripts\\python.exe` import probe for `app`, `ui.controller`, `ui.layout`, `ui.controller_actions`, `ui.controller_queue`, `ui.event_speech`, and `core.prompt_context`
+- Targeted q9 routing/completion regression run now passes for the core cases:
+  - `Add a task to buy milk.` -> `ADD_TASK`
+  - `I bought the milk.` -> `COMPLETE_TASK`
+  - follow-up `What tasks do I have now?` -> `LIST_TASKS: No pending tasks.`
+  - `Add an event dentist appointment on today.` -> `ADD_EVENT`
+  - `I went to the dentist appointment.` -> `COMPLETE_EVENT`
+  - `Add a task to buy milk tomorrow.` is normalized into an event and executed as `ADD_EVENT`.
+- Artifact:
+  - `data/benchmarks/results/task_event_completion_q9_targeted.json`
+- Final kept state from that run:
+  - `state/tasks.json = {}`
+  - `state/events.json` contains `buy milk: 2026-03-11` and no active dentist appointment entry.
+- Read-only task/event status questions now stay in CHAT.
+  - Example verified: `What tasks and events do I have now?`
+  - Artifact: `data/benchmarks/results/route_status_query_chat_check.json`
+- Ingested-document document-QA now has a working visual fallback for PDF pages.
+  - Verified on 2026-03-11 with isolated harness turns:
+    - `What is the wingspan from the document?` -> `34.1 m / 111 ft 10 in`
+    - `What does the document say about RVSM checks?` -> grounded answer from `PRO-SPO-50`
+  - Activity pane now shows page/section refs for both, and also logs visual-page usage for image-heavy PDF answers.
+- Assessment recommendation as of 2026-03-10:
+  - `Qwen3.5-9B-Q6_K` is the best current assessment model.
+  - It outperformed `Qwen3.5-4B-Q8_0` on stale-context correction and on the long-loop File Chaos task.
+  - Relevant artifacts:
+    - `data/benchmarks/results/model_compare_targeted_q8_vs_q9.json`
+    - `data/benchmarks/results/model_compare_event_followup_q8_vs_q9.json`
+    - `data/benchmarks/results/file_chaos_q8_assessment.json`
+    - `data/benchmarks/results/file_chaos_q9_assessment.json`
+- Engineering support is now a real repair loop, not just a local log.
+  - `codex_escalation` events in the GUI now enqueue a single external Codex repair worker through `core/codex_bridge.py`.
+  - The worker writes bounded state under:
+    - `data/state/codex_repair_request.json`
+    - `data/state/codex_repair_status.json`
+    - `data/state/codex_recovery.json`
+  - Verified behavior:
+    - worker writes a structured result
+    - reruns verification commands
+    - requests Piper restart only after verification passes
+    - post-restart recovery retries the interrupted user request once
+  - Validation:
+    - `python3 -m compileall config.py core ui memory harness scripts app.py`
+    - `python3 scripts/codex_escalation_smoke_test.py`
+    - `python3 scripts/codex_repair_bridge_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+- Boot now probes external engineering support in parallel with normal startup.
+  - `BootManager` supports non-blocking `background_boot_tasks`, so the Codex health probe overlaps llama-server startup instead of extending the critical path.
+  - `core/codex_bridge.py` now exposes `probe_codex_support()` and `resolve_codex_executable()` for both the boot probe and repair worker.
+  - Startup now logs `Engineering channel: ONLINE` or `Engineering channel: OFFLINE (...)` without replaying stale old repair failures as fresh boot events.
+- `Generic Code Repair Flow Smoke` is the named regression for vague inspect -> fix -> run code turns that should stay grounded to the active script instead of wandering into blind workspace search or stalled verification.
+- Command:
+  - `.venv\\Scripts\\python.exe scripts\\code_repair_flow_smoke_test.py --json --keep-data-copy`
+- It seeds a generic broken `control_demo.py`, asks Piper to diagnose only, then fix it, then run it.
+- Verified behavior:
+  - diagnosis stages now stay analysis-oriented instead of collapsing into exact-read/file-dump behavior
+  - failed code rewrites feed current on-disk source plus semantic recovery hints back into the planner
+  - current-state verification for code edits rejects overlapping-token corruption like `SCREEN_WIDTHH`
+  - vague code follow-ups inherit the active script target instead of re-searching the workspace
+  - plain `Run <script>.py.` turns are treated as launch stages, not as implicit interactive gameplay verification
+- Latest clean passing artifact:
+  - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-ppeiopdx\\data`
+  - `scripts/codex_repair_worker.py` now reconfigures stdio to UTF-8 and writes captured Codex output through a byte-safe helper, so Windows `charmap` stdout can no longer kill the repair loop before restart.
+  - On Windows, engineering support now prefers the WSL Codex backend when available, using `wsl.exe -e .../linux-x86_64/codex`, so repair jobs run in the same Codex environment that works from WSL instead of the broken native Windows shell path.
+  - Validation:
+    - `python3 -m compileall config.py core/codex_bridge.py scripts/codex_repair_worker.py llm/boot.py app.py scripts/codex_boot_probe_smoke_test.py`
+    - `python3 scripts/codex_boot_probe_smoke_test.py`
+    - `python3 scripts/codex_repair_bridge_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\codex_ui_repair_smoke_test.py`
+- Diagnosis-only `FILE_WORK` for `catch_the_stars.py` no longer trips the old verification/escalation loop.
+  - The old failure shape was:
+    - diagnosis stage misclassified as mutating or exact-read-only
+    - bare `read_text` auto-finished or exact-read persona bypass dumped the file
+    - stale retrieved memory could override the current file
+  - Current good state:
+    - diagnosis stages require an explicit diagnosis proposal before completion
+    - exact-read auto-replies are limited to true `show me the contents` stages
+    - persona no longer receives retrieved memory/document hits for normal `FILE_WORK` turns
+  - Validation:
+    - `python3 scripts/file_stage_policy_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\catch_the_stars_diagnosis_smoke_test.py --json --keep-data-copy`
+    - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-mnh58mic\\data`
+- Vague code follow-up routing now binds to the last explicit script/file target instead of re-searching the workspace.
+  - Good example: after `catch_the_stars.py` is the known active script, follow-up TASK cards like "inspect the input handler" or "fix the controls" are normalized to read/edit `catch_the_stars.py` directly.
+  - The task goal, FILE_WORK stage goals, and card context now all carry the explicit file target plus a direct "do not search the workspace again unless the file read fails" instruction.
+  - Validation:
+    - `python3 scripts/code_target_followup_normalizer_smoke_test.py`
+    - `python3 scripts/file_stage_policy_smoke_test.py`
+- FILE_WORK current-state verification is no longer allowed to invent false failures from incidental quoted context or broad reorg wording.
+  - Text-write current-state recovery now extracts expected file content from the stage goal/success text instead of picking up unrelated quoted context like `The workspace root is '.'`.
+  - Extension-based reorg stages no longer fall back to bogus generic copy-state inference from phrases like `duplicate identical files`; they use the dedicated extension-inventory current-state path instead.
+  - Executor now treats current-state verification as a recovery path for false negatives, not a way to downgrade an already `VERIFIED` direct tool result.
+  - Validation:
+    - `python3 scripts/file_checker_text_content_inference_smoke_test.py`
+    - `python3 scripts/extension_reorg_current_state_verifier_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_crud_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-0fmicem8\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+    - `.venv\\Scripts\\python.exe scripts\\file_chaos_test.py --json`
+- Code-edit stages now have a workable fallback after one bad `RUN_CODE` attempt.
+  - If the exact code file is already in scratchpad, runtime still blocks redundant rereads, but it no longer hard-blocks a valid `FILE_OP write_text` fallback for that same code file.
+  - Stage step budget is now configurable via `CFG.EXECUTOR_MAX_STEPS` and defaults to `12` instead of a hard-coded `10`.
+  - Validation:
+    - `.venv\\Scripts\\python.exe scripts\\code_file_write_fallback_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\redundant_code_read_guard_smoke_test.py`
+- Reversible skill-layer v1 is in and regression-clean under the current file-work smokes.
+  - `CFG.SKILL_LAYER_ENABLED` gates the whole layer so it can be disabled without code rollback.
+  - Current integration point: route normalization stays intact, then `apply_route_skill_layer(...)` tags the chosen workflow and injects planner/persona guidance.
+  - Current first-wave skills: `workspace_cleanup`, `code_fix`, `script_run`, `file_lookup`, `file_edit`, `task_event`, `search_research`.
+  - Important guardrails:
+    - `file_lookup` is now limited to genuinely non-mutating lookup/read workflows
+    - naming-mismatch document follow-ups with a known explicit path stay lookup-only instead of being poisoned by prior exact-read runtime context
+    - explicit filename/path rechecks now answer with the path, not file contents
+  - Validation:
+    - `python3 scripts/document_lookup_followup_normalizer_smoke_test.py`
+    - `python3 scripts/skill_layer_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-uazaqihz\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-fadajaj_\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_crud_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-orngpmm8\\data`
+  - Additional covered follow-up:
+    - `Read it back.` now reuses the prior document target/subject instead of trying to search for a literal file named `it back`.
+  - Additional covered compound command:
+    - `Remove bread from the grocery list and then read it back.` now normalizes into a two-stage FILE_WORK card: remove the requested text, then read the updated file back.
+    - Validation:
+      - `.venv\\Scripts\\python.exe scripts\\file_edit_compound_followup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-ybjhjtyw\\data`
+- v1 redesign Phase 1 has a real extracted seam now.
+  - `ContextPackEngine` is the shared owner for persona working-set assembly and hidden runtime-context rendering.
+  - `PromptContextService` is now a facade over that engine instead of hand-assembling prompt context itself.
+  - `phase_persona` now works through explicit persona packs and pack overrides instead of mutating `PromptContext` in place.
+  - Validation:
+    - `python3 -m compileall core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+- v1 redesign Phase 1 now also owns persona carry-forward runtime state.
+  - `PersonaRuntimePack` now carries:
+    - outcome block and paused/failed flags
+    - exact file read answers
+    - file lookup answers
+    - verified file-work summaries
+    - analysis-report answers
+    - FILE_WORK report-rule gating
+  - `phase_persona` no longer parses those directly from scratchpad.
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+- v1 redesign Phase 1 context packing is complete.
+  - `ContextPackEngine` / `PromptContextService` now own:
+    - persona working-set assembly
+    - hidden runtime-context rendering
+    - scratchpad-to-persona carry-forward state
+    - persona tail-rule blocks
+    - direct-answer fast-path selection
+  - `phase_persona` is now mostly orchestration plus streaming/recall control, not a second context-assembly site.
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-loewcsc4\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-c1o2g96x\\data`
+- Phase 2 first seam is green.
+  - `StateMutationEngine` now owns:
+    - task/event completion follow-up correction classification
+    - concrete `TASK_EVENT_WORK` / `MEMORY_WORK` outcome packaging
+    - false-success downgrades for `Event not found` / `Key not found` mutation results
+  - Validation:
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+- Reminder-style dated task/event requests now normalize correctly even if the router hands back a bad completion card.
+  - Covered shape:
+    - `My insurance company told me that my car's insurance will end on the 25th, so remind me to get a new yearly insurance for that.`
+  - Expected normalization:
+    - event-oriented `ADD_EVENT` card
+    - bare ordinal day `on the 25th` resolves to the next valid calendar date (`2026-03-25` on the current clock)
+  - Validation:
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+- State-domain direct/vague regression surface is green in targeted harness reruns.
+  - Green task flow:
+    - `Add a task to buy milk.` -> `What tasks do I have right now?` -> `I bought the milk.` -> `What tasks do I have now?`
+  - Green vague task completion:
+    - `Add a task to buy bread.` -> `What tasks do I have right now?` -> `I did it.` -> `What tasks do I have now?`
+  - Green event flow:
+    - `Add an event smoke alpha appointment on today.` -> `What events do I have scheduled?` -> `I went to the smoke alpha appointment.` -> `What events do I have now?`
+  - Green vague event completion:
+    - `Add an event smoke beta appointment on today.` -> `What events do I have scheduled?` -> `I went to it.` -> `What events do I have now?`
+  - Green knowledge flow:
+    - `Remember that my favorite drink is coffee.` -> `What do you know about my favorite drink?` -> `Forget that my favorite drink is coffee.` -> `What do you know about my favorite drink now?`
+  - Green vague knowledge query:
+    - `Remember that my favorite drink is coffee.` -> `Do you remember my favorite drink?` -> `Forget that my favorite drink is coffee.` -> `Do you remember my favorite drink now?`
+- Phase 2 state ownership is now partially engine-owned rather than split across prompt helpers.
+  - `StateMutationEngine` owns:
+    - completion-style task/event correction classification
+    - durable knowledge store/remove/query intent classification
+    - readonly answer resolution for world-model knowledge vs operational task/event state
+    - `TASK_EVENT_WORK` and `MEMORY_WORK` outcome packaging
+    - active state-domain route normalization for reminder, task/event follow-up, contextual remember/remove, and plural delete/complete turns
+  - Verified direct/vague world-state path:
+    - direct knowledge flow still replies `Your favorite drink is coffee.` after store and `I do not have a stored favorite drink.` after remove
+    - vague knowledge flow does the same through `Do you remember my favorite drink?`
+    - kept passing artifacts:
+      - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-1o1_a_zg\\data`
+      - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-wjuoppg4\\data`
+- Temporary and soft-intent memory now have dedicated owners.
+  - `world_model.json` remains the durable source of truth for hard personal facts.
+  - `knowledge.json` remains only as a compatibility mirror of durable world-model facts.
+  - `situational_state.json` now owns temporary state such as current activity, friction, and short-lived conditions.
+  - `intent_state.json` now owns soft intentions such as `Maybe I should ...` without promoting them to tasks or durable truth.
+  - Prompt context now renders `[SITUATIONAL STATE]` and `[INTENT STATE]` from those dedicated owners, and legacy transient root attributes are drained out of `world_model.json`.
+  - Focused greens:
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+- Ambiguous cross-domain follow-ups now have an engine-owned bounded LLM resolver instead of scattered router/persona guesses.
+  - Green examples:
+    - `Pending tasks: buy milk.` -> `Well, remove it.` becomes task delete for `buy milk`
+    - `Pending tasks: buy milk.` -> `I've already done it, you may remove it.` becomes task completion for `buy milk`
+    - `Any tasks left?` becomes a canonical readonly task query
+    - `My favorite drink is coffee.` -> `Just remember that fact.` becomes durable memory store
+    - `My biggest project is currently working on you, Piper.` -> `Just remember that fact.` stays `CHAT`
+  - Focused green:
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+- Declarative task/event state corrections now answer from current operational state.
+  - Green examples:
+    - `No tasks or events.` now renders the real current state instead of letting persona infer from the previous task result.
+    - `There should be events now.` now renders the actual upcoming events directly.
+  - Focused green:
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+- Durable-memory removal loop is green end-to-end.
+  - Green direct remove:
+    - `Remember that I work on Catch the Stars.` -> `I'm not really working on Catch the Stars, please remove it from your memory.` -> `Tell me everything you know about me.`
+  - Green already-absent remove:
+    - same removal turn repeated reports current state honestly instead of failing or deleting something unrelated
+  - Green vague remove:
+    - `Remember that I work on Catch the Stars.` -> `Tell me everything you know about me.` -> `I'm not really working on that project anymore, remove it.` -> `Tell me everything you know about me.`
+  - The active `works_on` fact is removed in all three cases, and the follow-up summary no longer reintroduces the project from recent chat history.
+  - Kept passing artifacts:
+    - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-xgdckjgp\\data`
+    - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-86yueskv\\data`
+    - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-9mpbuazj\\data`
+- Persona cleanup is now deterministic and lightweight.
+  - Active path:
+    - `core/persona_output.py`
+    - called from `phase_persona` after control-tag stripping
+  - Verified behavior:
+    - event-removal replies no longer say `upcoming tasks`
+    - casual chat replies strip generic `Would you like...` tails
+    - casual no-mutation chat replies drop unrelated operational/schedule paragraphs
+    - simple acknowledgements no longer leak `systems indicate no further mutations were required`
+  - Focused green:
+    - `python3 scripts/persona_output_sanitizer_smoke_test.py`

@@ -1,0 +1,14 @@
+{
+  "samples": {
+    "confirmation_question": "Shall I attempt to re-route the request to resolve this verification deadlock?",
+    "explicit_permission": "Would you like me to retry through the agent workflow?",
+    "auto_retry_statement": "I will retry the operation now.",
+    "plain_failure": "The task failed due to a missing file."
+  },
+  "results": {
+    "confirmation_question": true,
+    "explicit_permission": true,
+    "auto_retry_statement": false,
+    "plain_failure": false
+  }
+}

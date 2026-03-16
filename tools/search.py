@@ -1,0 +1,128 @@
+﻿"""core/search.py
+
+Online Search Tool using DuckDuckGo + Jina.ai Reader.
+"""
+
+import urllib.request
+import ssl
+import json
+from datetime import datetime
+from pathlib import Path
+
+from core.runtime_control import CancellationToken, OperationCancelled
+# 1. Search Library
+# FIX: Updated to use the modern package name to prevent install errors.
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    # Fallback for older versions just in case
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        raise ImportError("Please install: pip install duckduckgo-search")
+
+from config import CFG, Config
+# Daily facts removed
+
+# 2. The "Magic" Reader (Jina.ai)
+def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
+
+
+def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
+    try:
+        _raise_if_cancelled(cancel_token)
+        reader_url = f"https://r.jina.ai/{url}"
+        req = urllib.request.Request(reader_url, headers={'User-Agent': 'Mozilla/5.0'}) # Changed to standard browser UA
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+        # Use configured timeout for news sites (from config.SEARCH_URL_FETCH_TIMEOUT_S)
+        with urllib.request.urlopen(req, timeout=CFG.SEARCH_URL_FETCH_TIMEOUT_S, context=context) as resp:
+            _raise_if_cancelled(cancel_token)
+            data = resp.read().decode('utf-8', errors='ignore')
+
+            # CHECK FOR PAYWALL/LOGIN WALLS
+            # If the returned text is very short or contains certain keywords, it failed
+            if len(data) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+                return "Error: Page content too short (likely blocked/empty)"
+
+            return data
+            
+    except OperationCancelled:
+        raise
+    except Exception as e:
+        return f"Error reading page: {e}"
+
+def perform_search(query: str, data_dir, log_callback=None, cancel_token: CancellationToken | None = None):
+    # Helper to log to both Console and UI
+    def log(msg):
+        print(msg)
+        if log_callback:
+            log_callback(msg)
+            
+    # Helper to clean URLs for display
+    def clean_url(u):
+        return u.replace("https://", "").replace("http://", "").replace("www.", "").strip()
+
+    log(f"Searching web for: {query}")
+    
+    results = []
+    
+    # 1. Search
+    try:
+        _raise_if_cancelled(cancel_token)
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=CFG.SEARCH_MAX_RESULTS))
+        _raise_if_cancelled(cancel_token)
+        if not results: 
+            log("Search Error: Zero results.")
+            return "Search Error: Zero results."
+    except OperationCancelled:
+        raise
+    except Exception as e:
+        log(f"Search Error: {e}")
+        return f"Search Error: {e}"
+
+    # Filter Blacklist
+    filtered = [r for r in results if not any(d in r.get('href','') for d in CFG.SEARCH_BLACKLIST)]
+    
+    # 2. Build Base Context (Snippets)
+    output_parts = ["SEARCH SNIPPETS:"]
+    for r in filtered[:CFG.SEARCH_SNIPPETS_LIMIT]:
+        output_parts.append(f"Title: {r.get('title')}\nSnippet: {r.get('body')}")
+
+    # 3. Greedy Deep Dive (Top 6 Links)
+    output_parts.append("\n--- DEEP DIVE (Full Content) ---")
+    
+    links_visited = 0
+
+    for r in filtered:
+        _raise_if_cancelled(cancel_token)
+        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT: break
+        
+        link = r.get('href')
+        if not link: continue
+        
+        log(clean_url(link))
+        content = fetch_clean_text(link, cancel_token=cancel_token)
+        
+        # Check for errors
+        if "Error reading page" in content:
+            # We can keep errors silent or logged to console only to keep UI clean?
+            # Let's log to console but not UI for cleaner activity window
+            # log(f"Skipped: {clean_url(link)} (Error)")
+            continue
+        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+            continue
+
+        output_parts.append(f"\nSource: {link}\nContent: {content[:CFG.SEARCH_CONTENT_SLICE_LENGTH]}")
+        links_visited += 1
+
+    if links_visited == 0:
+        log("Error: Found results but could not read content from any link.")
+        return "Search Error: Found results but could not read content from any link."
+
+    return "\n".join(output_parts)

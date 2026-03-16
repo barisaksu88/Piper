@@ -1,0 +1,250 @@
+{
+  "updated_at_epoch_s": 1773098698,
+  "mode": "light_direct_compare",
+  "results": [
+    {
+      "label": "q8",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-4B-Q8_0.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\mmproj-F16.gguf",
+      "reasoning_budget": 0,
+      "boot_ok": true,
+      "boot_seconds": 5.586,
+      "boot_status": "ready",
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.104,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 44.608,
+            "prompt_per_token_ms": 2.34778947368421,
+            "prompt_per_second": 425.9325681492109,
+            "predicted_n": 2,
+            "predicted_ms": 21.677,
+            "predicted_per_token_ms": 10.8385,
+            "predicted_per_second": 92.2636896249481
+          },
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21
+          }
+        },
+        {
+          "name": "capital_question",
+          "passed": true,
+          "observed": "The capital of France is Paris.",
+          "latency_s": 0.219,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 25,
+            "prompt_ms": 47.483,
+            "prompt_per_token_ms": 1.89932,
+            "prompt_per_second": 526.504222563865,
+            "predicted_n": 8,
+            "predicted_ms": 118.521,
+            "predicted_per_token_ms": 14.815125,
+            "predicted_per_second": 67.49858674833996
+          },
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 25,
+            "total_tokens": 33
+          }
+        },
+        {
+          "name": "good_morning_route",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.167,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 28,
+            "prompt_ms": 39.175,
+            "prompt_per_token_ms": 1.3991071428571427,
+            "prompt_per_second": 714.7415443522656,
+            "predicted_n": 6,
+            "predicted_ms": 78.837,
+            "predicted_per_token_ms": 13.1395,
+            "predicted_per_second": 76.10639674264621
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 28,
+            "total_tokens": 34
+          }
+        },
+        {
+          "name": "birthday_bucket",
+          "passed": false,
+          "observed": "{\"bucket\":\"task\"}",
+          "latency_s": 0.164,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 33,
+            "prompt_ms": 47.609,
+            "prompt_per_token_ms": 1.4426969696969698,
+            "prompt_per_second": 693.1462538595644,
+            "predicted_n": 6,
+            "predicted_ms": 82.177,
+            "predicted_per_token_ms": 13.696166666666668,
+            "predicted_per_second": 73.01313019457999
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 33,
+            "total_tokens": 39
+          }
+        },
+        {
+          "name": "milk_bucket",
+          "passed": false,
+          "observed": "{\"bucket\":\"task\"}",
+          "latency_s": 0.18,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 35,
+            "prompt_ms": 38.737,
+            "prompt_per_token_ms": 1.1067714285714285,
+            "prompt_per_second": 903.5289258331827,
+            "predicted_n": 6,
+            "predicted_ms": 83.272,
+            "predicted_per_token_ms": 13.878666666666668,
+            "predicted_per_second": 72.0530310308387
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 35,
+            "total_tokens": 41
+          }
+        }
+      ],
+      "log_path": "data\\benchmarks\\logs\\Qwen3.5-4B-Q8_0.lightcmp.log"
+    },
+    {
+      "label": "q9",
+      "model_path": "C:\\Projects\\Piper\\models\\llama\\Qwen_Qwen3.5-9B-Q6_K.gguf",
+      "mmproj_path": "C:\\Projects\\Piper\\models\\llama\\Qwen3.5-9B.mmproj-F16.gguf",
+      "reasoning_budget": 0,
+      "boot_ok": true,
+      "boot_seconds": 10.674,
+      "boot_status": "ready",
+      "cases": [
+        {
+          "name": "exact_ok",
+          "passed": true,
+          "observed": "OK",
+          "latency_s": 0.122,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 19,
+            "prompt_ms": 55.654,
+            "prompt_per_token_ms": 2.9291578947368424,
+            "prompt_per_second": 341.3950479749883,
+            "predicted_n": 2,
+            "predicted_ms": 28.05,
+            "predicted_per_token_ms": 14.025,
+            "predicted_per_second": 71.301247771836
+          },
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 19,
+            "total_tokens": 21
+          }
+        },
+        {
+          "name": "capital_question",
+          "passed": true,
+          "observed": "The capital of France is Paris.",
+          "latency_s": 0.261,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 25,
+            "prompt_ms": 50.891,
+            "prompt_per_token_ms": 2.03564,
+            "prompt_per_second": 491.24599634512987,
+            "predicted_n": 8,
+            "predicted_ms": 157.018,
+            "predicted_per_token_ms": 19.62725,
+            "predicted_per_second": 50.94957266045931
+          },
+          "usage": {
+            "completion_tokens": 8,
+            "prompt_tokens": 25,
+            "total_tokens": 33
+          }
+        },
+        {
+          "name": "good_morning_route",
+          "passed": true,
+          "observed": "{\"decision\":\"CHAT\"}",
+          "latency_s": 0.194,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 28,
+            "prompt_ms": 47.793,
+            "prompt_per_token_ms": 1.7068928571428572,
+            "prompt_per_second": 585.8598539535079,
+            "predicted_n": 6,
+            "predicted_ms": 111.836,
+            "predicted_per_token_ms": 18.639333333333333,
+            "predicted_per_second": 53.649987481669584
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 28,
+            "total_tokens": 34
+          }
+        },
+        {
+          "name": "birthday_bucket",
+          "passed": true,
+          "observed": "{\"bucket\":\"event\"}",
+          "latency_s": 0.189,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 33,
+            "prompt_ms": 46.763,
+            "prompt_per_token_ms": 1.417060606060606,
+            "prompt_per_second": 705.6861193678764,
+            "predicted_n": 6,
+            "predicted_ms": 110.454,
+            "predicted_per_token_ms": 18.409,
+            "predicted_per_second": 54.32125590743658
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 33,
+            "total_tokens": 39
+          }
+        },
+        {
+          "name": "milk_bucket",
+          "passed": false,
+          "observed": "{\"bucket\":\"task\"}",
+          "latency_s": 0.213,
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 35,
+            "prompt_ms": 46.602,
+            "prompt_per_token_ms": 1.3314857142857142,
+            "prompt_per_second": 751.0407278657568,
+            "predicted_n": 6,
+            "predicted_ms": 113.152,
+            "predicted_per_token_ms": 18.858666666666668,
+            "predicted_per_second": 53.02601809954751
+          },
+          "usage": {
+            "completion_tokens": 6,
+            "prompt_tokens": 35,
+            "total_tokens": 41
+          }
+        }
+      ],
+      "log_path": "data\\benchmarks\\logs\\Qwen_Qwen3.5-9B-Q6_K.lightcmp.log"
+    }
+  ]
+}

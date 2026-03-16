@@ -1,0 +1,12 @@
+dearpygui
+numpy
+psutil
+requests
+urllib3
+chromadb
+sentence-transformers
+pypdf
+duckduckgo-search
+faster-whisper
+sounddevice
+kokoro-onnx

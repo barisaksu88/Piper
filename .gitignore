@@ -1,0 +1,48 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Test / pytest ─────────────────────────────────────────────────────────────
+.pytest_cache/
+pytest-cache-files-*/
+.coverage
+htmlcov/
+
+# ── Models and runtimes (large binaries) ──────────────────────────────────────
+models/
+runtime/
+*.gguf
+*.bin
+*.safetensors
+
+# ── Runtime state (regenerated on each session) ───────────────────────────────
+data/state/
+data/debug/
+data/vector_store/
+
+# ── User workspace (agent-generated files, not source) ────────────────────────
+data/workspace/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak

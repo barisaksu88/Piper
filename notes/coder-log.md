@@ -1,0 +1,2010 @@
+# Coder Log
+
+## 2026-03-15
+
+- Phase 6: SummaryEngine extraction complete. All 6 frozen engines now done.
+  - Contract: `docs/v1/SUMMARY_ENGINE.md` — defines 14 public methods across 7 ownership groups.
+  - `core/engines/summary.py` (490 lines) implements the full public API:
+    - `latest_stage_entries`, `extract_verified_result`, `extract_proposal`, `extract_exact_file_read`, `extract_file_lookup`, `extract_stage_status` — scratchpad extraction layer
+    - `build_runtime_note` — carry-forward pipeline (priority: verified result → exact-read path → file-lookup brief → LAST_LOG → OBSERVATION_TEXT)
+    - `build_outcome_block`, `select_outcome_detail`, `extract_observation_detail` — outcome formatting
+    - `is_generic_file_work_summary`, `sanitize_note`, `truncate_scratchpad`, `truncate_text` — shared utilities
+  - Duplication eliminated:
+    - `ContextPackEngine`: 12 methods removed, all replaced with `SummaryEngine.*` call sites.
+    - `ScratchpadFormatter`: 4 methods removed (`_truncate_text`, `_select_outcome_detail`, `_extract_observation_detail`, `_is_generic_file_work_summary`), replaced with `SummaryEngine.*` call sites.
+    - `PromptBuilder`: 2 methods removed (`_truncate_scratchpad`, `_scratchpad_exact_read_paths`); truncation replaced with `SummaryEngine.truncate_scratchpad`; exact-read-path extraction replaced with `FileWorkEngine.exact_read_paths_from_scratchpad`.
+    - `PromptContextService`: 5 delegation methods updated to point directly to `SummaryEngine` instead of `ContextPackEngine`.
+  - Import safety: `SummaryEngine` depends only on stdlib (`re`, `json`). Zero engine-to-engine imports.
+  - Smoke test: `scripts/summary_engine_smoke_test.py` — 42 cases, all pass.
+  - Pre-existing failures not caused by Phase 6:
+    - `context_pack_engine_smoke_test.py`: `grocery_list.txt` does not exist on disk — `_normalize_runtime_context_path` returns `""` for non-existent paths. Workspace-state dependency.
+    - `code_edit_recovery_hint_smoke_test.py`, `redundant_code_read_guard_smoke_test.py`: `ImportError` on `StageExecutor` — LLM server dependency. Integration-level tests.
+
+## 2026-03-15
+
+- Fixed three live-session bugs diagnosed from debug log (user: "arrange all except fcom").
+
+  **Bug A — `consolidate_by_extension` ignored exclusion constraints:**
+  - Root cause: tool had no `exclude_files` / `exclude` parameter. Stage 2 ran `consolidate_by_extension` on the whole workspace and moved the FCOM PDF to `pdf/` despite the planner's stated success_condition saying "FCOM files excluded from movement".
+  - Fix: added `exclude_files` (alias `exclude`) list parameter to `handle_consolidate_by_extension` in `tools/workspace_extension_actions.py`. Files are excluded by resolved path and by lowercase filename. Added a registry rule: "When the user wants to exclude specific files from consolidation, pass those filenames in the exclude_files list." Added a syntax example to `tools/registry.py`.
+
+  **Bug B — Stage 3 verification loop (planner proposes completion, file checker blocks indefinitely):**
+  - Root cause: Stage 3 goal was "Move all non-FCOM files to their designated folders" — a broad FILE_WORK stage that Stage 2 already completed. When Stage 3 ran, planner did `list_tree`, confirmed work was done, proposed COMPLETE. But `_accept_current_workspace_verification` → `verify_current_file_stage_state` returned None because the `stage_is_extension_file_reorg` guard was False (no explicit extension keywords in the stage text). The synthetic inventory STATE_CHECK path was never reached, so `_last_file_verdict` stayed `""` and completion was blocked forever. Stage 3 repeated until max steps.
+  - Fix 1: Extended `stage_is_broad_file_reorg` `reorg_intent` regex in `core/file_stage_policy.py` to match `organi[sz]\w*` (covers "organized", "organizing") and `move\b.{0,40}\bto\b` / `move\b.{0,40}\binto\b` (covers "move files to folders" without requiring "into").
+  - Fix 2: Extended guard in `file_checker.py` `verify_current_file_stage_state` to run the synthetic inventory STATE_CHECK for both `stage_is_extension_file_reorg` AND `stage_is_broad_file_reorg` stages.
+
+  **Bug C — Persona asks "should I reroute?" while system simultaneously reroutes:**
+  - Root cause: When a task failed hard enough to trigger engineering support (`latest_codex_escalation` set), the PERSONA phase ran with `[ENGINEERING_SUPPORT_RULE]` injected. Persona output included `[ROUTER]` tag (normal failure behavior) but phrased as an offer ("Should you wish to proceed...") without a literal `?`. `_wants_user_confirmation` returned False (no `?`), so the [ROUTER] tag fired and set `next_stage = ROUTE` at line 1235, rerouting immediately while the persona was just presenting the engineering brief.
+  - Fix: In `orchestrator_phases.py`, added a guard at the top of the `elif outcome_failed:` branch: if `orc.latest_codex_escalation` is set, suppress the reroute and go to FINISHED. Engineering support is a "stop and report to user" state — the user should decide what to do next, not the [ROUTER] tag.
+
+- Phase 4: VerificationEngine extraction complete.
+  - `core/engines/verification.py` fully implemented: `should_verify()`, `evaluate()` (RULES→LLM→STATE_CHECK), `evaluate_mutation()`, `_run_checker()`, `_map_check_to_result()`.
+  - `core/executor.py` wired: `self.verification_engine = VerificationEngine(file_checker=self.file_checker)` in `__init__`; inline 50-line verification block replaced with `should_verify()` + `evaluate()` call; `_last_file_verdict` kept in sync for downstream compat; `_last_verification: VerificationResult | None` added as the authoritative typed result.
+  - Verification: `file_edit_smoke_test.py` 3/3, `file_crud_smoke_test.py` 6/6, `file_lookup_smoke_test.py` 6/6, `file_chaos_test.py` pass.
+
+- Fixed route normalizer misclassifying `"Delete the file X from the workspace"` as remove-text-from-document.
+  - Root cause: `DIRECT_FILE_REMOVE_TEXT_RE` fires before `DIRECT_FILE_DELETE_RE` in the normalizer. For input "Delete the file X from the workspace", the remove-text regex captures needle=`the file X`, subject=`workspace`. `_subject_looks_like_workspace_document("workspace")` returned True because `"workspace"` was not in `_GENERIC_LOOKUP_SUBJECTS`, so it built a content-edit stage instead of a delete stage.
+  - Fix: added `"workspace"` to `_GENERIC_LOOKUP_SUBJECTS` in `route_normalizer.py`. `_clean_document_lookup_subject` now strips it to empty, blocking the wrong route. `DIRECT_FILE_DELETE_RE` then matches correctly.
+  - Verification: `file_crud_smoke_test.py` 6/6 (delete turns now pass).
+
+- Fixed knowledge removal false-positive "success" in persona after wrong key.
+  - Root cause: `memory_remove_listing_confirms_absent()` auto-resolves when the target string is not literally found in the listing. With the wrong combined key, the literal check misses it but the fact IS in the listing under a different key format → auto-resolve fires with success=True → persona says "removed".
+  - Fix: added word-overlap guard in `state_mutation.py`. If any significant word (>4 chars) from the target appears in the listing, the fact may be stored under a different key format — skip auto-resolve. True empty-listing case (genuinely absent fact) still triggers auto-resolve correctly.
+  - Verification: `state_mutation_engine_smoke_test.py` passes.
+
+- Fixed knowledge removal key mismatch (remove_knowledge target was wrong).
+  - Root cause: LLM classifier had no instruction on what to use as `target` for `remove_knowledge`. It was hallucinating a combined key like "I slept the whole day and spent the whole day at the beach, knowledge" that doesn't match any stored attribute.
+  - Stored attributes are canonicalized (e.g. `slept_the_whole_day_today`); rendered in memory_summary as "- Slept The Whole Day Today: slept the whole day today".
+  - Fix: added two rules to the classifier prompt in `followup_resolution.py`:
+    1. For `remove_knowledge`, set `target` to the exact attribute label from memory_summary (before the colon). Never invent a key.
+    2. If multiple stored facts match, choose the single most specific one.
+  - Verification: `state_mutation_engine_smoke_test.py`, `followup_resolution_engine_smoke_test.py`, `knowledge_route_normalizer_smoke_test.py` all pass.
+
+- Loosened LLM classifier rule for store_knowledge in followup resolution.
+  - Old rule "only when user explicitly means durable memory" was too conservative — local model returned clarify for "just remember that" after personal statements that don't follow "my X is Y" form.
+  - New rules: 'just remember that' / 'remember that' after any personal statement → store_knowledge; personal statements include past events, experiences, preferences, things the user did/owns; clarify only when no identifiable statement exists in history.
+  - Verification: `python scripts/followup_resolution_engine_smoke_test.py`
+
+- Fixed "Just remember that" failing after first-person personal statements.
+  - Root cause: `classify_contextual_remember_intent()` only handled "my X is Y" patterns. Statements like "I slept the whole day today." returned intent=none → CHAT → LLM clarification.
+  - Fix: added `_FIRST_PERSON_STATEMENT_RE` and a fallback branch for "I [verb] [object]" statements. Predicate (up to 5 words) = subject; full predicate = value. Soft/ongoing markers excluded by `_looks_like_soft_subject()`.
+  - Verification: inline classify test + `state_mutation_engine_smoke_test.py` + `followup_resolution_engine_smoke_test.py`
+
+- Removed cross-engine detection dependency from `FollowupResolutionEngine`.
+  - `should_resolve()` was calling `self.state_mutation_engine.looks_like_contextual_remember_followup()` and `looks_like_ambiguous_memory_followup()` — resolution-sensing work happening in the mutation engine.
+  - Moved `_CONTEXTUAL_REMEMBER_RE` and `_AMBIGUOUS_MEMORY_FOLLOWUP_RE` patterns into `core/engines/followup_resolution.py`.
+  - Added `looks_like_contextual_remember_followup()` and `looks_like_ambiguous_memory_followup()` as owned static methods on `FollowupResolutionEngine`.
+  - `should_resolve()` now calls those local methods directly — no cross-engine call required.
+  - `state_mutation_engine` reference in `__init__` kept for route-building delegation only.
+  - Verification:
+    - `python scripts/followup_resolution_engine_smoke_test.py`
+    - `python scripts/state_mutation_engine_smoke_test.py`
+    - `python scripts/skill_layer_smoke_test.py`
+    - `python scripts/context_pack_engine_smoke_test.py`
+
+- Added missing engine exports to `core/engines/__init__.py`.
+  - `FollowupResolutionEngine`, `RouteClarifier`, and `VerificationEngine` were instantiated in `orchestrator_phases.py` but absent from `__init__.py`.
+  - All five active engines now exported from the package.
+
+- Defined `VerificationEngine` contract (Phase 4 prep).
+  - `VerificationResult` dataclass with factory methods added to `core/engines/verification.py`.
+  - Full contract and migration map documented in `docs/v1/VERIFICATION_ENGINE.md`.
+
+## 2026-03-14
+
+- Fixed a readonly fragment regression from the latest live `Any tasks?` session.
+  - `Any tasks?` and `Any events?` were bypassing the deterministic readonly fast path because `core/operational_state_service.py` only recognized longer query forms like `what/show/list/do I have`.
+  - That let persona see stale `[RETRIEVED MEMORY]` about `by bread` and freestyle against it instead of answering from `[OPERATIONAL STATE]`.
+  - The readonly matcher now treats `any` as a valid query opener when the turn clearly targets tasks/events.
+  - Verification:
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+
+- Fixed two late regressions from the latest live logs.
+  - `I've already done it, you may remove it.` was still being hijacked by the LLM memory-followup refiner and converted into `MEMORY_WORK` against `pending task to buy milk`, even though it was a task-completion update.
+  - `core/engines/state_mutation.py` now refuses memory-followup refinement for completion-style turns unless they explicitly mention memory/knowledge/world-state scope.
+  - The persona prompt still showed duplicate relevance-policy blocks because `core/prompt_builder.py` only checked for `[RELEVANCE DISCIPLINE]` and missed the markdown form `## RELEVANCE DISCIPLINE` from `data/prompts/instructions.txt`.
+  - `core/prompt_builder.py` now treats either heading shape as already present, so the fallback block is not appended again.
+  - Verification:
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `python3 scripts/persona_relevance_policy_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+
+- Fixed two remaining state-read/transient-state leaks from the late event sessions.
+  - `core/operational_state_service.py` now treats date-scoped schedule queries like `what's on my schedules for tomorrow` and `Do I have an event for tomorrow?` as exact-date event reads instead of dumping the full upcoming-events list.
+  - `memory/transient_state.py` now exposes `reconcile_operational_change(...)` so matching soft-intent entries are cleared when an explicit task/event is added, removed, or completed.
+  - `core/agent.py` now calls that transient reconciliation hook on authoritative task/event mutations, and `app.py` / `harness/session.py` both pass the live `TransientStateManager` into `AgentBrain`.
+  - Cleaned the stale live `intent:bike-loot-tomorrow` residue from `data/state/intent_state.json`.
+  - Added / updated verification:
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/agent_transient_reconcile_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+
+## 2026-03-13
+
+- Repaired Qwen persona payloads after llama-server started rejecting system-only persona requests with `No user query found in messages.`
+  - Root cause: `core/prompting.py` folded the cleaned user/assistant history into `[CONVERSATION_TRANSCRIPT]` inside the first system prompt and then returned only that single `role="system"` message.
+  - Final fix: keep the single leading system message for Qwen compatibility, but append the cleaned `user` / `assistant` turns after it so the payload still exposes a real user query to the parser.
+  - Verification:
+    - `python3 -m compileall core/prompting.py scripts/persona_system_event_role_smoke_test.py scripts/vision_prompt_hygiene_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/vision_prompt_hygiene_smoke_test.py`
+- Re-fixed Qwen persona system-message ordering after a regression in `core/prompting.py`.
+  - Root cause: the Qwen-compatible single-system path still emitted a second trailing `role="system"` message for `[NO_MUTATION_RULE]`, `[FINAL_STAGE_OUTCOME]`, and related runtime context.
+  - Evidence: current persona escalations matched llama-server 400s with `System message must be at the beginning.`
+  - Final fix: merge `[LATEST_RUNTIME_CONTEXT]` back into the first system prompt and keep only user/assistant messages afterward on the single-system path.
+  - Updated `scripts/persona_system_event_role_smoke_test.py` to assert there is no trailing system message.
+  - Verification:
+    - `python3 -m compileall core/prompting.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+
+## 2026-03-11
+
+- Fixed persona runtime-event serialization for single-system-message models.
+  - Root cause: `build_persona_messages(...)` was appending `[LATEST_SYSTEM_EVENT]` blocks as `role="user"` on the Qwen-compatible single-system path, which made debug logs and model context look like the user had authored system runtime rules such as `[NO_MUTATION_RULE]`.
+  - Final fix: `core/prompting.py` now embeds terminal runtime-event blocks inside the merged system prompt under `[LATEST_RUNTIME_CONTEXT]` instead of serializing them as separate chat messages at all.
+  - The merged system protocol explicitly says those blocks are authoritative system facts, not user claims or prior assistant narration.
+  - Added `scripts/persona_system_event_role_smoke_test.py`.
+  - Verification:
+    - `python3 -m compileall core/prompting.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+- Added event-driven speech policy toggles and a deliberately noisy test mode.
+  - Added `ui/event_speech.py` as the policy layer for event-notification TTS:
+    - mode normalization/labels
+    - event-to-speech mapping
+    - `Off / Important / All / Noisy`
+  - `ui/layout.py` now exposes an `Events:` combo in the main control row.
+  - `ui/controller.py` now owns:
+    - current event-speech mode
+    - short dedupe window for repeated notifications
+    - direct event-notification speech dispatch through the current style voice/speed
+    - background one-line visual commentary for fresh image updates when `Events: Noisy` is active
+  - `ui/controller_queue.py` now feeds selected UI/runtime events into that policy:
+    - boot ready
+    - engineering escalation
+    - errors
+    - status/dashboard activity
+    - code-session launch/status
+    - search completion
+    - boot/agent logs in `Noisy`
+    - short `vision_snapshot_note` events for fresh image/screen captures in `Noisy`
+  - Added `scripts/event_speech_policy_smoke_test.py`.
+  - Verification:
+    - `python3 -m compileall ui scripts/event_speech_policy_smoke_test.py`
+    - `python3 scripts/event_speech_policy_smoke_test.py`
+    - `.venv\\Scripts\\python.exe` import probe for `ui.controller`, `ui.layout`, `ui.controller_actions`, `ui.controller_queue`
+- Added separate live-vision session memory plus commentary-style vision notes.
+  - Added `memory/vision_session.py` as an ephemeral rolling note buffer for active live-screen use.
+  - `app.py` now instantiates that buffer once and shares it between the UI controller and `PromptContextService`.
+  - `ui/layout.py` renames the main capture toggle from `SNAP` to `VISION`.
+  - `ui/controller.py` now:
+    - tracks vision-session activation through the live-screen toggle
+    - generates short companion-style visual comments instead of descriptive screen summaries
+    - includes recent visual comments in the note-generation prompt to reduce repetition
+    - only allows speech on meaningfully changed visual comments
+  - `core/prompt_context.py` and `core/prompt_builder.py` now expose those notes to persona under `[VISION SESSION NOTES]`.
+  - Persona keeps normal recall/context while vision is active; the visual notes are an additional ephemeral stream, not a replacement for ordinary session continuity.
+  - `ui/controller_queue.py` now logs every vision comment to the status pane, but only spoken visual remarks are stored in the separate vision-session memory.
+  - Added `scripts/vision_session_memory_smoke_test.py`.
+  - Verification:
+    - `python3 -m compileall memory/vision_session.py core/contracts.py core/prompt_context.py core/prompt_builder.py ui app.py scripts/event_speech_policy_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/event_speech_policy_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\vision_session_memory_smoke_test.py`
+    - `.venv\\Scripts\\python.exe` import probe for `app`, `ui.controller`, `ui.layout`, `ui.controller_actions`, `ui.controller_queue`, `ui.event_speech`, `core.prompt_context`
+- Tightened vision/persona prompt hygiene after live movie-mode drift.
+  - Root cause 1: the visual-commentary prompt did not explicitly frame screen captures as media/app content, so the model drifted into second-person webcam-style remarks such as `You look like...`.
+  - Root cause 2: the assistant `Thinking...` placeholder was still eligible to enter persona history as if it were a real prior utterance.
+  - `ui/vision_commentary.py` now centralizes vision-commentary prompt building and recent user-context extraction.
+  - The prompt now explicitly says the capture may be a movie/video/game/app screen, not a webcam feed, and includes recent user context like `we are watching ironman`.
+  - `memory/vision_session.py` now rejects viewer-assumption notes such as `You look...` from both speech gating and returned session notes.
+  - `core/prompting.py` now strips exact assistant `Thinking...` placeholders from model history.
+  - Added `scripts/vision_prompt_hygiene_smoke_test.py`.
+  - Verification:
+    - `python3 -m compileall ui/vision_commentary.py memory/vision_session.py core/prompting.py scripts/vision_prompt_hygiene_smoke_test.py`
+    - `python3 scripts/vision_prompt_hygiene_smoke_test.py`
+- Tightened visual-comment repetition control.
+  - `ui/vision_commentary.py` now tells the model not to reuse any recent remark and to return `SKIP` when it has no fresh angle.
+  - `ui/controller.py` now drops `SKIP` instead of forcing a recycled status/speech event.
+  - `memory/vision_session.py` now compares a new remark against the whole recent spoken-vision buffer, not only the last spoken note.
+  - Updated `scripts/vision_prompt_hygiene_smoke_test.py` and `scripts/vision_session_memory_smoke_test.py`.
+  - Verification:
+    - `python3 -m compileall ui/vision_commentary.py memory/vision_session.py ui/controller.py scripts/vision_prompt_hygiene_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/vision_prompt_hygiene_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\vision_session_memory_smoke_test.py`
+- Normalized the world-model graph closer to the intended shape.
+  - Same-name people can now stay distinct when the user clarifies they are different people:
+    - `memory/world_model.py` now resolves relation targets with label-collision handling and can mint stable relation-scoped ids like `person:ekin_friend`
+    - prompt guidance in `memory/world_model_prompts.py` now tells the extractor not to collapse different people that share the same label
+  - Temporary workspace artifacts are now treated as temporary graph memory:
+    - file-backed project nodes and `works_on` edges default to a transient expiry when no ttl is provided
+    - startup normalization backfills expiry for existing workspace-artifact graph entries
+  - The compatibility mirror now disambiguates duplicate labels when flattening world-model relationships, so `knowledge.json` can render keys like `Ekin (partner)` and `Ekin (friend)` instead of overwriting one with the other.
+  - The rendered world-state block now shows incoming relation hints for same-name entities, so both `Ekin` nodes stay visible in prompt context when queried.
+  - Live state normalized:
+    - split `Ekin` into separate partner/friend nodes
+    - set temporary expiry on `Catch the Stars`
+  - Verification:
+    - `python3 -m compileall memory core app.py`
+    - `.venv\\Scripts\\python.exe` dummy-manager probe confirmed:
+      - world-state render shows `Entity: Ekin [partner]` and `Entity: Ekin [friend]`
+      - `knowledge.json` mirror contains distinct `Ekin (partner)` and `Ekin (friend)` keys
+- Fixed a world-model hygiene bug that let transient correction chatter become durable profile memory.
+  - Root cause: the async world-model refresh could still run on arbitrary recent chat, and the accepted attribute shape was too permissive.
+  - Added `history_contains_world_model_candidate(...)` in `memory/knowledge_history.py` so durable world-model refresh now skips recent turns that do not look like real profile/project/entity disclosures.
+  - Added `profile_fact_shape_is_allowed(...)` in `memory/knowledge_fact_rules.py` and applied it in `memory/world_model.py` for both live merges and legacy import, blocking meta keys like `user_corrected_*` and codelike values such as `foo = true`.
+  - Added a startup scrub pass in `WorldModelManager` so malformed/meta memory entries are removed from `world_model.json` and mirrored `knowledge.json`.
+  - Tightened `memory/world_model_prompts.py` to forbid storing assistant-mistake corrections, temporary filename/game references, or boolean-expression payloads as world-model facts.
+  - Cleaned the live polluted state by removing the bogus `User Corrected Game Name` / `user_corrected_game_name` entry from `data/state/knowledge.json` and `data/state/world_model.json` (plus backups).
+  - Verification:
+    - `python3 -m compileall memory core app.py`
+    - `.venv\\Scripts\\python.exe` probe:
+      - `profile_fact_shape_is_allowed('user_corrected_game_name', \"'thousand bulls' or user_confused_about_game_name = true\") -> False`
+      - `history_contains_world_model_candidate(['Not thousand bulls the less that game you said you made']) -> False`
+- Hardened the generic code inspect/fix/run flow after repeated `catch_the_stars`-style failures.
+  - Root causes:
+    - diagnosis-only FILE_WORK stages could still be treated like targeted read/display stages
+    - failed code rewrites did not feed enough real artifact state back into the next planner step
+    - current-state code verification could accept overlapping-token corruption (`SCREEN_WIDTHH`)
+    - vague code follow-ups could drop the known active script target and burn steps searching the workspace
+    - plain `Run <script>.py.` follow-ups could inherit stale interactive-verification success criteria
+  - Fixes:
+    - `core/file_stage_policy.py`
+      - diagnosis stages no longer count as direct-content-display stages
+      - added semantic recovery hints for directional-control gaps and likely identifier typos
+    - `core/executor.py`
+      - failed code-edit checks now push current exact source plus stronger recovery hints back into scratchpad
+      - diagnosis stages can complete from grounded read evidence instead of stalling on checker-only gates
+    - `core/file_checker_rules.py`
+      - current-state code verification now checks code-edit success with token-aware matching and directional-control logic
+    - `core/route_normalizer.py`
+      - vague code/game follow-ups now inherit the last explicit script target
+      - plain run requests now normalize to launch-oriented success conditions
+    - `core/scratchpad_formatter.py`
+      - mutation observations now include snippet content so the planner can see malformed rewritten source
+    - `core/prompt_builder.py`
+      - code-edit override now pushes minimal grounded edits instead of full-file JSON blobs
+  - Added regressions:
+    - `scripts/code_edit_recovery_hint_smoke_test.py`
+    - `scripts/code_edit_current_state_verifier_smoke_test.py`
+    - `scripts/code_target_followup_normalizer_smoke_test.py`
+    - `scripts/redundant_code_read_guard_smoke_test.py`
+    - `scripts/code_repair_flow_smoke_test.py`
+  - Verification:
+    - `python3 scripts/code_edit_recovery_hint_smoke_test.py`
+    - `python3 scripts/code_edit_current_state_verifier_smoke_test.py`
+    - `python3 scripts/file_stage_policy_smoke_test.py`
+    - `python3 scripts/code_target_followup_normalizer_smoke_test.py`
+    - `.\.venv\Scripts\python.exe scripts\redundant_code_read_guard_smoke_test.py`
+    - `.\.venv\Scripts\python.exe scripts\code_repair_flow_smoke_test.py --json --keep-data-copy`
+  - Latest clean passing artifact:
+    - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-ppeiopdx\\data`
+  - Follow-up observation:
+    - one later rerun reached the successful run-stage outcome in the isolated logs but lingered during teardown; I terminated the rerun manually and confirmed no `llama-server` processes remained afterward.
+- Fixed a task-clarification regression where `CHAT` stages inside `TASK` could fall through to a fake `RUN_CODE` success.
+  - Added `core/stage_policy.py` so generic stage intent like `CHAT`, approval pauses, and user-input pauses are classified outside FILE_WORK-only logic.
+  - `core/executor.py` now treats `CHAT` stages as proposal-only:
+    - no runtime tools are exposed
+    - planner must finish with `tool: null`, `is_complete: true`, and a `proposal`
+    - the stage pauses as `AWAITING USER INPUT` instead of masquerading as completed execution
+  - `core/orchestrator_phases.py` now carries that pause state through to persona and tells persona to ask for the missing details instead of narrating completion.
+  - `core/scratchpad_formatter.py` now prefers verifier/proposal notes over the raw last step when building `[FINAL_STAGE_OUTCOME]`, so generic `RUN_CODE executed` no longer wins over stronger stage evidence.
+  - `data/prompts/manager.txt` now explicitly tells the planner that `CHAT` stages are handoff pauses, not tool-execution stages.
+  - Verification:
+    - `python3 -m compileall core data/prompts app.py`
+    - `.venv\\Scripts\\python.exe` stubbed executor check for the bad game-clarification case now ends as `PAUSED / AWAITING USER INPUT` with the proposal in `LAST_LOG`
+- Added first-pass engineering-support sensing and Codex-brief generation.
+  - `core/contracts.py` now defines `RuntimeSignal` and `EscalationDecision`.
+  - `core/engineering_support.py` now owns:
+    - signal normalization
+    - automatic escalation heuristics
+    - local Codex-brief JSONL writing
+    - manual snapshot generation
+  - `core/orchestrator.py` now owns the detector for each run and exposes `emit_runtime_signal(...)`.
+  - `core/executor.py` now emits structured runtime signals for:
+    - planner JSON failures
+    - planner repetition loops
+    - verification blocks
+    - repeated FILE_CHECKER failures
+    - true mutating file steps that succeed without changing workspace state
+  - `core/orchestrator_phases.py` now emits route/search/persona runtime-error signals and tells persona to mention prepared engineering support when a task fails after an escalation brief is generated.
+  - Manual `/codex [note]` snapshots now work from both the GUI and the harness, writing to `data/debug/codex_escalations.jsonl`.
+  - Added `scripts/codex_escalation_smoke_test.py`.
+  - Important integration fix during validation:
+    - moved the new `ENGINEERING_SUPPORT_RULE` in `phase_persona` to after `outcome_failed` is defined
+    - narrowed `mutation_no_effect` sensing so `find_paths` / `read_text` in a mutating stage do not falsely trigger escalation
+  - Verification:
+    - `python3 -m compileall core ui harness scripts app.py`
+    - `.\.venv\Scripts\python.exe scripts/codex_escalation_smoke_test.py`
+    - `.\.venv\Scripts\python.exe scripts/file_edit_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/file_crud_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/file_lookup_smoke_test.py --json`
+  - Tightened `scripts/file_edit_smoke_test.py` so blank assistant replies no longer pass the first two turns just because the on-disk file happened to be correct.
+- Repo Sweep Hard pass:
+  - fixed embedded Code-tab session rerun/stop races in `core/code_session.py`, so superseded processes no longer leak stale output or duplicate inactive events
+  - added `scripts/code_session_smoke_test.py` to verify prompt-without-newline output, stdin delivery, clean exit, and silent rerun
+  - fixed successful `FILE_WORK` text-mutation reporting drift by adding structured verified-result scratchpad notes in `core/executor.py`
+  - `core/orchestrator_phases.py` now bypasses persona for those verified mutation outcomes, which prevents stale retrieved memory from restating old file contents after a verified edit
+  - cleaned small repo drift from the UI/status path:
+    - removed dead status-widget queue branches in `ui/controller_queue.py`
+    - stopped emitting the dead `status_widget_dashboard_mode` event from `core/orchestrator.py`
+    - fixed the stale `ui/commands.py` module docstring and dropped one unused import from `ui/controller.py`
+  - verification:
+    - `python3 -m compileall core ui tools scripts app.py`
+    - `.\.venv\Scripts\python.exe scripts/file_edit_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/file_lookup_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/file_crud_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/code_session_smoke_test.py --json`
+    - `.\.venv\Scripts\python.exe scripts/file_chaos_test.py --json`
+- Added a one-click screen snapshot path for awareness before any continuous screen-share work.
+  - `tools/screen_capture.py` captures the primary display through Windows PowerShell/System.Drawing and saves a downscaled JPEG under `data/workspace/images`.
+  - Chat UI now has a `SNAP` button beside `MIC`; pressing it captures the current screen, updates `Visual Cortex`, and runs the existing local vision flow with a default screen-awareness prompt.
+  - Verified the capture helper creates a real JPG and that `/vision "<captured-path>" Describe this screen briefly.` returns a valid desktop summary with the active 9B + mmproj runtime.
+- Added a minimal `/vision "<image-path>" <question>` command that sends local images to the active multimodal `llama-server` path.
+  - `llm/llm_server_client.py` now accepts multimodal message content parts and renders image placeholders instead of raw data URIs in debug prompt previews.
+  - `tools/vision.py` resolves local image paths, encodes them as data URIs, and retries a few `llama.cpp`-compatible content-part variants to tolerate server format drift.
+  - UI and harness command handling now treat `/vision` as a real assistant turn, so existing TTS, stop, status, and transcript flows still apply.
+  - Verified with `scripts/piper_harness.py once "/vision data/workspace/images/sine_wave.png Describe this image briefly."` against the active 9B + mmproj runtime.
+- Added dedicated ingested-document memory in `memory/documents.py`.
+  - Stores ingested document metadata in `data/state/ingested_documents.json`.
+  - Stores document vectors in a dedicated Chroma collection (`piper_documents`) under the shared `vector_store`.
+  - Prompt context now appends retrieved document excerpts as `[INGESTED DOCUMENTS]`.
+- Added explicit persona self-recall via `[RECALL: keywords]`.
+  - Persona keeps live streaming; recall is handled before visible output when the reply begins with a recall tag.
+  - `Thinking...` now appears in chat while route/plan/act work is in flight and is replaced on the first streamed assistant output.
+- Added proper document ingest capability:
+  - `.pdf` extraction via `pypdf`
+  - `.docx` extraction via direct `word/document.xml` parsing without adding a Word-specific dependency
+  - text-like file ingestion remains supported
+- Added a Dear PyGui file-picker path for document ingest from the `Documents` tab, while keeping `/ingest <path>` as a command fallback.
+- Added `ARCHITECTURE.md` as a current-state repo map that explicitly defers to `AGENTS.md` for doctrine.
+- Added UI surfaces for the new state:
+  - `Code` tab beside `Visual Cortex`
+  - `Documents` tab between `Status` and `Monitor`
+  - main controls now stay disabled during boot and while active work is running, while `Stop` remains enabled for cancellation
+- Added `/ingest <path>` as the current document-ingest entrypoint.
+- Verification:
+  - `python3 -m compileall app.py config.py core ui memory tools`
+  - `.venv\\Scripts\\python.exe -m compileall app.py config.py core ui memory tools`
+  - `.venv\\Scripts\\python.exe` probe confirmed `DocumentMemoryManager` lists zero docs cleanly on the live state
+  - `.venv\\Scripts\\python.exe` temporary ingest/recall probe succeeded, then the temporary `brief.txt` document record was removed from live state
+  - isolated temp-data probe now ingests both a synthetic PDF and synthetic DOCX successfully and retrieves them through document recall
+
+## 2026-03-10
+
+- Added a separate `insta_agent/` Instagram-content PoC that borrows Piper's model/runtime surfaces without coupling to Piper's orchestrator or UI.
+- WSL runtime note for Windows `llama-server.exe`:
+  - model and mmproj arguments must be passed as Windows-style paths (`C:\...`), not `/mnt/...`
+  - the server must bind `0.0.0.0` instead of `127.0.0.1`
+  - the WSL client must call the Windows gateway IP from `ip route` rather than `127.0.0.1`
+- The PoC now prefers a local non-streaming HTTP bridge because SSE streaming over the WSL-to-Windows gateway surfaced timeout/read quirks that were not worth carrying in the standalone prototype.
+
+## 2026-03-09
+
+- Added a repo-local note system so future coding passes can preserve working knowledge outside chat context.
+- Fixed event normalization for direct dated appointment disclosures.
+- Fixed event date resolution for phrases like `24th of March at 1 p.m.`.
+- Added default expiry handling for transient knowledge such as `pending_*`.
+- Changed retrieved memory rendering from raw dates to age labels.
+- Fixed memory decay selection so recall applies decay over a larger candidate pool before trimming results.
+- Unified active knowledge reads so expired entries are not exposed through direct knowledge tools.
+- Fixed qwen persona chronology so the latest stage outcome is appended after the conversation transcript instead of being merged ahead of the user turn.
+- Fixed malformed planner fallback parsing and `RUN_CODE` normalization so escaped newlines no longer get written literally into `temp_exec.py`.
+- Expanded `FILE_WORK` rails so `FILE_OP` supports and verifies `list_tree`, `ensure_dirs`, `move_many`, `copy_many`, and `delete_many` as first-class structured actions.
+- Added runtime enforcement for non-mutating file stages so inspection/planning stages do not mutate and simple directory walks no longer depend on `RUN_CODE`.
+- Fixed two Windows-specific harness/runtime bugs in FILE_WORK:
+  - `list_tree` short-path vs long-path mismatch under isolated Windows temp dirs
+  - directory-only checker logic incorrectly reading later file requirements from stage context
+- Revalidated the live harness:
+  - structured file CRUD flow now passes end-to-end
+  - open-ended folder organization can inspect, create folders, move files, and verify the final state
+  - proposal-first organization leaves the workspace unchanged on the proposal turn
+- Fixed a regression where persona `[ROUTER]` loopback was ignored after failed task outcomes; failed/incomplete outcomes can now re-enter routing again.
+- Hardened planner JSON parsing so malformed planner replies that use `action` instead of `tool` are recovered instead of collapsing into an empty-tool retry.
+- Widened FILE_WORK retry breathing room in the executor so partial progress is not sent to Inspector as early.
+- Fixed another FILE_WORK regression where Inspector `FINISH` could be treated as stage success even though `FILE_CHECKER` never reached `VERIFIED`.
+- Added visible raw-log reporting for non-VERIFIED FILE_CHECKER outcomes so retry failures are diagnosable without reading scratchpad internals.
+- Added explicit no-op protection for `move_path` / `move_many` / `copy_path` / `copy_many` so self-moves and self-copies fail loudly instead of masquerading as progress.
+- Tightened broad-scope `FILE_WORK` verification so `move_many` / `copy_many` only verify fully when they actually cover the stage scope; partial batches now stay `PARTIAL`.
+- Added a runtime warning when qwen repeats identical `list_tree` calls on an unchanged root, so the scratchpad states clearly that repeated inventory is not progress.
+- Added a pause rail for broad file reorganization loops: when the planner keeps inspection-looping without a reliable taxonomy, the stage now pauses for proposal/approval instead of blindly rerouting again.
+- Lowered planner temperature to `0.0` and tightened the manager prompt so qwen emits shorter structured planner thoughts and is less likely to drift into malformed JSON.
+- Hardened malformed planner JSON recovery so FILE_OP / RUN_CODE tool blocks can still be extracted when qwen breaks the outer JSON.
+- Truncated planner/inspector scratchpad tails before prompt assembly to reduce qwen3.5 q6 context-overflow failures during long FILE_WORK retries.
+- Replaced raw FILE_OP / RUN_CODE scratchpad JSON dumps with safe structured summaries so qwen no longer copies mid-truncated fake paths like `s...` into later file operations.
+- Added targeted FILE_WORK lookup rails:
+  - new `FILE_OP find_paths` action for exact missing-file/path discovery
+  - targeted missing-file stages no longer auto-complete after a generic `list_tree`
+  - runtime now emits explicit hints to switch from repeated inventory to `find_paths` after missing-source failures or repeated unchanged `list_tree`
+- Fixed a FILE_WORK stage-classification bug where execution goals containing phrases like `according to the plan` were misclassified as planning-only and blocked from legitimate `ensure_dirs` / move actions.
+- Added prompt guidance that if Piper is already operating in the workspace root, it must not invent or create a redundant top-level `Workspace` folder unless the user explicitly requests one.
+- Added an explicit proposal handoff path for planning / approval stages:
+  - planner may now complete with `tool: null`, `is_complete: true`, and a `proposal` field
+  - executor stores that proposal in the scratchpad for persona instead of forcing the planner to write proposal text into workspace files
+- Hardened malformed planner JSON recovery so `[FILE_OP] ... [/FILE_OP]` blocks survive even when qwen emits invalid outer JSON with raw newlines inside the `tool` field.
+- Fixed `FILE_OP find_paths` glob handling:
+  - imported `fnmatch` so glob mode no longer crashes
+  - wildcard queries like `*.png` now also work in `mode: "basename"` as a forgiving fallback, because qwen often mixes the two
+- Added controlled dependency self-healing for `FILE_WORK`:
+  - explicit third-party import errors now temporarily unlock `INSTALL_PACKAGE` for the current stage
+  - the planner prompt now includes `INSTALL_PACKAGE` docs only when that temporary unlock is active
+  - stdlib modules like `fnmatch` are filtered out, so Piper does not try to `pip install` them
+  - the activity log now shows when Piper is installing a package and tells the planner to retry the original action afterward
+- Fixed another FILE_WORK runtime cluster:
+  - malformed `[RUN_CODE]` blocks without a closing tag are now recovered instead of degrading into `Tag [RUN_CODE] requires an argument`
+  - `list_tree` now returns top-level per-folder file counts, so one root scan carries more useful structure into planning
+  - stage-classification regexes now recognize inflected mutation verbs like `moving`, `removing`, and `copying`, which prevents false folder-structure-only blocks during real execution stages
+- Added deterministic no-progress handling in the executor:
+  - repeated identical completion-like planner decisions after a successful inspection now auto-finish from the existing evidence
+  - repeated identical empty-tool decisions now inject a stronger runtime error instead of silently burning steps
+  - dashboard `Thinking:` lines are de-duplicated so the same planner thought does not spam the activity view
+- Added generic extension-consolidation rails for FILE_WORK:
+  - route normalizer now rewrites broad `group by extension / remove empty folders` requests into concrete inspect -> consolidate -> cleanup stages
+  - `FILE_OP` now supports `extension_inventory`, `consolidate_by_extension`, and `delete_empty_dirs`
+  - local FILE_CHECKER verification covers those actions from actual workspace state
+- Fixed a completion deadlock in repeated FILE_WORK stages:
+  - if the planner tries to complete an extension-consolidation stage without a fresh tool call, the executor now verifies the current workspace state directly instead of insisting on a verifier note from the current step only
+- Revalidated against an isolated copy of the live `data/workspace`:
+  - prompt: organize the workspace, group files by extension, avoid duplicates, delete empty folders
+  - outcome: success
+  - resulting workspace had one bucket per extension (`images`, `text_files`, `python_scripts`, `.json`) and no empty directories remained
+- Observed real qwen3.5 q6 degradation versus qwen2.5 on long file-management retries:
+  - `Context size has been exceeded` server errors
+  - occasional dropped llama-server connections
+  - less stable long-loop behavior even when the execution rails are improved
+- 2026-03-09: Extracted WorkspaceToolRuntime from core/agent.py into tools/workspace_runtime.py. Verified with harness: simple task turn succeeded; extension-based workspace organization succeeded on isolated copy with no empty dirs remaining.
+- 2026-03-09: Split FILE_WORK policy and checker logic out of core/executor.py into core/file_stage_policy.py and core/file_checker.py. Verified with harness: task add still works; extension-based workspace organization still succeeds with no empty dirs remaining.
+- 2026-03-09: Extracted generic executor helper logic into core/executor_support.py and kept StageExecutor as the coordinator. Verified with harness: task add and extension-based workspace organization still succeeded.
+- 2026-03-09: Added the named `File Chaos Test` regression surface in `scripts/file_chaos_test.py` plus a VS Code task. It seeds a deterministic messy workspace fixture, runs the natural-language extension-grouping request through the harness, and verifies the final filesystem state from disk.
+- 2026-03-09: Adjusted the Dear PyGui shell for better UI readability and Windows behavior:
+  - widened the default viewport to `1450x860`
+  - widened the fixed right monitor/status pane and increased initial chat wrap width
+  - replaced in-app batch relaunch with a restart exit-code contract (`85`) so `start_piper.bat` loops instead of falling into `pause`
+  - added a Windows DWM viewport hook that requests immersive dark mode and dark caption colors after `show_viewport()`
+  - mechanical verification passed via `compileall` and import checks; live Windows GUI behavior still needs user validation
+- 2026-03-09: Refined the top status bar behavior:
+  - added ANSI/control-character stripping before top-bar status rendering
+  - split the top bar into a colored runtime mode plus grey metadata
+  - runtime mode now recognizes dedicated states such as `THINKING`, `GENERATING`, `ROUTING`, `PLANNING`, and `ERROR`
+  - planner steps now push structured `Stage x/y | Step n` metadata so stage/session/style context stays neutral while the mode color changes
+  - mechanical verification passed via `compileall` and a small import test for status classification and ANSI stripping
+- 2026-03-10: Added startup TTS warm-up to the boot sequence:
+  - `BootManager` now starts the TTS warm-up thread immediately after server boot begins, so warm-up overlaps normal startup work instead of being appended after readiness
+  - boot-time warm-up is still skipped on `resume_server()` so image-generation LLM resumes do not keep rewarming TTS
+  - `TTS.warm_up()` is idempotent, starts worker threads if needed, and runs one dry synthesis without playing audio to absorb the first-use cold start
+  - app startup now registers `Warming TTS engine...` as a boot-time task
+  - mechanical verification passed via `compileall` and a dry import check with `TTSConfig(enabled=False)`
+- 2026-03-10: Reorganized `data/` into owned subfolders and updated path owners:
+  - `data/state` for live JSON/memory state
+  - `data/debug` for runtime prompt/TTS/debug logs
+  - `data/benchmarks/{results,logs,scripts}` for model comparison artifacts
+  - `data/harness/{results,scripts}` plus `data/harness/_harness_prompt.txt`
+  - `data/reference` for static reference material like `llama_b8241_help.txt`
+  - added config path helpers/properties and updated runtime, harness, and benchmark scripts to use the new layout
+  - mechanical verification passed via `compileall` plus import/path checks after the on-disk move
+- 2026-03-09: Split core/prompting.py into a thin facade plus core/prompt_builder.py and core/scratchpad_formatter.py. Verified with harness: simple task turn still succeeds.
+- 2026-03-09: The prompting split surfaced a real Windows path-alias bug in FILE_WORK regression runs (short-path vs long-path temp workspace aliases). Fixed canonical path checks in tools/file_ops.py, tools/workspace_runtime.py, and core/file_checker.py, then reran File Chaos Test successfully.
+- 2026-03-09: Split memory/knowledge.py into a slimmer coordinator plus memory/knowledge_policy.py and memory/knowledge_prompts.py. Verified behavior with targeted policy probes (transient expiry, additive merge, grounding) and harness runs.
+- 2026-03-09: Extracted basic UI rendering helpers into ui/controller_render.py so controller chat rendering and bounded log rendering no longer carry raw formatting logic inline.
+- 2026-03-09: After the knowledge/UI split, the File Chaos Test still passed. Observed one runtime difference: the successful run reported a shorter Routing/Generating-only status trace instead of the earlier detailed Stage X / Step Y statuses, but final artifact state remained correct.
+- 2026-03-10: Split core/route_normalizer.py into focused helpers:
+  - core/route_patterns.py for regex policy
+  - core/route_dates.py for date phrase extraction/resolution
+  - core/route_subjects.py for event/task subject extraction and follow-up grounding
+  - Verified with direct normalization probes, `py_compile`, harness task smoke, and File Chaos Test.
+- 2026-03-10: Split the extension-consolidation subsystem out of tools/workspace_runtime.py into tools/workspace_extension_ops.py.
+  - WorkspaceToolRuntime now delegates extension inventory, destination inference, and folder scoring to the new helper module.
+  - Verified with `py_compile`, harness task smoke, and File Chaos Test.
+- 2026-03-10: During File Chaos Test after the workspace-runtime split, observed one transient llama-server connection reset (`WinError 10054`) under qwen3.5-q8.
+  - The task recovered via reroute and still completed successfully.
+  - This is a runtime stability wrinkle worth watching; it did not corrupt state or fail the final artifact verification.
+- 2026-03-10: Split FILE_OP runtime dispatch out of tools/workspace_runtime.py into tools/workspace_file_actions.py, then split that dispatcher into action-family modules:
+  - tools/workspace_query_actions.py
+  - tools/workspace_mutation_actions.py
+  - tools/workspace_extension_actions.py
+  - Verified with py_compile, harness task smoke, and repeated File Chaos runs.
+  - One intermediate regression was caused by exec_file_op being dedented out of WorkspaceToolRuntime during the refactor; fixed immediately and revalidated.
+- 2026-03-10: Split core/file_checker.py local rule logic into core/file_checker_rules.py.
+  - FileWorkChecker now delegates local FILE_OP verification to LocalFileOpRuleChecker.
+  - Verified with py_compile and harness/file-work regression surfaces.
+- 2026-03-10: Split memory/knowledge_policy.py into:
+  - memory/knowledge_history.py
+  - memory/knowledge_fact_rules.py
+  - knowledge_policy.py is now a small re-export surface.
+  - Verified with targeted policy probe (expiry, additive merge, grounding) and harness smoke.
+- 2026-03-10: Fixed a latent LlamaServerClient interface mismatch.
+  - llm/llm_server_client.py now accepts optional cancel_token on generate()/generate_stream() to match orchestrator/executor usage.
+  - This surfaced during harness validation after the refactor and was fixed before the final validation pass.
+- 2026-03-10: File Chaos remains slightly q8-variant.
+  - One seeded run failed with a non-deterministic FILE_WORK route/checker path.
+  - Immediate rerun on the same test surface passed cleanly with correct artifact state.
+  - Treat this as model/runtime variance, not a deterministic regression from the refactor.
+- 2026-03-10: Hardened the UI stop button into a shared cancellation path.
+  - Added a repo-wide cancellation token (`runtime_control.py`) and threaded it through UI generation, orchestrator phases, planner/inspector/file-checker LLM calls, background search, image generation, `RUN_CODE`, and bulk `FILE_OP` loops.
+  - The stop button now cancels active work instead of only stopping TTS, and the top bar distinguishes `STOPPING` from final `CANCELED`.
+  - Verified with `python3 -m compileall` plus smoke checks for pre-canceled LLM calls and mid-run interpreter cancellation.
+- 2026-03-10: Fixed secretary/planner JSON recovery in `core/json_utils.py`.
+  - Added missing malformed-JSON recovery helpers (`_append_missing_json_closers`, `_extract_object_field`).
+  - This fixed the q9 task-completion regression where a truncated secretary card for `I bought the milk.` parsed into a planner-like fallback and produced `Route: None`.
+  - Revalidated with a targeted q9 harness run saved at `data/benchmarks/results/task_event_completion_q9_targeted.json`.
+  - Verified outcomes from agent logs and kept state:
+    - `ADD_TASK` then `COMPLETE_TASK` for `buy milk`
+    - `ADD_EVENT` then `COMPLETE_EVENT` for `dentist appointment`
+    - `Add a task to buy milk tomorrow.` routed to `ADD_EVENT` and left `state/tasks.json` empty while adding `buy milk: 2026-03-11` to `state/events.json`
+  - No lingering `llama-server.exe` remained after the run.
+- 2026-03-10: Read-only task/event status questions now normalize to `CHAT` instead of entering `TASK` mode.
+  - Implemented in `core/route_normalizer.py` with `READONLY_TASK_EVENT_QUERY_RE` in `core/route_patterns.py`.
+  - Prompt guidance in `data/prompts/secretary.txt` now says persona should answer read-only task/event status questions from prompt context rather than creating a task card.
+  - Verified with a live harness check saved at `data/benchmarks/results/route_status_query_chat_check.json`, where `What tasks and events do I have now?` produced `Secretary Raw: {"decision":"CHAT"}` and `Route: CHAT`.
+- 2026-03-10: Targeted 4B-Q8 vs 9B-Q6 assessment compare.
+  - `model_compare_targeted_q8_vs_q9.json`: 9B-Q6 passed the stale-context correction case (`Piper` -> `No, tomorrow is off.`) while 4B-Q8 did not.
+  - `model_compare_event_followup_q8_vs_q9.json`: both models failed the neutral ambiguous event follow-up case, which currently looks like a system-level weakness more than a model separator.
+  - `file_chaos_q8_assessment.json`: 4B-Q8 failed File Chaos, leaving empty directories and stopping on FILE_CHECKER_VERDICT gating.
+  - `file_chaos_q9_assessment.json`: 9B-Q6 passed File Chaos cleanly with no empty directories or misplaced files.
+  - Practical conclusion: 9B-Q6 is the better assessment model and is the better long-loop candidate right now; 4B-Q8 remains the snappier daily model but is less reliable on harder workflows.
+- 2026-03-10: Clean harness rerun for small FILE_WORK is currently failing despite healthy boot/runtime.
+  - Used `PiperHarness(isolated_data=True, keep_data_copy=True)` and explicitly cleared the isolated `state/memory.jsonl` before `start()`, because the harness otherwise loads recent memory from the copied data dir.
+  - Repro task chain: create `text_files/harness_alpha.txt`, copy it into `text_files/harness_box/`, move it, read it, then delete the copy.
+  - All five turns returned without timing out, but the workspace remained unchanged: no created source file, no copy, no moved file.
+  - Clean artifacts were kept at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-yrjzh4g2\data`.
+  - Prompt/debug evidence shows three distinct failure classes:
+    - checker deadlock on already-satisfied or completion-like states (`The stage goal is complete.` immediately followed by `FILE_WORK cannot complete until FILE_CHECKER_VERDICT is VERIFIED.`)
+    - cross-stage grounding drift where the prompt says `text_files/harness_alpha.txt` exists but `copy_path` immediately fails with source not found
+    - user-facing narration drift where a `read_text` not-found result is reported as an absolute-path / parent-path security violation
+- 2026-03-10: Fixed the deterministic small FILE_WORK CRUD regression and codified it as a smoke test.
+  - Added direct route normalization for single-path CRUD requests in `core/route_normalizer.py` / `core/route_patterns.py`, so create/copy/move/read/delete file requests no longer depend on the router inventing multi-stage directory scaffolding.
+  - Sanitized FILE_WORK intent classification in `core/file_stage_policy.py` so filenames and folder names like `text_files` or `harness_alpha_moved.txt` no longer trip mutation/inspection heuristics by substring alone.
+  - Extended current-state verification in `core/file_checker.py` / `core/file_checker_rules.py` beyond extension reorg, so already-satisfied file stages can verify from actual workspace state instead of looping on `FILE_CHECKER_VERDICT`.
+  - Tightened copy verification to compare destination content against the source file when applicable.
+  - Replaced the odd `PiperGen_00071_.png` FILE_OP syntax example with a neutral `logo.png` example in `tools/registry.py` to reduce prompt anchoring noise.
+  - Tightened persona completion/failure handoff in `core/orchestrator_phases.py` so `LAST_LOG` is treated as the authoritative cause/evidence, including already-satisfied file states.
+  - Added `scripts/file_crud_smoke_test.py` as the reusable isolated harness regression surface for this path.
+  - Verification:
+    - targeted local probes for route normalization, FILE_WORK intent classification, and current-state checker synthesis
+    - clean isolated harness CRUD rerun passed end-to-end with kept artifacts at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-y75wux6i\data`
+    - reusable smoke script passed with `success: true` and kept artifacts at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-r7ww5o6r\data`
+    - targeted one-turn absent-delete rerun now says the file was already absent instead of hanging or reporting an invented path-security error; kept artifacts at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-altx0va6\data`
+- 2026-03-10: Fixed fuzzy workspace document lookup so existing files like `grocery_list.txt` are found and read across follow-up turns.
+  - `core/route_normalizer.py` now upgrades document-like content questions and filename-mismatch follow-ups into explicit `FILE_WORK` cards, using recent history to recover subjects for messages like `What's in the file?` and `check again`.
+  - `core/route_normalizer.py` now preserves explicit router file targets like `grocery_list.txt` and can recover them from recent history, so pronoun follow-ups such as `Yes, can you read what's in it?` no longer get rewritten into a bogus fuzzy lookup for the literal phrase `what's in it`.
+  - `core/orchestrator_phases.py` now applies route normalization even when the secretary emits malformed JSON and would otherwise fall back to bare `CHAT`.
+  - `tools/workspace_query_actions.py` now treats separator-normalized basename fragments as valid `find_paths` matches, so queries like `grocery list` match `grocery_list.txt`.
+  - `core/file_stage_policy.py` now treats filename lookup/search stages as non-mutating inspection work, blocks `list_tree` from falsely satisfying targeted search/read stages, and matches read/search evidence against quoted lookup terms rather than only explicit filenames with extensions.
+  - `core/executor.py` now accepts planner completion from existing non-mutating FILE_WORK evidence before any checker gate, which closes the lingering `find_paths succeeded but is_complete was still blocked` failure mode on lookup-only stages.
+  - `core/orchestrator_phases.py` now classifies post-stage failure from structured scratchpad signals (`OBSERVATION_KIND: error`, `SYSTEM ERROR`, non-verified checker notes) instead of raw substring hits on the entire last entry. This fixes the false `Stage Failed/Errors` outcome when a successful lookup step mentions prior failure in the planner thought, such as `The previous search failed. I will retry.`.
+  - `core/executor.py`, `data/prompts/manager.txt`, and `tools/registry.py` were updated to steer repeated lookup stages toward `find_paths` with partial filename queries.
+  - Added `scripts/file_lookup_smoke_test.py` as the reusable isolated harness regression for this path.
+  - Verification:
+    - direct local probe: `normalize_route_decision({"decision":"CHAT"}, ...)` now maps the four grocery messages into `FILE_WORK`
+    - direct local probe: `handle_find_paths(..., {"query":"grocery list","mode":"basename"})` now returns `grocery_list.txt`
+    - direct local probe: a scratchpad step with thought text containing `previous search failed` plus a successful `find_paths` observation now yields `true_success = True`
+    - direct local probe: an explicit router card for `grocery_list.txt` plus the follow-up `Yes, can you read what's in it?` now stays targeted on `grocery_list.txt` instead of being rewritten to `what's in it`
+  - isolated harness lookup smoke passed with kept artifacts at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-yfe_bo7h\data`
+  - isolated CRUD smoke still passed after the lookup changes with kept artifacts at `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-gloygn8i\data`
+- 2026-03-10: Hardened small `FILE_WORK` text-edit and exact-read behavior.
+  - `core/scratchpad_formatter.py` now carries `FILE_OP read_text` / `read_many` content snippets into the planner scratchpad with larger observation limits, so edit stages can actually see what they just read.
+  - `core/file_stage_policy.py` now derives stage intent from `stage_goal + success_condition` instead of polluting intent heuristics with historical `context`, which fixed read-only follow-ups being misclassified as mutating after prior edit turns.
+  - `core/executor.py` now blocks repeated unchanged `read_text` loops in content-edit stages, appends deterministic `FILE_READ_EXACT_*` and `FILE_LOOKUP_MATCHES` notes for successful read/search stages, and no longer lets malformed tool parsing fall through to fake `Done.` success.
+  - `core/agent.py` now recovers malformed inline `[FILE_OP ... [/FILE_OP]` and `[RUN_CODE ... [/RUN_CODE]` blocks that qwen sometimes emits.
+  - `core/route_patterns.py` / `core/route_normalizer.py` now normalize direct text-edit requests like `Remove 'eggs' from the grocery list file.` and quoted replace requests into explicit `FILE_WORK` edit cards instead of trusting the router to invent a good edit stage.
+  - `core/orchestrator_phases.py` now bypasses persona generation for successful exact file reads and targeted filename lookups, answering directly from authoritative scratchpad notes to avoid paraphrase drift and persona timeout failures on simple file turns.
+  - Added `scripts/file_edit_smoke_test.py` as the deterministic isolated harness regression for single-file text edits followed by exact readback.
+  - Verification:
+    - `python3 -m compileall core tools scripts`
+    - `.\.venv\Scripts\python.exe scripts\file_edit_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-s68411le\data`
+    - `.\.venv\Scripts\python.exe scripts\file_lookup_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-4w0ok6pl\data`
+    - `.\.venv\Scripts\python.exe scripts\file_crud_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-r6fm03_3\data`
+- 2026-03-10: Hardened llama-server transport for long FILE_WORK runs and revalidated File Chaos on q9.
+  - The recent chaos failures were not normal baseline behavior; earlier notes had q9 passing cleanly, but current runs were dying mid-stage with `cannot read from timed out object`, `WinError 10054`, and later `10061`.
+  - `llm/llm_server_client.py` now uses a configurable stream read timeout (`CFG.LLAMA_SERVER_STREAM_READ_TIMEOUT_S`, default `30s`) instead of forcing a fragile `0.5s` low-level socket timeout during SSE reads.
+  - `llm/boot.py` no longer launches `llama-server` behind an unread `stdout=PIPE`; server output is now written to `data/debug/llama_server.log`, avoiding a latent long-run Windows pipe/backpressure problem and preserving runtime logs for postmortems.
+  - `app.py`, `harness/session.py`, and `config.py` were updated to carry the new stream-read timeout setting through both live runtime and isolated harness runs.
+  - Verification:
+    - `python3 -m compileall llm app.py harness config.py`
+    - `.\.venv\Scripts\python.exe scripts\file_chaos_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-n2y3ybxj\data`
+- 2026-03-10: Fixed the remaining false-failure path for already-satisfied mutating `FILE_WORK` stages.
+  - Root cause 1: `verify_current_file_stage_state()` only understood explicit file paths from the stage card, so normalized document-reference stages like `grocery list` could not prove current-state success after a prior `find_paths` / `read_text`.
+  - Root cause 2: persona exact-read/lookup bypass was reading notes from the whole scratchpad, which risked stale cross-stage file notes overriding later stage outcomes.
+  - `core/file_checker.py` now accepts prior tool evidence when doing current-state verification and extracts candidate paths from `requested_path`, `requested_paths`, `files`, `matches`, and `evidence_files`.
+  - `core/file_checker_rules.py` now lets `LocalFileOpRuleChecker` prioritize those candidate paths while synthesizing current-state checks.
+  - `core/executor.py` now passes the last successful file tool result into current-state verification for completion acceptance and final recovery.
+  - `core/orchestrator_phases.py` exact-read and lookup bypass now only inspect notes from the latest stage slice.
+  - Direct probe now verifies the normalized grocery follow-up stage as `VERIFIED` with reason `Requested text is already absent, so the success condition is satisfied.`
+  - Sequential isolated harness verification:
+    - `.\.venv\Scripts\python.exe scripts\file_edit_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-jyx6sos1\data`
+    - `.\.venv\Scripts\python.exe scripts\file_lookup_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-kmh3nere\data`
+    - `.\.venv\Scripts\python.exe scripts\file_crud_smoke_test.py --json --keep-data-copy` -> passing artifact `C:\Users\HAWKGA~1\AppData\Local\Temp\piper-harness-jz982w68\data`
+  - Note: earlier parallel reruns produced timeouts/blank turns under shared model load; sequential reruns were clean and are the authoritative signal.
+- 2026-03-11: Added a supported `RUN_CODE` path for launching existing workspace Python scripts.
+  - Problem: the planner tried to execute scripts with `subprocess.run([sys.executable, "script.py", ...])`, but the sandbox blocks `subprocess` and `sys` imports. For interactive scripts like `bulls_and_cows.py`, even a direct non-interactive run would not produce a playable session.
+  - `tools/workspace_runtime.py` now recognizes two generalized script-launch forms:
+    - `run_workspace_script("relative/path.py")`
+    - common legacy `subprocess ... "relative/path.py"` launch snippets, which are auto-reinterpreted into the supported helper
+  - On Windows runtime, the helper launches the script in a new console window and reports success if it remains alive past the short startup check. On non-Windows dev runtimes, quick non-interactive scripts still execute, but interactive live-console launch remains Windows-only.
+  - `core/file_stage_policy.py` now classifies script-launch stages separately, suppresses file-checker gating for them, and emits a recovery hint telling the planner to use `run_workspace_script(...)` instead of importing `subprocess`.
+  - `core/executor.py` now auto-finishes a script-launch stage after a successful `RUN_CODE` launch result.
+  - `tools/registry.py` and `data/prompts/manager.txt` now document the helper so the planner has a first-class supported syntax for running existing workspace scripts.
+  - Mechanical verification:
+    - `python3 -m compileall core tools data/prompts`
+    - direct policy probe: `Execute the bulls_and_cows.py script` now yields `stage_is_script_launch_stage=True` and `stage_requires_file_verification=False`
+    - direct runtime probe: `run_workspace_script("hello_game.py")` returns `EXECUTED`
+    - direct runtime probe: legacy `subprocess.run([sys.executable, "hello_game.py"])` is auto-reinterpreted and returns the same `EXECUTED` result
+  - Caveat: the actual interactive console launch path was not live-tested from WSL; it is intended for the Windows Piper runtime.
+- 2026-03-11: Converted the `Code` tab from a readonly artefact viewer into an embedded interactive process console.
+  - Added `core/code_session.py` as a controller-owned subprocess session with piped stdin/stdout and char-by-char output pumping so prompts like `input("Enter guess: ")` appear immediately even without a trailing newline.
+  - `ui/layout.py` now gives the `Code` tab its own status line, console output area, stdin input box, send button, clear button, and local stop button.
+  - `ui/controller.py`, `ui/controller_actions.py`, and `ui/controller_queue.py` now own the session lifecycle, launch/focus the Code tab when a script-run request arrives, forward input to the child process, and return Piper to `IDLE` cleanly when the session exits or is stopped.
+  - `core/executor.py` now emits a `code_session_launch` UI event when `RUN_CODE` returns the `run_workspace_script` action.
+  - `tools/workspace_runtime.py` now requests `launch_mode=embedded_code_tab` instead of spawning an external console directly.
+  - Mechanical verification:
+    - `python3 -m compileall core tools ui app.py`
+    - direct `EmbeddedCodeSession` probe with a temp script that prints `Welcome`, prompts `Enter guess: `, reads one line, echoes it, and exits
+    - observed output: `$ python echo_game.py`, `Welcome`, `Enter guess: 1234`, `You said 1234`, `[Process exited with code 0]`
+    - direct runtime probe confirms both `run_workspace_script("bulls_and_cows.py")` and legacy `subprocess.run([sys.executable, "bulls_and_cows.py"])` now resolve to `launch_mode=embedded_code_tab`
+  - Residual caveat: this supports simple stdin/stdout console programs. Full-screen TUI/curses apps would still need a ConPTY-style terminal path.
+- 2026-03-11: Fixed a follow-on routing/runtime bug for script-launch stages.
+  - Symptom: a stage like `Locate and execute the Bulls and Cows game script` was still treated as non-mutating lookup work, so one successful `find_paths` auto-finished the stage and nothing launched in the `Code` tab.
+  - `core/file_stage_policy.py` now excludes script-launch stages from non-mutating lookup classification and from targeted-lookup completion logic.
+  - Successful `find_paths` in a script-launch stage now emits a deterministic hint: `run_workspace_script("matched_script.py")`.
+  - `ui/controller_queue.py` now switches to the `Code` tab immediately when an embedded session launch event is received, before the process output starts arriving.
+  - Direct probe result for the reproduced stage shape:
+    - `stage_is_script_launch_stage=True`
+    - `stage_is_non_mutating_file_stage=False`
+    - `stage_requires_targeted_lookup=False`
+    - recovery hint resolves to `run_workspace_script("bulls_and_cows.py")`
+- 2026-03-11: Fixed the Documents-tab ingest action so it no longer feels dead after picking a file.
+  - Root cause: the Dear PyGui picker callback ingested documents synchronously on the UI thread and provided almost no visible progress, so first-run embedding/model startup looked like a no-op.
+  - `ui/controller_actions.py` now resolves picker payloads more defensively, starts document ingestion on a background thread, emits immediate `[UI] Ingesting ...` chat feedback, and posts final success/failure summaries back through the UI queue.
+  - `ui/controller.py` and `ui/controller_queue.py` now track `document_ingest_active` so the `Ingest Document` button disables while an ingest is running and re-enables when it finishes.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall ui app.py core memory`
+    - `.\\.venv\\Scripts\\python.exe` import probe for `app`
+    - synthetic Dear PyGui selection payload probe covering `file_path_name`, `current_path + file_name`, and `selections`
+- 2026-03-11: Fixed read-only Q&A over ingested documents so it no longer falls back into `FILE_WORK` against the raw PDF.
+  - Symptom: questions like `What does the document say about RVSM checks?` were routed as `TASK`, then the executor tried `FILE_OP read_text` on the PDF and eventually timed out in `RUN_CODE`.
+  - Root cause 1: routing had no deterministic rule for already-ingested document questions, so the Secretary was free to invent a `FILE_WORK` card even though persona already had `[INGESTED DOCUMENTS]` available.
+  - Root cause 2: document prompt hits used the beginning of the full ingested text, which is poor for large manuals because page 1 dominates the prompt even when the query is about a later section.
+  - `core/orchestrator_phases.py` now short-circuits read-only ingested-document questions to `CHAT` before the Secretary runs, logs that route decision explicitly, and adds a persona tail rule telling Piper to answer from document memory rather than narrating stale file-tool failures.
+  - `memory/documents.py` now renders query-focused excerpts from the matched full-document text, with higher weight for explicit acronyms and reference terms, so a query like `RVSM checks` surfaces the RVSM section instead of generic early pages.
+  - `data/prompts/secretary.txt` and `data/prompts/instructions.txt` now reinforce that ingested-document Q&A is a read-only chat path, not a file-operation task.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall core memory data/prompts app.py`
+    - direct route probe: `_should_route_ingested_document_chat('What does the document say about RVSM checks?', [], docs) -> True`
+    - direct excerpt probe now returns the `REDUCED VERTICAL SEPARATION MINIMUM - RVSM` section from the ingested FCOM
+    - isolated harness turn now logs `Routed to CHAT via ingested document memory.` and answers without entering the executive loop
+- 2026-03-11: Added a dedicated `DOCUMENT_FOCUS` pass for ingested-document Q&A so the persona prompt is cleaner and the activity pane shows source refs.
+  - Trigger: after the route short-circuit marks an ingested-document read-only question, the orchestrator now runs a focused extraction pass before persona instead of sending raw multi-page excerpts straight into the final prompt.
+  - `core/document_focus.py` adds a small LLM extraction helper that compresses the relevant document snippets into `relevant_info` plus references, driven by the new `data/prompts/document_focus.txt` template.
+  - `core/orchestrator.py` / `core/orchestrator_phases.py` now include an internal `DOC_FOCUS` phase, store the focused context on the orchestrator, and log `Document source:` / `Document refs:` into the dashboard activity pane.
+  - `core/contracts.py` and `core/prompt_builder.py` now support a `[DOCUMENT FOCUS]` block so persona can answer from the compact extracted context instead of the raw `[INGESTED DOCUMENTS]` dump on those turns.
+  - `memory/documents.py` now exposes `extract_document_reference_labels(...)`, which distills broad refs like `Page 6749` and `Section PRO-SPO-50` for the activity pane without spamming narrower Ident-code variants.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall core memory data/prompts app.py`
+    - isolated harness turn logs:
+      - `--- PHASE 1.5: DOCUMENT FOCUS ---`
+      - `Document source: A320 - FCOM - 03 DEC 2025.pdf`
+      - `Document refs: Page 6749 | Section PRO-SPO-50`
+    - isolated prompt-log probe confirms `PHASE: DOCUMENT_FOCUS` and a persona `[DOCUMENT FOCUS]` block are present for the RVSM query path
+- 2026-03-11: Improved large-PDF ingested-document retrieval so concept queries land on the right pages more often.
+  - Symptom: queries like `What is the wingspan?` or `What are the dimensions?` were either falling back to the first pages of the FCOM or hitting irrelevant matches, because only a whole-document vector existed and the lexical scorer had no structural penalties.
+  - `memory/documents.py` now expands some query concepts (`wingspan` -> `principal dimensions`, etc.), normalizes joined words for matching (`wingspan` vs `wing span`), and reranks sections by document structure.
+  - Preliminary pages such as table-of-contents and summary pages are now penalized, while content headings such as `PRINCIPAL DIMENSIONS` and `GENERAL ARRANGEMENT` are boosted.
+  - I also explored page-chunk vector indexing, but for very large PDFs like the FCOM it is too expensive to build synchronously. The current runtime therefore keeps the whole-document vector path and uses stronger lexical page/section extraction for large manuals.
+  - Mechanical verification:
+    - direct recall probe for `What is the wingspan?` now surfaces pages `394`, `395`, and `397` in `DSC-20-20 PRINCIPAL DIMENSIONS` instead of the cover pages
+    - direct recall probe for `What are the dimensions?` now surfaces the same `PRINCIPAL DIMENSIONS` section
+  - Remaining limitation: some dimension/diagram pages still appear to be image-heavy enough that plain text extraction may omit the actual numeric table values. This is now a source-extraction limitation, not only a retrieval-ranking problem.
+- 2026-03-11: Added PDF-page vision fallback for ingested-document Q&A and hardened routing/retrieval for mixed fact queries.
+  - `core/document_focus.py` now renders the top matched PDF pages to temporary images and runs a multimodal extraction pass when text focus is empty or looks insufficient for a fact-style query (`wingspan`, `dimensions`, `clearance`, etc.).
+  - The visual extractor now requires a visible label match for specific measurement questions and passes the matched label into `[DOCUMENT FOCUS]`, which prevents bare numbers from being reinterpreted incorrectly by persona.
+  - `core/orchestrator_phases.py` now fail-closes document turns: read-only ingested-document questions answer only from `[DOCUMENT FOCUS]`, log `Document visual pages:` and `Document vision fallback used.`, and no longer fall back to raw `[INGESTED DOCUMENTS]` when focus extraction is empty.
+  - `_should_route_ingested_document_chat(...)` now recognizes plain fact queries such as `What is the wingspan from the document?`, not only summary-style prompts.
+  - `memory/documents.py` now merges chunk-vector hits with a whole-document lexical page scan instead of returning early on chunk results, and expands `rvsm` to `reduced vertical separation minimum` / `PRO-SPO-50`. This keeps `RVSM checks` on the RVSM pages instead of checklist noise.
+  - Mechanical verification:
+    - isolated harness turn: `What is the wingspan from the document?` -> `34.1 m / 111 ft 10 in`
+    - isolated harness turn: `What does the document say about RVSM checks?` -> grounded procedural summary from pages `6749-6751`
+    - dashboard activity now shows:
+      - `Document refs: Page 394 | Section DSC-20-20`
+      - `Document visual pages: Page 394 | Page 395 | Page 397`
+      - `Document vision fallback used.`
+- 2026-03-11: Reworked `SNAP` into a live screen toggle with a fixed rolling image instead of one-shot snapshot narration.
+  - `tools/live_screen.py` now owns a background capture loop that overwrites `data/workspace/images/live_screen.jpg` on an interval, keeps only freshness/error state in memory, and never stores a text summary of the screen.
+  - `tools/screen_capture.py` now supports atomic capture directly to a fixed target path so the current live frame is always replaced in place.
+  - `ui/controller.py`, `ui/controller_actions.py`, and `ui/controller_queue.py` now treat `SNAP` like a toggle: `SNAP` -> `LIVE`, keep the button usable during normal turns, refresh the Visual Cortex preview from the fixed image, and show `Screen: LIVE` in the top bar while the loop is active.
+  - `core/orchestrator.py` and `core/orchestrator_phases.py` now pass the current live screen image into normal multimodal route/persona turns when the frame is fresh. The attached-turn instruction explicitly says it is a current frame for this turn, not continuous vision.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall llm ui harness tools core memory app.py`
+    - direct `LiveScreenSession` probe confirms `start()`, `current_image_path()`, and `stop()` all resolve to the fixed `live_screen.jpg` path
+    - isolated harness probe with `live_screen=LiveScreenSession(...)` produced a normal assistant reply describing the current desktop from the attached live frame
+- 2026-03-11: Tuned live screen capture and routing for visual text-reading prompts.
+  - Raised the rolling screenshot clamp from `1280` to a configurable `SCREEN_CAPTURE_MAX_DIM` default of `1920`, which now writes a `1920x1080` probe on the current setup instead of the earlier smaller frame.
+  - `data/prompts/secretary.txt` now explicitly says that reading text, filenames, labels, buttons, or tabs from the attached live screen is `CHAT`, not `FILE_WORK`.
+  - `core/orchestrator_phases.py` now has a deterministic live-screen visual-query guard, so prompts like `Read the file name visible on the screen.` bypass router/task drift and go straight to persona chat handling.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall llm ui harness tools core memory app.py`
+    - direct capture probe wrote `C:\\Projects\\Piper\\data\\workspace\\images\\live_screen_probe.jpg` at `1920x1080`
+    - isolated harness turn with live screen enabled answered `The file name visible on the screen is \`Ground Crew.txt\`.` without leaking a failed file-task narration
+- 2026-03-11: Added multimodal fallback resizing for live-screen turns.
+  - Problem: `1920x1080` live frames worked in short `/vision` queries, but longer route/persona turns could intermittently fail in `llama-server` with `failed to process image`.
+  - `tools/vision.py` now retries multimodal attachment requests with temporary smaller JPEGs (`1600`, then `1280`) when the original image attempt fails, instead of surfacing `Vision request failed` immediately.
+  - This keeps the stored live screen image high-resolution while giving the inference path a graceful degradation path under prompt/image pressure.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall tools/vision.py core/orchestrator_phases.py ui/controller_actions.py app.py`
+    - isolated live-screen orchestrator turn after the patch answered visible on-screen text normally instead of failing the turn
+- 2026-03-11: Hardened persona against live-screen multimodal failures.
+  - `core/prompt_context.py` now lets persona trim memory/document retrieval counts per turn.
+  - `core/orchestrator_phases.py` now treats live-screen visual questions as a lighter persona shape: reduced memory recall and no ingested-document prompt stuffing, which cuts irrelevant prompt weight during image turns.
+  - Persona now catches `VisionError` instead of letting it crash the whole orchestrator. For visual screen questions it degrades to a short retry message; for non-visual turns it can fall back to text-only generation.
+  - `tools/vision.py` fallback resize ladder was extended to `1600`, `1280`, `1024`, `768`.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall core/orchestrator_phases.py core/prompt_context.py tools/vision.py`
+    - isolated live-screen turn after the patch completed with an assistant reply instead of surfacing the previous giant `Orchestrator Error: Vision request failed ...` chain
+- 2026-03-11: Promoted embedded code sessions into first-class UI runtime state and generalized pane autoscroll.
+  - `ui/controller.py` now owns a shared autoscroll scheduler for scrollable child windows and tracks `code_session_meta` so the top bar can show `CODE SESSION | Code: <script>`.
+  - `ui/layout.py` converted the boot log, status activity, monitor, documents, and code panes from multiline `input_text` widgets into scrollable child-window text views so Dear PyGui can reliably follow appended output.
+  - `ui/controller_actions.py` now routes the main chat input into the running embedded process when a code session is active, which prevents short guesses like `1234` from going back through routing/persona.
+  - `ui/controller_queue.py` / `ui/controller_status.py` now keep the right-pane views and code console pinned to the latest output and preserve `CODE SESSION` as the effective runtime mode while the process is live.
+  - Mechanical verification:
+    - `python3 -m compileall ui core app.py`
+    - `.\\.venv\\Scripts\\python.exe` Dear PyGui probe confirmed:
+      - child-window `horizontal_scrollbar=True`
+      - `set_y_scroll(..., get_y_scroll_max(...))`
+      - dynamic button relabeling and input hint updates
+    - direct mode probe confirmed `_effective_runtime_mode(...)` returns `CODE SESSION` over idle while a code session is active
+- 2026-03-11: Added live-screen runtime controls, active-window capture, and pointer-focused visual turns.
+  - `ui/layout.py`, `ui/controller.py`, and `ui/controller_actions.py` now expose live-screen source and refresh-rate controls beside the `SNAP` toggle, with runtime options for `Display`, `Window`, and `Pointer` plus `2s / 5s / 10s / 15s`.
+  - `tools/screen_capture.py` now supports capture modes for the display under the cursor, the current foreground window, and a pointer-centered crop, while preserving the existing atomic JPEG overwrite path and `SCREEN_CAPTURE_MAX_DIM` clamp.
+  - `tools/live_screen.py` now tracks `mode`, `interval_s`, and a separate fixed-path pointer-focus image so the live loop and one-off pointer crops share the same session object.
+  - `core/orchestrator.py` / `core/orchestrator_phases.py` now keep one resolved live-screen attachment per turn and switch to a pointer-centered crop when the user says things like `look here`, `this`, `that`, or `near my cursor` in an otherwise visual live-screen query.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall ui tools core app.py`
+    - direct capture probe created:
+      - `capture_display.jpg` at `1920x1080`
+      - `capture_window.jpg` at `1625x1392`
+      - `capture_pointer.jpg` at `1400x900`
+- 2026-03-11: Hardened state persistence and trimmed always-on debug/path assumptions.
+  - `memory/stores.py` now writes JSON stores atomically and maintains `.bak` companions. If a primary state file is corrupted but the backup is still valid, Piper archives the corrupt file and restores from backup instead of silently loading `{}` and overwriting state on the next save.
+  - LLM HTTP payload dumps are now opt-in via `PIPER_DEBUG_LLM_HTTP_PAYLOADS=1`, and prompt/manager debug dumps are separately gated by `PIPER_DEBUG_LLM_PROMPTS=1` and `PIPER_DEBUG_MANAGER_PROMPTS=1`.
+  - `llm/boot.py` no longer kills generic `llama-server` processes up front. It now checks for a healthy existing server first and only cleans up stale processes that match Piper's configured port/model/runtime shape.
+  - `ui/controller_actions.py` now resolves Visual Cortex image previews through Piper's configured workspace and Comfy output directory instead of a hardcoded `F:` path.
+  - `core/pipeline.py` now logs stream-time TTS failures into `tts_debug.txt` instead of swallowing them silently.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall app.py config.py core ui memory tools llm harness`
+    - temp-store recovery probe restored a corrupted JSON file from its `.bak` and archived the bad copy as `*.corrupt_*.json`
+    - `scripts/file_edit_smoke_test.py --json`
+    - `scripts/code_session_smoke_test.py --json`
+- 2026-03-11: Reduced helper-script bootstrap duplication.
+  - Added `scripts/_bootstrap.py` so the harness/smoke/benchmark entrypoints share one repo-root bootstrap instead of repeating the same `ROOT_DIR` and `sys.path` block.
+  - This stays within the existing boundary: runtime logic still lives in `core/`, `memory/`, `tools/`, `llm/`, and `ui/`; `scripts/` remains an entrypoint/regression surface.
+  - One intermediate regression was caused by stripping a needed `Path` import from `code_session_smoke_test.py`; fixed immediately and revalidated.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall scripts`
+    - `.\\.venv\\Scripts\\python.exe scripts\\piper_harness.py --help`
+    - `.\\.venv\\Scripts\\python.exe scripts\\code_session_smoke_test.py --json`
+- 2026-03-11: Refactored prompt/environment/state/command boundaries toward the repository doctrine.
+  - Added `memory/state_owner.py` so shared `tasks.json`, `events.json`, and `knowledge.json` stores are constructed in one owner module and injected into app/harness/runtime services instead of being recreated ad hoc inside multiple `core` modules.
+  - Added `core/instructions_loader.py` and `core/environment_service.py`, then rewired `core/prompt_context.py` into a service + pure assembler split. Prompt assembly now consumes loaded inputs instead of having `core/prompting.py` read instructions or shared state directly.
+  - `core/prompting.py` is now a pure formatting module again; the old instruction-file loader and unused debug writer were removed from it.
+  - Command parsing was moved down to `core/commands.py`, and `harness/session.py` no longer imports `ui.commands`.
+  - `app.py`, `harness/session.py`, `core/orchestrator.py`, and `ui/controller_actions.py` now pass `PromptContextService` explicitly instead of letting the orchestrator assemble prompt/runtime dependencies for itself.
+  - Mechanical verification:
+    - `.\\.venv\\Scripts\\python.exe -m compileall app.py config.py core ui memory tools llm harness scripts`
+    - `.\\.venv\\Scripts\\python.exe -c "import app; print('app_import_ok')"`
+    - `.\\.venv\\Scripts\\python.exe scripts\\piper_harness.py --help`
+    - `.\\.venv\\Scripts\\python.exe scripts\\code_session_smoke_test.py --json`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_crud_smoke_test.py --json`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_chaos_test.py --json`
+  - Important validation note:
+    - the llama-server-backed harness smokes should be run sequentially on one machine; parallel harness boots can generate false negatives by racing the shared server lifecycle
+- 2026-03-11: Built the first real Codex self-healing loop around the new engineering-support briefs.
+  - Added `memory/codex_repair_store.py` as the single owner for:
+    - `data/state/codex_repair_request.json`
+    - `data/state/codex_repair_status.json`
+    - `data/state/codex_recovery.json`
+  - Added `core/codex_bridge.py` to:
+    - load the latest escalation payload from `data/debug/codex_escalations.jsonl`
+    - write a bounded repair request
+    - spawn `scripts/codex_repair_worker.py`
+    - poll worker status
+    - hand recovery state back to Piper after restart
+  - Added `scripts/codex_repair_worker.py`.
+    - It calls the local `codex exec` CLI with a JSON schema contract, requires structured verification commands, reruns those commands itself, and only then writes `codex_recovery.json` plus `restart_requested`.
+    - It also supports `--simulate fixed|blocked|no_fix` for deterministic testing without invoking the real Codex CLI.
+  - Added `scripts/codex_repair_bridge_smoke_test.py`.
+    - This validates the end-to-end control plane:
+      - escalation log -> repair request
+      - worker -> verified result
+      - recovery payload -> restart_requested status
+      - recovery consume -> resumed status
+  - Wired the GUI controller into the bridge.
+    - `ui/controller_queue.py` now turns `codex_escalation` events into repair requests.
+    - `ui/controller.py` polls the repair status file, auto-restarts Piper when a verified repair is ready, and retries the interrupted user request once after boot.
+  - Additional cleanup:
+    - made `memory/__init__.py` lazy for `KnowledgeManager` so importing the lightweight repair store no longer drags in `chromadb`
+    - harness isolated-data overlays now clear repair-state files to avoid stale self-heal jobs contaminating smokes
+    - stale `queued/running/restart_requested` repair status is treated as expired after the repair timeout window instead of blocking all future repair attempts forever
+  - Validation:
+    - `python3 -m compileall config.py core ui memory harness scripts app.py`
+    - `python3 scripts/codex_escalation_smoke_test.py`
+    - `python3 scripts/codex_repair_bridge_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+- 2026-03-11: Replaced flat profile prompting with a graph-backed world model. `world_model.json` is now the source of truth for durable personal memory, `knowledge.json` is maintained as a compatibility mirror, tasks/events remain separate operational state, and persona prompt assembly now injects `[WORLD STATE]`, `[OPERATIONAL STATE]`, and `[ENVIRONMENT]` as distinct blocks.
+- 2026-03-11: Tightened prompt-time context hygiene after the world-model rollout. `[WORLD STATE]` now suppresses transient/TTL-backed attributes unless the user query is about them, `[OPERATIONAL STATE]` defaults to near-term events and only surfaces distant events when query-relevant, document routing now catches plural-doc/follow-up phrasing more reliably, and persona no longer receives raw `[INGESTED DOCUMENTS]` excerpt dumps outside the focused `[DOCUMENT FOCUS]` path.
+- 2026-03-11: Added a dedicated `[SITUATIONAL STATE]` prompt block sourced from active transient/TTL-backed world-model facts. Stable identity stays in `[WORLD STATE]`, while temporary user sentiment or hesitation remains available to persona for tone and planning.
+- 2026-03-11: Reduced chat-stream jitter and hardened stop behavior for speech playback.
+  - `ui/controller.py` now keeps a cached chat render and updates only the live assistant row during streaming deltas instead of rebuilding the entire transcript on each chunk.
+  - `tools/tts.py` now exposes `is_busy()` and tracks synth/play activity, so the UI can keep the Stop button active while speech is still playing after generation finishes.
+  - `core/pipeline.py` cancel handling now hard-stops TTS without calling `stream_end()` afterward, which prevents canceled turns from flushing a residual speech tail.
+  - `ui/controller_actions.py` now reports `Speech stopped.` when Stop is used only to cut off TTS, and clears the chat-render cache on transcript clear.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile core\\pipeline.py ui\\controller.py ui\\controller_actions.py tools\\tts.py harness\\tts_probe.py`
+    - direct pipeline probe confirmed cancel emits `stop` without a trailing `stream_end`
+    - direct Dear PyGui probe confirmed the streaming assistant keeps the same widget across deltas
+- 2026-03-11: Fixed router/persona context drift for follow-up turns after task execution.
+  - Added a single upserted hidden system block `[LATEST_RUNTIME_CONTEXT]` in `memory/chat_state.py` so the latest authoritative runtime outcome can survive into the next route pass without showing in the chat transcript.
+  - `core/orchestrator_phases.py` now builds that block from the previous task/search turn, including route type, task goal or search query, compact execution status, a short runtime note, and relevant paths.
+  - The secretary/router now receives `[LATEST_RUNTIME_CONTEXT]` as an explicit extra system message, and route normalization also gets the enriched history instead of relying only on assistant narration.
+  - `core/prompting.py` now strips `[LATEST_RUNTIME_CONTEXT]` from normal persona/model history, so the fix stays routing-focused instead of polluting conversation context.
+  - `data/prompts/secretary.txt` was updated to mention `[DOCUMENT MATCHES]` / `[DOCUMENT FOCUS]` and to treat `[LATEST_RUNTIME_CONTEXT]` as authoritative for corrections, retries, and clarifications.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile memory\\chat_state.py core\\prompting.py core\\orchestrator_phases.py`
+    - direct route probe confirmed the router prompt now includes `[LATEST_RUNTIME_CONTEXT]`
+    - direct persona-message probe confirmed `[LATEST_RUNTIME_CONTEXT]` is excluded from normal persona history
+- 2026-03-11: Reduced repeated file re-reads during FILE_WORK inspection/fix passes.
+  - `core/executor.py` now appends exact file-read content into scratchpad immediately after successful single-file `FILE_OP read_text` calls, instead of waiting until stage completion.
+  - small `read_many` payloads still qualify when they are narrow enough, but broader multi-file reads are kept compact to avoid blowing up planner context.
+  - `core/prompt_builder.py` now gives file inspection/content-edit stages a larger planner scratchpad budget so the newly captured exact file contents remain visible to the planner.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile core\\executor.py core\\prompt_builder.py core\\file_stage_policy.py`
+    - direct executor probe confirmed a `read_text` result produces `FILE_READ_EXACT_PATH` / `FILE_READ_EXACT_CONTENT` in scratchpad immediately
+    - direct planner-prompt probe confirmed that exact content survives into the planner prompt
+- 2026-03-11: Fixed the follow-up repair loop that appeared while retrying code-file edits such as `catch_the_stars.py`.
+  - `core/orchestrator_phases.py` no longer sends `[LATEST_RUNTIME_CONTEXT]` as a second `system` role message to the secretary. It is now merged into the single leading secretary system prompt so Qwen/llama.cpp chat templates stop throwing `System message must be at the beginning`.
+  - `core/orchestrator_phases.py` also suppresses `[ROUTER]` loopback if the latest secretary pass itself errored, which prevents a failed route from spinning persona back into ROUTE over and over.
+  - `core/file_stage_policy.py`, `core/prompt_builder.py`, `data/prompts/manager.txt`, and `tools/registry.py` now steer existing code-file edit stages toward `RUN_CODE` after inspection instead of encouraging giant `FILE_OP write_text` JSON payloads.
+  - `core/executor.py` now blocks fragile `FILE_OP write_text` attempts for inspected code-file edit stages and emits an explicit system error telling the planner to use `RUN_CODE` to read-modify-write the file.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile core\\orchestrator_phases.py core\\file_stage_policy.py core\\executor.py core\\prompt_builder.py tools\\registry.py`
+    - direct secretary-system probe confirmed `[LATEST_RUNTIME_CONTEXT]` is merged once into a single system prompt
+    - direct file-policy and executor probes confirmed `catch_the_stars.py` now produces a `RUN_CODE` hint and blocks code-file `FILE_OP write_text`
+- 2026-03-11: Made `Code` tab changed-file previews less misleading.
+  - `tools/workspace_runtime.py` now captures up to 6000 characters for changed-file text previews instead of 800 and marks genuinely clipped previews as `PREVIEW TRUNCATED`.
+  - `core/executor.py` now labels that surface as a preview, and when clipping does occur it explicitly says the file on disk is longer.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile tools\\workspace_runtime.py core\\executor.py`
+    - direct workspace-runtime probe confirmed `catch_the_stars.py` now shows its full 4517-character content with `truncated=False`
+- 2026-03-11: Added a direct `Run File` control to the `Code` tab.
+  - `ui/layout.py`, `ui/controller.py`, `ui/controller_actions.py`, and `ui/controller_queue.py` now expose a `Run File` button that launches the first visible `.py` path from the current code preview into the embedded code session.
+  - The button is only enabled when Piper is boot-ready, there is no active operation/session, and the current preview actually shows a runnable script path.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile ui\\layout.py ui\\controller.py ui\\controller_actions.py ui\\controller_queue.py`
+- 2026-03-11: Stopped interactive script verification loops from relaunching games repeatedly.
+  - `core/route_normalizer.py` now rewrites `launch the game, then verify controls` cards into a `FILE_WORK` launch stage followed by a `CHAT` stage that asks the user to test the already-running app and report what happened.
+  - `core/file_stage_policy.py` now recognizes interactive runtime verification stages separately from normal file verification stages.
+  - `core/executor.py` and `core/orchestrator_phases.py` now support a user-input pause mode so that, if an interactive verification stage still reaches the executor, Piper pauses after the first successful launch and asks for user feedback instead of relaunching the script in a loop.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile core\\route_normalizer.py core\\file_stage_policy.py core\\executor.py core\\orchestrator_phases.py`
+    - direct route-normalizer probe confirmed the second stage becomes `CHAT` for the `catch_the_stars.py` run-and-verify card shape
+- 2026-03-11: Added a non-blocking engineering boot probe and cleaned the Codex repair worker path.
+  - `llm/boot.py` now supports `background_boot_tasks`, and `app.py` uses that to run a Codex health probe while the server is booting.
+  - `core/codex_bridge.py` now owns both `resolve_codex_executable()` and `probe_codex_support()`, so executable discovery is shared between the boot probe and repair worker.
+  - `scripts/codex_repair_worker.py` now uses the shared resolver, keeps UTF-8 subprocess handling, and no longer depends on the removed local `_resolve_codex_executable()` helper.
+  - Validation:
+    - `python3 -m compileall config.py core/codex_bridge.py scripts/codex_repair_worker.py llm/boot.py app.py scripts/codex_boot_probe_smoke_test.py`
+    - `python3 scripts/codex_boot_probe_smoke_test.py`
+    - `python3 scripts/codex_repair_bridge_smoke_test.py`
+- 2026-03-11: Fixed another Windows-only Codex repair worker encoding failure.
+  - The worker could still die after starting `codex.exe` because printing captured Codex output through the worker's default `sys.stdout` used the local Windows `charmap` encoding.
+  - `scripts/codex_repair_worker.py` now reconfigures `stdout`/`stderr` to UTF-8 when possible and routes captured Codex output through a byte-safe helper.
+  - Validation:
+    - `python3 -m compileall scripts/codex_repair_worker.py`
+    - `python3 scripts/codex_repair_bridge_smoke_test.py`
+    - direct probe with a strict `cp1252`-encoded `sys.stdout` confirmed `_emit_stdout('hello 🌐 world')` succeeds
+- 2026-03-11: Added end-to-end UI coverage for the engineering self-heal loop.
+  - `scripts/codex_ui_repair_smoke_test.py` exercises `PiperController.queue_codex_repair()`, `poll_codex_repair()`, and `resume_codex_recovery_if_needed()` against a real simulated repair worker.
+  - It verifies the controller logs engineering status lines, requests restart when repair reaches `restart_requested`, and resubmits the interrupted user message after consuming recovery.
+  - Operational note: this smoke must run under `.venv\\Scripts\\python.exe` because `ui.controller` imports `dearpygui`.
+- 2026-03-11: Switched Windows engineering support to prefer the WSL Codex backend.
+  - The real blocked repair log for `catch_the_stars.py` showed `codex.exe` could start but its local tool/shell invocations were failing with `%1 is not a valid Win32 application`.
+  - `config.py` now resolves both the native Windows Codex path and the sibling WSL/Linux Codex path from the VS Code extension install, with `CODEX_PREFER_WSL` defaulting on for Windows.
+  - `core/codex_bridge.py` now builds launch commands instead of assuming a single native executable, translating `--cd`, schema, and output paths into `/mnt/...` form when the WSL backend is used.
+  - `scripts/codex_repair_worker.py` now uses the shared launch-command builder, so real repair jobs follow the same WSL-backed path as the boot probe.
+  - Validation:
+    - `.venv\\Scripts\\python.exe` confirmed `launch_prefix = ['...wsl.exe', '-e', '.../linux-x86_64/codex']`
+    - real `probe_codex_support()` under the Windows runtime still returned `Engineering channel: ONLINE`
+    - direct real Codex task via the new launch path successfully ran `/bin/bash -c pwd` in `/mnt/c/Projects/Piper`
+- 2026-03-11: Restored the repeated-read planner loop rail for code/text edit stages.
+  - `core/executor.py` had the `repeated_content_read` guard accidentally nested under the `list_tree` repeat branch after an unconditional `return`, so unchanged `read_text` retries in edit stages never emitted the intended `planner_repeat` signal or the stronger `RUN_CODE` correction rail.
+  - Validation:
+    - `.\\.venv\\Scripts\\python.exe -m py_compile core\\executor.py`
+    - direct executor probe confirmed a repeated unchanged `read_text` on `catch_the_stars.py` now emits `planner_repeat` and appends the code-file `RUN_CODE` hint
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+- 2026-03-11: Hardened diagnosis-only `FILE_WORK` turns after the `catch_the_stars.py` raw-log loop.
+  - Root causes from the kept raw logs:
+    - diagnosis stages like `read and analyze ... identify why ...` were being treated as plain non-mutating inspection and could auto-finish after a single `read_text`
+    - diagnosis stages could also trip the exact-read fast path and dump the file verbatim
+    - persona was still seeing stale retrieved memory for `catch_the_stars.py`, which could override the just-read file
+    - inspector/repeated-completion paths could finish a diagnosis stage without any explicit diagnosis summary in `proposal`
+  - Runtime changes:
+    - `core/file_stage_policy.py`
+      - narrowed mutation detection so `movement` no longer looks like a `move*` mutation verb
+      - widened code-edit detection for `modify the code / logic / handlers` phrasing
+      - added `stage_requires_analysis_report()` and stopped treating a bare `read_text` as sufficient for diagnosis/report stages
+      - narrowed `stage_requires_targeted_read()` so diagnosis/debug turns are no longer treated like `show me the exact contents`
+    - `core/orchestrator_phases.py`
+      - exact-read and file-lookup auto-replies now only trigger when the latest stage is actually a targeted read/lookup stage
+      - persona suppresses retrieved memory/document hits for normal `FILE_WORK` turns so grounded file evidence wins
+    - `core/scratchpad_formatter.py`
+      - `PROPOSAL:` now outranks raw exact-read blobs when building `LAST_LOG` for FILE_WORK outcomes
+    - `core/executor.py`
+      - diagnosis/report stages now inject a post-read hint telling planner to put the diagnosis in `proposal`
+      - explicit completion, repeated-completion fallback, and inspector finish now reject diagnosis-stage completion unless the current stage contains a `PROPOSAL:` diagnosis summary
+  - Added regression surfaces:
+    - `scripts/file_stage_policy_smoke_test.py`
+      - covers diagnosis, modify, and interactive-runtime-verification stage shapes for `catch_the_stars`
+    - `scripts/catch_the_stars_diagnosis_smoke_test.py`
+      - isolated harness turn that asks Piper to diagnose the broken script without editing it
+      - rejects engineering escalation, verification-block drift, verbatim code dumps, and the stale `IGHT // 2 - 50))` corruption story
+  - Validation:
+    - `python3 -m compileall core/file_stage_policy.py core/scratchpad_formatter.py core/orchestrator_phases.py core/executor.py scripts/file_stage_policy_smoke_test.py scripts/catch_the_stars_diagnosis_smoke_test.py`
+    - `python3 scripts/file_stage_policy_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\catch_the_stars_diagnosis_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-mnh58mic\\data`
+- 2026-03-11: Fixed the `LAST_LOG` mismatch that was making persona talk about `50))` after a verified file write.
+  - `core/scratchpad_formatter.py` now summarizes `FILE_WORK_VERIFIED_RESULT` from its structured JSON payload instead of taking the last 200 characters of the stored file content blob.
+  - That prevents persona from receiving the tail of the rewritten source file as its authoritative outcome note.
+  - `scripts/catch_the_stars_diagnosis_smoke_test.py` now closes the isolated harness in a `finally` block so an interrupted diagnosis smoke is less likely to strand a test `llama-server`.
+  - Validation:
+    - `python3 -m compileall core/scratchpad_formatter.py scripts/catch_the_stars_diagnosis_smoke_test.py`
+- 2026-03-11: Added a proactive rail for redundant rereads in code edit stages.
+  - Root cause: `read_text` could succeed and store the full exact source in scratchpad, but the planner still sometimes hallucinated that the file read was truncated and spent another step rereading the same unchanged code file before the existing reactive repeat rail kicked in.
+  - `core/executor.py` now blocks a repeated `FILE_OP read_text/read_many` on the same unchanged code file before execution when exact current source is already present in scratchpad.
+  - `core/prompt_builder.py` now adds an `EXACT_READ_READY` section for content-edit stages so the planner is told explicitly that the exact source is already available and must not be reread just because an observation preview looked truncated.
+  - `core/file_stage_policy.py` also now treats `correct/fix/repair` phrasing as code/text mutation language for content-edit stage classification.
+  - Added deterministic regression:
+    - `scripts/redundant_code_read_guard_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/file_stage_policy.py core/prompt_builder.py core/executor.py scripts/redundant_code_read_guard_smoke_test.py scripts/file_stage_policy_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\redundant_code_read_guard_smoke_test.py`
+    - `python3 scripts\\file_stage_policy_smoke_test.py`
+- 2026-03-11: Fixed vague code follow-up routing so Piper stops re-searching the workspace when the active script is already known.
+  - Root cause: `core/route_normalizer.py` only recovered recent explicit file targets for document-style follow-ups. Vague code tasks like "inspect the input handler" or "fix the controls" were left targetless, so the planner started with `find_paths` / `list_tree` loops instead of reading the already-known script.
+  - `core/route_normalizer.py` now normalizes code/game/script follow-up TASK cards onto the latest explicit code file target from recent history when the current card is vague and file-less.
+  - The normalizer injects the explicit file into the task goal, FILE_WORK stage goals, and card context, and adds a direct "do not search the workspace for another file unless this read fails" instruction.
+  - Added deterministic regression:
+    - `scripts/code_target_followup_normalizer_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/route_normalizer.py scripts/code_target_followup_normalizer_smoke_test.py scripts/file_stage_policy_smoke_test.py`
+    - `python3 scripts/code_target_followup_normalizer_smoke_test.py`
+    - `python3 scripts/file_stage_policy_smoke_test.py`
+- 2026-03-11: Reduced code-edit dead loops in `catch_the_stars`-style repair turns.
+  - Live logs showed two separate failure modes:
+    - older Stage 1 route drift wasted steps on blind `find_paths` / `list_tree` searches for "input" and "movement" instead of using the known script target
+    - newer Stage 2 edit turns hit a self-inflicted loop after a blocked `RUN_CODE` edit (`Importing 'sys' is blocked.`), because runtime then hard-blocked a valid `FILE_OP write_text` fallback and the planner fell back into blocked rereads
+  - `config.py`
+    - added `EXECUTOR_MAX_STEPS` (env: `PIPER_EXECUTOR_MAX_STEPS`), default `12`
+  - `core/executor.py`
+    - stage step budget now comes from `CFG.EXECUTOR_MAX_STEPS` instead of a hard-coded `10`
+    - code-file edit stages now allow a valid `FILE_OP write_text` fallback when rewriting the exact code file already read into scratchpad
+    - redundant-read blocker now explicitly says one valid `FILE_OP write_text` is acceptable if the final source is already computed
+  - `core/file_stage_policy.py`
+    - blocked `sys` / `subprocess` imports during code-edit `RUN_CODE` now emit a specific recovery hint instead of only the generic failure
+    - post-read code-edit hint now says to prefer `RUN_CODE`, but allows one valid `FILE_OP write_text` fallback
+  - `core/prompt_builder.py`
+    - `CODE_EDIT_OVERRIDE` now reflects the same preference/fallback rule so prompt guidance matches runtime behavior
+  - Added deterministic regression:
+    - `scripts/code_file_write_fallback_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall config.py core/executor.py core/file_stage_policy.py core/prompt_builder.py scripts/code_file_write_fallback_smoke_test.py scripts/redundant_code_read_guard_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\code_file_write_fallback_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\redundant_code_read_guard_smoke_test.py`
+- 2026-03-12: Repo Sweep Hard fixed two FILE_WORK verifier regressions that were breaking isolated CRUD and chaos harness runs.
+  - Small CRUD regression:
+    - Root cause: `core/file_checker_rules.py` extracted expected current-state text content from all quoted literals in the stage, so a context string like `The workspace root is '.'` could be hashed as the target content instead of `"alpha beta gamma"`.
+    - Symptom: a successful `write_text` action verified correctly on the initial tool result but then got downgraded by current-state recovery, causing repeated create-file reroutes in `scripts/file_crud_smoke_test.py`.
+    - Fix:
+      - quoted text inference now prioritizes stage goal/success text over incidental context
+      - non-content literals like `.` / `..` are ignored for text-state inference
+      - added `scripts/file_checker_text_content_inference_smoke_test.py`
+  - Extension reorg regression:
+    - Root cause: current-state synthesis for broad extension reorg stages was allowed to interpret wording like `duplicate identical files` as generic copy semantics, which made `verify_current_file_stage_state()` fabricate a copy mismatch on `.json/misc_data.json` after a successful `consolidate_by_extension`.
+    - Symptom: `scripts/file_chaos_test.py` failed after a correct consolidation step, then left empty directories behind because the stage never advanced to `delete_empty_dirs`.
+    - Fix:
+      - extension reorg stages now skip generic synthetic copy/move current-state inference and fall back to the dedicated extension-inventory verification path
+      - generic copy inference now requires an actual copy-style verb instead of matching any `duplicate*` wording
+      - `core/executor.py` no longer lets fallback current-state checks downgrade an already `VERIFIED` direct file-checker result; current-state only upgrades/recoveries false negatives now
+      - added `scripts/extension_reorg_current_state_verifier_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/file_checker_rules.py core/executor.py scripts/file_checker_text_content_inference_smoke_test.py scripts/extension_reorg_current_state_verifier_smoke_test.py`
+    - `python3 scripts/file_checker_text_content_inference_smoke_test.py`
+    - `python3 scripts/extension_reorg_current_state_verifier_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_crud_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-0fmicem8\\data`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_chaos_test.py --json`
+  - Cleanup:
+    - confirmed no stray `llama-server`, harness, or repair-worker processes remained after the sweep runs
+- 2026-03-13: Added reversible skill-layer v1 behind `CFG.SKILL_LAYER_ENABLED` and cleaned the first routing regressions before leaving it enabled.
+  - New pieces:
+    - `core/skills/selector.py`
+    - `core/skills/__init__.py`
+    - `SkillDecision` contract in `core/contracts.py`
+    - planner/persona active-skill injection in `core/prompt_builder.py` / `core/orchestrator_phases.py`
+  - Regression 1:
+    - naming-mismatch follow-up after a successful exact file read was being re-normalized from hidden `[LATEST_RUNTIME_CONTEXT]` text into a bogus subject like `exact contents of 'grocery_list`, then rereading the file
+    - fixed by skipping hidden/system messages in recent document-subject extraction and by preferring an explicit-target filename recheck card for document search/naming follow-ups
+    - added `scripts/document_lookup_followup_normalizer_smoke_test.py`
+  - Regression 2:
+    - `file_lookup` skill matching was too greedy and hijacked mutating file turns such as remove-text, copy, and move into lookup-only path searches
+    - fixed by restricting `file_lookup` to non-mutating file stages only
+    - strengthened `scripts/skill_layer_smoke_test.py` so content edits resolve to `file_edit` and simple path-copy turns stay unskilled
+  - Validation:
+    - `python3 -m compileall config.py core scripts`
+    - `python3 scripts/document_lookup_followup_normalizer_smoke_test.py`
+    - `python3 scripts/skill_layer_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-u9nb532c\\data`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-fadajaj_\\data`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_crud_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-orngpmm8\\data`
+  - Cleanup:
+    - confirmed no stray `llama-server`, harness, or repair-worker processes remained after the skill-layer runs
+- 2026-03-13: Fixed the `Read it back.` document follow-up bug in the route normalizer.
+  - Root cause:
+    - `_extract_document_lookup_subject()` was treating phrases like `read it back` as a literal document subject `it back`
+    - because that current-turn subject was non-empty, routing never fell back to the real prior target/subject from history
+  - Fix:
+    - pronoun follow-up cleanup now strips trailing discourse tails like `back`, `again`, `for me`, `to me`, `out loud`, `aloud` when the subject begins with `it/this/that`
+    - pronoun lookup blacklist now explicitly covers `it back` / `it again` / `this back` / `that back`
+    - extended `scripts/document_lookup_followup_normalizer_smoke_test.py` to cover the no-explicit-path `Read it back.` case
+    - extended `scripts/file_lookup_smoke_test.py` with a real `read_it_back` turn
+  - Validation:
+    - `python3 -m compileall core/route_normalizer.py scripts/document_lookup_followup_normalizer_smoke_test.py scripts/file_lookup_smoke_test.py`
+    - `python3 scripts/document_lookup_followup_normalizer_smoke_test.py`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-uazaqihz\\data`
+- 2026-03-13: Fixed the compound remove-then-read parser gap for direct FILE_WORK text-edit requests.
+  - Failure shape from live logs:
+    - `Remove bread from the grocery list and then read it back.` either fell through direct normalization entirely or captured the whole subject as `grocery list and then read it back`
+    - older live builds then drifted into the old `it back` lookup bug and answered `No matching files found.`
+    - the follow-up `Again` reply was wrong persona narration, and loopback correctly caught that repeated contradiction
+  - Fix:
+    - `DIRECT_FILE_REMOVE_TEXT_RE` now accepts unquoted removal text, not just quoted needles
+    - `_split_file_followup_tail()` strips compound tails like `and then read it back`
+    - remove-text card builders now optionally emit a second FILE_WORK stage to read the updated file back
+    - added `scripts/file_edit_compound_followup_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/route_patterns.py core/route_normalizer.py scripts/file_edit_compound_followup_smoke_test.py`
+    - direct route probe for:
+      - `Remove bread from the grocery list and then read it back.`
+      - `Remove 'bread' from the grocery list and then read it back.`
+    - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_compound_followup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-ybjhjtyw\\data`
+  - Cleanup:
+    - confirmed the focused harness shut its local `llama-server` down cleanly after the run
+- 2026-03-13: Created a lightweight source snapshot under `versions/piper_v0/` before the planned v1 engine/context-pack refactor pass.
+  - Intent:
+    - keep the live root as `Piper v1`
+    - preserve a rollback/reference baseline without cloning heavy runtime assets
+  - Included:
+    - root code/config/docs
+    - `core/`, `ui/`, `memory/`, `llm/`, `tools/`, `harness/`, `scripts/`, `notes/`
+    - `data/prompts/`, `data/styles/`, `data/templates/`
+  - Excluded:
+    - `models/`, `runtime/`, `.venv*`, caches, and live `data/state|debug|workspace|vector_store|benchmarks|harness|reference`
+- 2026-03-13: Added `PIPER_V1_ENGINE_BLUEPRINT.md` as the active source-of-truth for the v1 redesign.
+  - Purpose:
+    - preserve the original philosophy of the redesign
+    - define the target stack
+    - define migration workflow
+    - define anti-sidetrack rules
+    - keep `piper_v0` as rollback/reference while the live root becomes `v1`
+- 2026-03-13: Added the v1 docs/checklists hub under `docs/`.
+  - New files:
+    - `docs/README.md`
+    - `docs/V1_EXECUTION_ROADMAP.md`
+    - `docs/checklists/V1_GUARDRAILS.md`
+    - `docs/checklists/TRIAGE_MAP.md`
+    - `docs/checklists/RELEASE_READINESS.md`
+  - Purpose:
+    - keep architecture work tied to a staged roadmap
+    - give a fast "what file do I inspect first?" map
+    - define a release/readiness checklist for real-use confidence
+    - reduce drift by turning repeated architectural discipline into explicit checklists
+  - Follow-up verification:
+    - reviewed the older live `data/debug/llm_prompt_debug.txt` failure for `Remove bread from the grocery list and then read it back.`
+    - that logged run did not actually remove `bread`; it routed into a bogus "locate or create grocery list containing bread" stage, wrote `bread\\nmilk\\neggs\\n`, then stage 2 only read that pre-removal state
+    - reran the focused smoke on current code:
+      - `.\\.venv\\Scripts\\python.exe scripts\\file_edit_compound_followup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-paf4amdo\\data`
+    - confirmed no stray `llama-server` remained after the rerun
+- 2026-03-13: Started the real v1 extraction with `ContextPackEngine` as the first shared engine seam.
+  - Wiring changes:
+    - `core/engines/context_pack.py` is now the single owner for persona pack assembly and hidden runtime-context message rendering
+    - `core/prompt_context.py` was reduced to a facade that delegates to `ContextPackEngine`
+    - `core/orchestrator_phases.py` `phase_persona(...)` now works through explicit persona packs and pack overrides instead of mutating `PromptContext` via ad hoc `replace(...)` calls
+    - `_build_latest_runtime_context_message(...)` now delegates to the shared context-pack service instead of assembling its own packet inline
+  - Docs:
+    - updated `docs/architecture/ARCHITECTURE.md` to name `ContextPackEngine` as the context assembly boundary
+    - updated `docs/v1/EXECUTION_ROADMAP.md` Phase 1 status to `in progress`
+  - Validation:
+    - `python3 -m compileall core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+  - Follow-up fix during validation:
+    - `PromptContextService` now imports heavy memory modules only under `TYPE_CHECKING`, so lightweight context-pack smokes no longer fail by trying to import `chromadb`
+- 2026-03-13: Continued Phase 1 by extracting scratchpad-to-persona carry-forward state into a typed runtime pack.
+  - New contract:
+    - `PersonaRuntimePack` in `core/contracts.py`
+  - New ownership:
+    - `core/engines/context_pack.py` now owns extraction of:
+      - exact file read answers
+      - file lookup answers
+      - verified file-work summaries
+      - latest stage proposal answers
+      - persona outcome block / failed / paused flags
+      - FILE_WORK report-rule gating
+    - `core/orchestrator_phases.py` `phase_persona(...)` now consumes `orc.prompt_context.build_persona_runtime_pack(...)` instead of parsing scratchpad fragments directly
+    - the manager success-recovery check for analysis-report stages now calls the shared prompt-context facade instead of local helper functions
+  - Cleanup:
+    - removed the old duplicated extraction helpers from `core/orchestrator_phases.py`
+    - tightened `needs_file_work_report_rule` to key off the explicit latest stage card instead of requiring `STAGE_TYPE: FILE_WORK` text inside scratchpad
+    - upgraded `_extract_latest_runtime_note(...)` in `ContextPackEngine` to keep parity with the richer old inline runtime-note behavior
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+- 2026-03-13: Finished Phase 1 context packing by extracting persona directives and direct-answer fast-path policy.
+  - New contract:
+    - `PersonaDirectivePack` in `core/contracts.py`
+  - New ownership:
+    - `core/engines/context_pack.py` now builds persona tail-rule blocks (`NO_MUTATION_RULE`, document QA rule, search-report rule, active-skill block, engineering-support rule, FILE_WORK report rule)
+    - `core/engines/context_pack.py` now selects direct persona fast-path answers from verified runtime state instead of leaving that selection inline inside `phase_persona(...)`
+    - `core/orchestrator_phases.py` now uses `_finish_persona_fast_path(...)` / `_finalize_persona_turn(...)` helpers so the repeated finish/update/upsert sequence is not copied across direct-answer branches
+  - Validation and parity:
+    - `python3 -m compileall core/contracts.py core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-loewcsc4\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-c1o2g96x\\data`
+  - Small adjacent fix:
+    - updated `scripts/persona_system_event_role_smoke_test.py` to expect `2` messages, not `3`, because placeholder assistant `Thinking...` is intentionally filtered from the final persona prompt history
+- 2026-03-13: Cleaned the repo structure before continuing v1 work.
+  - Moved the first extracted engine to `core/engines/context_pack.py` so engine code has a single home.
+  - Consolidated design/reference docs under:
+    - `docs/architecture/`
+    - `docs/v1/`
+    - `docs/v1/checklists/`
+  - Fixed stale doc links and `core/prompt_context.py` imports after the move.
+  - Pruned stale `data/harness/` scratch artifacts while keeping the directory contract in place for future harness output ownership.
+  - Validation:
+    - `python3 -m compileall core/engines/context_pack.py core/prompt_context.py docs/v1 docs/architecture scripts/context_pack_engine_smoke_test.py scripts/vision_session_memory_smoke_test.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/vision_session_memory_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\file_lookup_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-rsc642ta\\data`
+    - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json --keep-data-copy`
+      - passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-bhv55grm\\data`
+    - final cleanup sweep: no active `llama-server`, harness, or repair-worker processes; no `__pycache__` directories left in the active tree
+- 2026-03-13: Fixed a three-layer task/event correction failure chain.
+  - Root causes:
+    - direct first-person event assertions like `I already got an appointment` were being mistaken for completion commands in `core/route_normalizer.py`
+    - persona could leak internal tail markers like `[ACTIVE_SKILL]` because final cleanup only stripped `[ROUTER]` / `[RECALL]`
+    - inspector could terminate a stage without any successful tool or proposal evidence, producing false `RESULT: SUCCESS` after an `Event not found` failure
+  - Fixes:
+    - widened direct event assertion detection in `core/route_patterns.py` and forced those correction turns back to `CHAT` in `core/route_normalizer.py`
+    - expanded `_strip_persona_control_tags(...)` in `core/orchestrator_phases.py` to remove internal runtime markers
+    - added `_inspector_finish_has_stage_evidence()` in `core/executor.py` and blocked inspector completion when no success/proposal evidence exists
+  - Validation:
+    - `python3 -m compileall core/orchestrator_phases.py core/route_normalizer.py core/route_patterns.py core/executor.py scripts/task_event_correction_normalizer_smoke_test.py scripts/persona_control_tag_strip_smoke_test.py scripts/inspector_stage_evidence_guard_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\persona_control_tag_strip_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts\\inspector_stage_evidence_guard_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+- 2026-03-13: Tightened persona relevance discipline without muting Quinn mode.
+  - Problem:
+    - persona was over-consuming profile facts, upcoming events, and retrieved memory as if they were material that needed to be used, producing forced relevance chains
+  - Fixes:
+    - added an explicit `## RELEVANCE DISCIPLINE` section to `data/prompts/instructions.txt`
+    - added a `[RELEVANCE DISCIPLINE]` block in `core/prompt_builder.py` whenever persona receives world/situational/operational state or retrieved memory
+  - Expected effect:
+    - Quinn can stay mean, but should default to one directly relevant contextual fact instead of chaining unrelated profile facts into the same riff
+    - upcoming events should be mentioned only when the current turn or runtime outcome makes them genuinely relevant
+  - Validation:
+    - `python3 -m compileall core/prompt_builder.py scripts/persona_relevance_policy_smoke_test.py scripts/context_pack_engine_smoke_test.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_relevance_policy_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+- 2026-03-13: Started v1 redesign Phase 2 with a first extracted `StateMutationEngine`.
+  - Why:
+    - task/event and memory stages were flattening into generic `SUCCESS` / `MEMORY UPDATED` outcomes, which made persona and runtime context lose the difference between corrections, inspections, real mutations, and not-found failures
+    - direct calendar assertions like `Fix your calendar, I already got an appointment.` were still a pressure point because the routing distinction was scattered
+  - First seam:
+    - added `core/engines/state_mutation.py`
+    - task/event follow-up completion classification now flows through `StateMutationEngine.classify_task_event_followup(...)`
+    - `ScratchpadFormatter` now asks the engine for `TASK_EVENT_WORK` / `MEMORY_WORK` outcome packs instead of hardcoding generic domain-level result strings
+    - `phase_manager(...)` now trusts `effective_success` from the outcome pack, so `Event not found` / `Key not found` style results can no longer be narrated as completed mutation stages
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/state_mutation.py core/scratchpad_formatter.py core/orchestrator_phases.py core/route_normalizer.py scripts/state_mutation_engine_smoke_test.py scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+- 2026-03-13: Fixed reminder-style dated task/event requests that were being preserved as bogus completion cards.
+  - Live failure from `llm_prompt_debug.txt`:
+    - `Oh yeah, something important. My insurance company told me that my cars insurance will end on the 25th, so remind me to get a new yearly insurance for that.`
+    - router/normalizer path preserved a bad `COMPLETE_TASK` card and looped on `Task not found: <entire sentence>`
+  - Fixes:
+    - added reminder-request normalization in `core/route_normalizer.py` so `remind me to ...` requests override bad task/event completion cards and become `ADD_EVENT` when a date is present, else `ADD_TASK`
+    - added bare ordinal-day recognition (`on the 25th`) to `core/route_patterns.py`, `core/route_dates.py`, and `core/agent.py`
+  - Validation:
+    - `python3 -m compileall core/route_patterns.py core/route_dates.py core/agent.py core/route_normalizer.py scripts/reminder_event_normalizer_smoke_test.py scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+- 2026-03-13: Repaired direct/vague state-domain flows for knowledge memory and task/event follow-ups.
+  - Failures found:
+    - `Remember that my favorite drink is coffee.` was being misrouted into `COMPLETE_TASK`
+    - `What do you know about my favorite drink?` could fall through to the task/event readonly answer and list events instead
+    - vague follow-ups like `I did it.` or `I went to it.` could either stay `CHAT` or complete the literal target `it`
+  - Fixes:
+    - added explicit knowledge routing in `core/route_normalizer.py` for store/remove/query turns
+    - added knowledge patterns in `core/route_patterns.py`
+    - added deterministic readonly knowledge answers in `core/prompt_context.py`
+    - tightened `OperationalStateService.build_readonly_answer(...)` so generic `what ...` questions do not get hijacked into task/event listings
+    - added runtime-context-driven repair for vague `CHAT` follow-ups and for malformed `TASK` completion cards that target pronouns like `it`
+  - Validation:
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `.venv\\Scripts\\python.exe -u - <<'PY' ... _task_vague_flow_eval/_event_vague_flow_eval ... PY`
+      - `task_flow_vague_completion` passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-9khegcjf\\data`
+      - `event_flow_vague_completion` passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-m8qgx_hc\\data`
+- 2026-03-13: Continued Phase 2 by moving durable knowledge/world-state ownership under `StateMutationEngine`.
+  - Changes:
+    - added engine-owned `KnowledgeMutationIntent` and `StateReadonlyPack` contracts in `core/contracts.py`
+    - moved knowledge store/remove/query parsing and route-card construction into `core/engines/state_mutation.py`
+    - moved readonly state-answer resolution for knowledge vs task/event queries into `StateMutationEngine`, with `core/prompt_context.py` delegating to it
+    - upgraded `MEMORY_WORK` outcome packaging so knowledge updates are marked with `state_owner=world_model` and `[WORLD STATE]` inspection output is recognized as a first-class success shape
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/state_mutation.py core/route_normalizer.py core/prompt_context.py scripts/state_mutation_engine_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/knowledge_readonly_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `.venv\\Scripts\\python.exe -c "... _run_scenario(... knowledge direct/vague ...)"` passed
+      - `knowledge_flow_direct` passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-1o1_a_zg\\data`
+      - `knowledge_flow_vague_query` passing kept artifact: `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-wjuoppg4\\data`
+- 2026-03-13: Fixed retry reconstruction for dated reminder/event requests.
+  - Live failure seen in `data/debug/llm_prompt_debug.txt`:
+    - initial insurance reminder request was misrouted into `COMPLETE_TASK`
+    - follow-up `Try again.` rebuilt a vague retry stage and lost the original explicit dated reminder shape
+    - the live app then narrated a bogus `Event scheduled: Car insurance renewal on 2025-12-25`, which did not persist into `data/state/events.json`
+  - Fix:
+    - added `_normalize_retry_from_latest_runtime_context(...)` in `core/route_normalizer.py`
+    - bare retry utterances now reuse the previous explicit dated request from `[LATEST_RUNTIME_CONTEXT]` and pass back through reminder normalization instead of letting the model improvise the event payload
+  - Validation:
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+      - direct request and bare `Try again.` both normalize to `ADD_EVENT` on `2026-03-25`
+- 2026-03-13: Moved persona runtime/system-event block to the end of the prompt.
+  - Change:
+    - in `core/prompting.py`, Qwen/single-system persona assembly now emits `[LATEST_RUNTIME_CONTEXT]` as one terminal `system` message after the conversation transcript instead of embedding it inside the first merged system prompt
+  - Reason:
+    - latest outcome/instruction blocks behave better when they are truly last in the prompt
+  - Validation:
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/vision_prompt_hygiene_smoke_test.py`
+- 2026-03-13: Fixed readonly operational-state countdown questions being misanswered as full event listings.
+  - Live failure seen in `data/debug/llm_prompt_debug.txt`:
+    - `Tell me how many days my first upcoming event.` returned the generic `Upcoming events: ...` list
+    - clarified follow-up `But that's not what I asked. How many days are left to my first upcoming event?` also fell back to the same list
+  - Fix:
+    - `core/operational_state_service.py` now detects event-countdown phrasing and renders a dedicated first-event countdown answer
+    - readonly question detection no longer requires the query to begin with `what/show/list/tell me`, so clarification preambles still resolve through the readonly state path
+  - Validation:
+    - `python3 -m compileall core/operational_state_service.py scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+- 2026-03-13: Fixed self-heal boot restart loop caused by persisted `restart_requested` state.
+  - Root cause:
+    - `app.py` auto-restarts Piper when a repair requests restart and the app is not launched via `start_piper.bat`
+    - on the next boot, the UI poller treated the persisted `codex_repair_status.json` state `restart_requested` as a fresh restart trigger before recovery handoff
+  - Fix:
+    - `ui/controller.py` now suppresses restart replay only when a recovery payload was already present at startup
+    - `core/codex_bridge.py` suppresses boot replay for `restart_requested` statuses that already have matching recovery on disk
+    - `consume_recovery()` now clears the stale repair request as part of handoff
+  - Validation:
+    - `python3 -m compileall core/codex_bridge.py ui/controller.py scripts/codex_ui_repair_smoke_test.py`
+    - `.venv\\Scripts\\python.exe scripts/codex_ui_repair_smoke_test.py`
+  - Cleanup:
+    - cleared stale live `data/state/codex_repair_status.json` after confirming the loop source
+- 2026-03-14: Re-fixed single-system persona runtime-context ordering and world-state rendered-fact removal.
+  - Persona ordering:
+    - for Qwen/single-system compatibility, `[LATEST_RUNTIME_CONTEXT]` had drifted back into the first system message, so stage outcomes were rendered above the recent conversation again
+    - `core/prompting.py` now emits runtime context as a final assistant compatibility message while keeping the first system message as the only true system message
+    - updated `scripts/persona_system_event_role_smoke_test.py` to assert the runtime block sits in the tail message, not the main system body
+  - World-state removal:
+    - planner naturally copied rendered lines like `works on: Catch the Stars` from `[WORLD STATE]`, but `memory/world_model.py` could only remove canonical keys or entity labels
+    - `remove_fact()` now understands rendered `attribute: value` and `relation: label` lines, removes matching root facts or root relations, and prunes orphaned temporary workspace nodes
+    - added `scripts/world_model_rendered_fact_removal_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/prompting.py memory/world_model.py scripts/persona_system_event_role_smoke_test.py scripts/world_model_rendered_fact_removal_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/world_model_rendered_fact_removal_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+- 2026-03-14: Added a speculative-request guard so first-person thinking-out-loud lines do not auto-promote into code/file tasks.
+  - Root cause:
+    - the router/runtime treated user text like `Maybe I should create a fuzzy words code` as an explicit `FILE_WORK` request
+    - that produced a code-generation stage and tool attempts even though the user had not actually asked Piper to perform the work
+  - Fix:
+    - `core/route_normalizer.py` now downgrades speculative first-person task ideas to `CHAT` unless the user explicitly asked Piper to do the work
+    - `core/route_patterns.py` now defines reusable speculative-vs-explicit request regexes
+    - `data/prompts/secretary.txt` now tells the router to keep `maybe I should...` / `perhaps we should...` style thinking-out-loud lines conversational
+    - added `scripts/speculative_task_idea_normalizer_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/route_patterns.py core/route_normalizer.py scripts/speculative_task_idea_normalizer_smoke_test.py`
+    - `python3 scripts/speculative_task_idea_normalizer_smoke_test.py`
+    - `python3 scripts/code_target_followup_normalizer_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+- 2026-03-14: Split temporary and soft-intent memory out of durable world-model ownership.
+  - Architecture:
+    - added `situational_state.json` for temporary user state
+    - added `intent_state.json` for soft intentions / leanings
+    - durable personal truth remains owned by `world_model.json`; `knowledge.json` stays a compatibility mirror
+  - Runtime wiring:
+    - `memory/transient_state.py` now ingests user turns into situational and intent owners
+    - `core/orchestrator_phases.py` records the latest user turn into transient state at route time
+    - `core/engines/context_pack.py` and `core/prompt_builder.py` now render `[SITUATIONAL STATE]` and `[INTENT STATE]` from the new owner instead of relying on transient facts living inside the world model
+    - `memory/world_model.py` now drains legacy situational root attributes out of `world_model.json` so old temporary facts stop leaking into durable prompt state
+  - Validation:
+    - `python3 -m compileall app.py config.py core/contracts.py core/engines/context_pack.py core/prompt_context.py core/prompt_builder.py core/orchestrator_phases.py core/environment.py memory/stores.py memory/state_owner.py memory/world_model.py memory/transient_state.py scripts/transient_state_manager_smoke_test.py scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/world_model_rendered_fact_removal_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/persona_relevance_policy_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+  - Note:
+    - `scripts/state_domain_harness_smoke_test.py` under `.venv` was started as an extra integration check but stalled during startup and was killed; it was not counted as proof.
+- 2026-03-14: Fixed project/work-state memory removals that were drifting into task/event cleanup.
+  - Root cause:
+    - memory-removal phrasing like `I'm not really working on that project ... please remove it` was not recognized as durable-memory removal
+    - the route then fell through into `TASK_EVENT_WORK`, where Piper tried `LIST_TASKS` / task cleanup instead of `REMOVE_KNOWLEDGE`
+  - Fix:
+    - `core/engines/state_mutation.py` now recognizes direct project/work-state negation as `remove_knowledge` with rendered facts like `works on: Catch the Stars`
+    - `core/route_normalizer.py` now has a contextual fallback that can recover the latest rendered `works on:` fact from recent history for generic `remove it` follow-ups in project/work-state context
+    - expanded `scripts/knowledge_route_normalizer_smoke_test.py` and `scripts/state_mutation_engine_smoke_test.py` to cover both direct and contextual project-removal cases
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/route_normalizer.py scripts/knowledge_route_normalizer_smoke_test.py scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/world_model_rendered_fact_removal_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+- 2026-03-14: Restored one-step state-owner reinterpretation when a mutating task/event stage only proves an empty readonly list.
+  - Root cause:
+    - after the state-engine split, `LIST_TASKS -> No pending tasks.` and `LIST_EVENTS -> No upcoming events.` still counted as successful `TASKS LISTED` / `EVENTS LISTED` outcomes
+    - that meant clearly wrong state-owner resolutions never actually failed, so Piper had no reason to attempt a fresh route
+  - Fix:
+    - `core/engines/state_mutation.py` now marks empty readonly list evidence as `FAILED / INCOMPLETE` when the stage goal is mutating
+    - those packs now carry a one-shot auto-reroute flag for likely state-owner mismatches
+    - `core/orchestrator_phases.py` now persists the failed runtime context and triggers a single fresh routing pass instead of dropping straight into persona
+    - added `scripts/state_owner_reroute_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/state_mutation.py core/orchestrator_phases.py scripts/state_mutation_engine_smoke_test.py scripts/state_owner_reroute_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/state_owner_reroute_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/task_event_correction_normalizer_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/knowledge_readonly_smoke_test.py`
+- 2026-03-14: Restored stage-local self-recovery for failed durable-memory removals.
+  - Root cause:
+    - direct `MEMORY_WORK` remove stages were narrowed to `REMOVE_KNOWLEDGE` only
+    - when `REMOVE_KNOWLEDGE` returned `Key not found: ...`, the planner had no inspection tool budget to recover by listing memory and retrying with the exact rendered fact
+    - this made the user type a second message (`retry harder`) to unlock `LIST_KNOWLEDGE`, which is the opposite of agentic looping
+  - Fix:
+    - `core/engines/state_mutation.py` now grants remove-memory stages both `REMOVE_KNOWLEDGE` and `LIST_KNOWLEDGE`
+    - `core/executor.py` now appends a specific recovery hint after failed `REMOVE_KNOWLEDGE`: list memory once, retry with the exact rendered key if present, or finish honestly if already absent
+    - `core/executor.py` also hints after `LIST_KNOWLEDGE` in remove-memory stages so the planner can close the loop without user intervention
+    - added `scripts/memory_remove_recovery_hint_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/executor.py scripts/knowledge_route_normalizer_smoke_test.py scripts/memory_remove_recovery_hint_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/memory_remove_recovery_hint_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/state_owner_reroute_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/knowledge_readonly_smoke_test.py`
+- 2026-03-14: Restored auto-finish for FILE_WORK edit stages that are already satisfied after inspection.
+  - Root cause:
+    - edit stages like `remove the exact text "worms"` could read the correct file state and still fail
+    - the planner anchored on the truncated `read_many` preview instead of the exact-read scratchpad note, then burned steps on repeated rereads and even a forbidden `RUN_CODE`
+    - runtime already had enough evidence to certify `Requested text is already absent`, but only tried current-state verification on completion-like planner decisions or at final recovery
+  - Fix:
+    - `core/executor.py` now checks current-state verification immediately after a successful `FILE_OP read_text/read_many` in a mutating FILE_WORK stage
+    - if the inspected on-disk state already satisfies the requested text/path constraint, the executor now auto-finishes the stage as verified instead of waiting for the planner to discover that
+    - added `scripts/file_edit_already_satisfied_read_recovery_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/executor.py scripts/file_edit_already_satisfied_read_recovery_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/file_edit_already_satisfied_read_recovery_smoke_test.py`
+    - `python3 scripts/file_checker_text_content_inference_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/file_edit_smoke_test.py --json --keep-data-copy --timeout 120`
+- 2026-03-14: Durable-memory removal now self-recovers from `LIST_KNOWLEDGE`, and broad self-profile queries answer from current state instead of recent chat drift.
+  - Root cause:
+    - `MEMORY_WORK` remove stages could list world state, confirm the target fact was absent, and still let the planner wander into deleting an unrelated key.
+    - broad readonly prompts like `Tell me everything you know about me.` were still vulnerable to recent chat/history bleed, so a just-removed project could get mentioned back to the user.
+    - temporary `project:*` nodes with only workspace metadata could survive after `works_on` removal and keep leaking into prompt state.
+  - Fix:
+    - `core/engines/state_mutation.py` now extracts the remove target from the stage card and recognizes when `LIST_KNOWLEDGE` proves that target is already absent.
+    - `core/executor.py` now auto-finishes `MEMORY_WORK` remove stages with `Knowledge already absent: ...` instead of waiting for the planner to improvise another deletion.
+    - `memory/world_model.py` now treats nodes with only temporary workspace attributes (`file_name`, `path`, etc.) as orphaned, so they are pruned when the last `works_on` edge is removed.
+    - `core/engines/state_mutation.py` now provides a readonly fast path for broad profile-summary questions, built from current world state plus current operational state instead of persona history.
+    - `scripts/memory_state_harness_smoke_test.py` now checks the active `works_on` relation instead of grepping raw JSON for any stale project slug.
+  - Validation:
+    - `python3 -m compileall core/executor.py core/engines/state_mutation.py memory/world_model.py scripts/state_mutation_engine_smoke_test.py scripts/world_model_rendered_fact_removal_smoke_test.py scripts/memory_state_harness_smoke_test.py scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/world_model_rendered_fact_removal_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/memory_remove_recovery_hint_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/memory_state_harness_smoke_test.py --json --timeout 90`
+    - `./.venv/Scripts/python.exe scripts/state_domain_harness_smoke_test.py --json`
+- 2026-03-14: Stopped first-person activity lines from being hardened into durable world-model facts.
+  - Root cause:
+    - `Please remember that I'm working on improving piper, which is you.` was not mainly a world-model extractor mistake.
+    - The Python-side durable-memory regex matched it first as `remember that <subject> is <value>`, producing:
+      - subject: `I'm working on improving piper, which`
+      - value: `you`
+    - That promoted a transient/current-activity statement into durable memory before the LLM world-model layer even mattered.
+  - Fix:
+    - `core/engines/state_mutation.py` now treats `remember ...` plus first-person activity/state phrasing as transient context, not durable knowledge.
+    - `core/route_normalizer.py` now forces those turns back to `CHAT` instead of letting bad router/task cards survive.
+    - `memory/knowledge_fact_rules.py` now rejects suspicious first-person clause keys like `I'm working on ... , which` during world-model scrubbing.
+    - Added `scripts/world_model_suspicious_fact_scrub_smoke_test.py`.
+    - Cleaned the live repo state by reloading the world-model manager, which scrubbed the malformed durable key from `data/state/world_model.json` and synced `data/state/knowledge.json`.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/route_normalizer.py memory/knowledge_fact_rules.py scripts/knowledge_route_normalizer_smoke_test.py scripts/transient_state_manager_smoke_test.py scripts/world_model_suspicious_fact_scrub_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/world_model_suspicious_fact_scrub_smoke_test.py`
+- 2026-03-14: Fixed contextual `remember that fact` turns being misrouted into stale task/event completion.
+  - Root cause:
+    - `Just remember that fact.` had no contextual memory-follow-up owner, so if the router drifted into `TASK`, the bad task/event card survived unchanged.
+    - The exact failure in `data/debug/llm_prompt_debug.txt` was:
+      - stage goal: `Mark the task 'Just remember that fact' as completed and archive it`
+      - tool loop: `COMPLETE_TASK` -> `Task not found` -> repeated blocked `LIST_TASKS`
+    - The prior user statement was also not being recognized strongly enough as transient focus/current-project context.
+  - Fix:
+    - `core/engines/state_mutation.py` now recognizes contextual `remember that fact/it/this` turns and can resolve the prior user assertion into either:
+      - durable knowledge store for simple `my X is Y` facts
+      - no durable mutation for transient/current-focus assertions
+    - `core/route_normalizer.py` now applies that contextual remember normalization before retry/task-event follow-up logic.
+    - `memory/transient_state.py` now captures `my biggest/main/current project/focus/priority is ...` as situational state.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/route_normalizer.py memory/transient_state.py scripts/knowledge_route_normalizer_smoke_test.py scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+- 2026-03-14: Added a bounded LLM refiner for ambiguous memory follow-ups after repeated regex-route failures.
+  - Problem:
+    - `Just remember that fact.` and `No, I can see it's not. Just remember it.` were still reaching stale `TASK_EVENT_WORK` cards in live logs.
+    - Pure phrase normalization was not enough because users can express memory intent in too many ways for rescue regexes to stay reliable.
+  - Fix:
+    - `core/engines/state_mutation.py` now exposes a narrow LLM classifier for ambiguous memory-style follow-ups.
+    - `core/orchestrator_phases.py` applies that classifier right after secretary normalization and before skill selection.
+    - It only fires for ambiguous `remember/forget/remove it/that/fact` turns with nearby prior user context.
+    - Durable/simple prior facts become `MEMORY_WORK`; transient/current-focus assertions stay `CHAT`.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/orchestrator_phases.py memory/transient_state.py scripts/llm_memory_followup_refiner_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/transient_state_manager_smoke_test.py`
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/transient_state_manager_smoke_test.py`
+- 2026-03-14: Added a bounded LLM clarification step for ambiguous task routes that should pause and ask the user instead of executing.
+  - Problem:
+    - The router was still too eager to preserve `TASK` when the user turn was fragmentary or corrective but not concretely actionable.
+    - Latest live example in `data/debug/llm_prompt_debug.txt`:
+      - user: `A temporary tree.`
+      - bad route: `Create a new temporary profile entry or update the existing profile to include the 'tree' information.`
+    - This is not a better regex problem; it is a narrow ambiguity-resolution problem.
+  - Fix:
+    - Added `core/engines/route_clarity.py` with a bounded LLM classifier for ambiguous task-like turns.
+    - `core/orchestrator_phases.py` now applies it after route normalization and before skill selection.
+    - When the latest turn is too underspecified to execute safely, the route becomes a `TASK` card with a single `CHAT` clarification stage and no tools.
+    - Explicit actionable requests like `Create a temporary tree file for me.` still stay on the task path.
+  - Validation:
+    - `python3 -m compileall core/engines/route_clarity.py core/orchestrator_phases.py scripts/route_clarifier_smoke_test.py scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+- 2026-03-14: Hardened ambiguous-task clarification with a direct fragment guard and fixed the follow-up regression it introduced.
+  - Problem:
+    - The first bounded clarifier was still too soft for ultra-short fragments like `A temporary tree.` in live harness runs, which let the model keep a bogus `MEMORY_WORK` route and store it as world state.
+    - After adding a hard fragment guard, the guard overfired on real task/event completion follow-ups such as `I bought the milk.` and `I went to it.`, causing clarification pauses instead of completion.
+  - Fix:
+    - `core/engines/route_clarity.py` now force-clarifies only very short no-action task fragments, and it explicitly exempts completion/progress statements matched by `COMPLETION_HINT_RE`.
+    - `core/orchestrator_phases.py` now logs the generic message `Ambiguous task route converted into clarification pause.` because the route may be clarified by the hard guard or the bounded LLM.
+    - Added `scripts/ambiguous_task_clarification_harness_smoke_test.py` to cover the exact live failure class with real conversation history.
+  - Validation:
+    - `python3 -m compileall core/engines/route_clarity.py core/orchestrator_phases.py scripts/route_clarifier_smoke_test.py scripts/ambiguous_task_clarification_harness_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/ambiguous_task_clarification_harness_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/state_domain_harness_smoke_test.py --json`
+- 2026-03-14: Fixed the recurring Qwen persona prompt-shape regression and the task-delete follow-up collision.
+  - Problem:
+    - The Qwen-safe persona path had drifted into duplicating full conversation history: once inside `[CONVERSATION_TRANSCRIPT]` and again as normal chat messages after the system prompt.
+    - `Please remove that from the tasks.` was also colliding with two wrong owners:
+      - direct file-text removal on subject `tasks`
+      - then the bounded LLM memory-followup refiner, which re-overrode a correct task-delete route back into `MEMORY_WORK`
+    - The live result was false `knowledge already absent` narration while `tasks.json` still contained `buy milk`.
+  - Fix:
+    - `core/prompting.py` now uses the Qwen-safe shape `system`, `user`:
+      - the first system message contains the transcript and the runtime tail at the bottom
+      - only the latest user turn is sent as the actual chat message
+      - older assistant/user turns are no longer duplicated after the system message
+    - `core/route_normalizer.py` now:
+      - blocks `remove ... from the tasks/events/calendar` from falling into knowledge removal
+      - blocks subject-based direct file text removal from treating `tasks` / `events` / `calendar` like workspace documents
+      - resolves singular `that` task/event deletion from the latest listed state, or asks for clarification if multiple items are visible
+    - `core/engines/state_mutation.py` now keeps the LLM memory-followup refiner out of explicit task/event container requests.
+    - Added focused regressions:
+      - `scripts/task_delete_followup_normalizer_smoke_test.py`
+      - `scripts/task_delete_followup_harness_smoke_test.py`
+      - updated `scripts/persona_system_event_role_smoke_test.py`
+      - updated `scripts/llm_memory_followup_refiner_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/prompting.py core/route_normalizer.py core/engines/state_mutation.py scripts/persona_system_event_role_smoke_test.py scripts/task_delete_followup_normalizer_smoke_test.py scripts/task_delete_followup_harness_smoke_test.py scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/task_delete_followup_normalizer_smoke_test.py`
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/task_delete_followup_harness_smoke_test.py`
+- 2026-03-14: Fixed duplicate persona policy blocks and instruction truncation leakage in the live prompt.
+  - Problem:
+    - The persona prompt was duplicating `[RELEVANCE DISCIPLINE]`: once inside `data/prompts/instructions.txt`, then again from `core/prompt_builder.py` whenever contextual memory/state blocks were present.
+    - `core/instructions_loader.py` was also hard-truncating `instructions.txt` at 4000 chars and appending the literal marker `[TRUNCATED instructions.txt]` into the model-visible prompt.
+    - The live log for `Done the shopping, remove them all.` showed both artifacts, which made the prompt look patched together and noisier than intended.
+  - Fix:
+    - `core/prompt_builder.py` now injects the fallback relevance block only if the loaded instructions do not already define `[RELEVANCE DISCIPLINE]`.
+    - `core/instructions_loader.py` now uses a higher default cap and trims silently instead of emitting a truncation marker into the prompt.
+    - Added focused regressions:
+      - `scripts/persona_relevance_policy_smoke_test.py`
+      - `scripts/instructions_loader_smoke_test.py`
+  - Validation:
+    - `python3 -m compileall core/instructions_loader.py core/prompt_builder.py scripts/persona_relevance_policy_smoke_test.py scripts/instructions_loader_smoke_test.py`
+    - `python3 scripts/persona_relevance_policy_smoke_test.py`
+    - `python3 scripts/instructions_loader_smoke_test.py`
+- 2026-03-14: Fixed plural task follow-up routing for `remove them all` and the merged-subject regression.
+  - Problem:
+    - The live `Done the shopping, remove them all.` flow was still unstable even after the earlier single-target task fix.
+    - Without a concrete plural follow-up normalizer, secretary could leave a vague shopping-removal stage in place, and task completion routing could collapse multiple visible tasks into one fake subject such as `by bread; buy milk; buy bread`.
+    - The task-list subject parser only split on commas, but persona readbacks often format tasks with semicolons, so plural follow-ups could merge the whole visible list into one bogus task name.
+    - `Please remove that from the tasks.` was also still too eager to clarify when a latest runtime target already existed.
+  - Fix:
+    - `core/route_normalizer.py` now:
+      - resolves plural task/event follow-ups like `remove them all` into concrete task/event targets from the latest visible list or latest runtime subject
+      - builds one concrete stage per resolved target instead of one vague aggregate stage
+      - parses task lists split by commas or semicolons
+      - prefers the latest resolved task/event candidate when generic `that/it` delete follow-ups occur
+    - Added focused coverage in:
+      - `scripts/vague_task_event_followup_normalizer_smoke_test.py`
+      - `scripts/shopping_task_cleanup_harness_smoke_test.py`
+    - The harness now clears copied task state before running so the scenario is deterministic instead of inheriting repo-local pending tasks.
+  - Validation:
+    - `python3 -m compileall core/route_normalizer.py scripts/vague_task_event_followup_normalizer_smoke_test.py scripts/shopping_task_cleanup_harness_smoke_test.py`
+    - `python3 scripts/task_delete_followup_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/shopping_task_cleanup_harness_smoke_test.py`
+- 2026-03-14: Removed the final-user duplication in the Qwen-safe persona prompt shape.
+  - Problem:
+    - In the single-system/Qwen path, the latest user turn was still included inside `[CONVERSATION_TRANSCRIPT]` and then repeated as the trailing `user` message.
+    - That made the model see the most recent user input twice, once in the transcript and once at the very end of the prompt.
+  - Fix:
+    - `core/prompting.py` now renders the transcript only up to, but not including, the final user turn when a trailing `user` message is present.
+    - `scripts/persona_system_event_role_smoke_test.py` now fails unless the latest user turn is absent from the system transcript and present only as the final `user` message.
+  - Validation:
+    - `python3 -m compileall core/prompting.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+- 2026-03-14: Restored Qwen persona compatibility while keeping latest runtime context terminal in transcript order.
+  - Problem:
+    - Collapsing the Qwen persona path to a single API `system` message made llama-server fail with `No user query found in messages.`
+    - The earlier one-message fix was invalid for the current Qwen chat template even though it made the runtime block appear fully terminal.
+    - The repo still needed the runtime/system block to feel session-recent instead of old header text.
+  - Fix:
+    - `core/prompting.py` now uses the Qwen-safe shape:
+      - one real API `system` message
+      - one real trailing API `user` message
+      - transcript inside the system prompt stops before the final real user turn
+      - when runtime context exists, the transcript appends:
+        - a synthetic `ROLE: user` `[CURRENT_USER_TURN]` marker
+        - then a final `ROLE: system` block containing `[MESSAGE_PROTOCOL]` and `[LATEST_RUNTIME_CONTEXT]`
+    - This preserves template compatibility, avoids duplicating the actual final user text, and keeps runtime context terminal inside the transcript sequence.
+    - `scripts/persona_system_event_role_smoke_test.py` now enforces that exact shape.
+  - Validation:
+    - `python3 -m compileall core/prompting.py scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `./.venv/Scripts/python.exe scripts/piper_harness.py once "Hello." --json`
+- 2026-03-14: Fixed readonly task/event questions being stolen by the broad knowledge-query path.
+  - Problem:
+    - Prompts like `What's on my to-do list?` were matching the generic durable-memory regex (`what is/what's <subject>`), so persona replied with malformed knowledge-style lines such as `I do not have a stored on my to-do list.` even when `[OPERATIONAL STATE]` contained pending tasks.
+    - The readonly fast path in `StateMutationEngine.build_readonly_answer()` was checking knowledge before operational task/event queries.
+  - Fix:
+    - `core/engines/state_mutation.py` now gives `READONLY_TASK_EVENT_QUERY_RE` precedence over durable-memory lookup inside readonly answer construction.
+    - Added regression coverage so both the raw operational service and the prompt-context readonly path answer `What's on my to-do list?` as `Pending tasks: ...`.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py scripts/knowledge_readonly_smoke_test.py scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+- 2026-03-14: Collapsed active state-route normalization into `StateMutationEngine` so state meaning stops being split across `route_normalizer`.
+  - Problem:
+    - State semantics were still being decided in too many places:
+      - `route_normalizer` handled reminder conversion, task/event completion/delete follow-ups, contextual remember/remove, and retry reconstruction
+      - `StateMutationEngine` separately handled readonly answers, mutation intent, and outcome truth
+    - That let the same user sentence cross multiple interpreters before action, which is why the repo kept cycling through `Task not found`, `Event not found`, `Key not found`, and wrong-owner readonly answers.
+  - Fix:
+    - `core/engines/state_mutation.py` now exposes one engine-owned `normalize_route_decision(...)` entry point for active state-domain route rewrites.
+    - The engine now owns:
+      - durable knowledge store/remove/query route normalization
+      - contextual remember/remove follow-ups
+      - state-only retry reconstruction from `[LATEST_RUNTIME_CONTEXT]`
+      - reminder-to-task/event conversion
+      - task/event completion and delete follow-ups
+      - plural task/event follow-ups like `remove them all`
+      - state-query downgrades such as readonly task/event status questions staying `CHAT`
+    - `core/route_normalizer.py` now delegates active state routing to that engine instead of running a separate chain of state rewrite helpers.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py core/route_normalizer.py scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/task_delete_followup_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+  - Note:
+    - Larger Windows harness scripts were unreliable during this pass because repeated full-runtime startups sometimes stalled or crashed before assertions ran. I did not count those unstable runs as proof.
+- 2026-03-14: Fixed declarative task/event state contradictions falling through to persona riffing.
+  - Problem:
+    - Turns like `No tasks or events.` and `There should be events now.` were not treated as readonly/current-state checks because the fast path only recognized question-style queries.
+    - That let persona answer from conversational momentum (`No pending tasks.` / recent task completion) even when `[OPERATIONAL STATE]` still contained upcoming events.
+  - Fix:
+    - `core/operational_state_service.py` now treats assertive/corrective task-event turns as current-state requests when they mention tasks/events and include state-claim language such as `no ...`, `there should be ...`, or `still have ...`.
+    - Mixed task+event mentions now render both sides explicitly, e.g. `No pending tasks.` plus `Upcoming events: ...`, instead of silently dropping one side.
+    - Added regression coverage for:
+      - `No tasks or events.`
+      - `There should be events now.`
+  - Validation:
+    - `python3 -m compileall core/operational_state_service.py scripts/operational_state_readonly_smoke_test.py scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/knowledge_readonly_smoke_test.py`
+- 2026-03-14: Fixed natural completion follow-ups binding to the whole sentence instead of the live task/event target.
+  - Problem:
+    - Completion lines like `Cool, I forgot about those, thank you, but I washed my car already.` were routed into `TASK_EVENT_WORK`, but the completion target was the entire sentence instead of the active event.
+    - Because completion cards allowed only `COMPLETE_TASK` or `COMPLETE_EVENT`, a bad first bind then dead-ended into tool-security violations instead of same-domain recovery.
+  - Fix:
+    - `core/engines/state_mutation.py` now scores recent live task/event candidates against the user’s completion wording and prefers the best matching active target over a suspicious raw sentence subject.
+    - Runtime follow-up subject extraction is now domain-aware, so an `EVENT SCHEDULED` runtime block does not leak a fake task candidate.
+    - Completion stages now allow one same-domain list tool (`LIST_TASKS` or `LIST_EVENTS`) for bounded recovery after a miss.
+  - Validation:
+    - `python3 -m compileall core/engines/state_mutation.py scripts/state_mutation_engine_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py scripts/task_event_correction_normalizer_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+  - Note:
+    - `scripts/state_domain_harness_smoke_test.py --json` under `.venv` stalled during full runtime startup in this pass, so I did not count that harness run as proof.
+- 2026-03-14: Fixed proposal confirmations like `Yes, please.` being eaten by the ambiguous-task clarifier.
+  - Problem:
+    - After Piper proposed `Shall I schedule this activity for tomorrow instead?`, a clear assent like `Yes, please.` was still converted into a clarification pause.
+    - The generic route clarifier only saw a short fragment with no action verb and ignored the assistant's immediately previous proposal.
+  - Fix:
+    - `core/engines/route_clarity.py` now detects affirmative confirmation of Piper's own scheduling proposal before the generic clarification path runs.
+    - It reconstructs a concrete `ADD_EVENT` card from the assistant proposal plus recent runtime/user context.
+  - Validation:
+    - `python3 -m compileall core/engines/route_clarity.py scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/task_event_correction_normalizer_smoke_test.py`
+- 2026-03-14: Replaced scattered vague follow-up guessing with an engine-owned LLM follow-up resolver.
+  - Problem:
+    - Repeated bugs like `Well, remove it.`, `I've already done it, you may remove it.`, `Any tasks left?`, and `Just remember that fact.` kept resurfacing because router heuristics, state mutation normalization, the older memory follow-up refiner, and persona fallback were all partially interpreting the same vague follow-up.
+    - That let the system narrate task removal even when the live task still existed, or bounce a task follow-up into memory removal.
+  - Fix:
+    - Added `core/engines/followup_resolution.py` with a bounded LLM classifier that sees:
+      - the latest user turn
+      - recent session history
+      - `[LATEST_RUNTIME_CONTEXT]`
+      - current task/event snapshot
+      - current memory summary
+    - The resolver returns strict JSON and is now called directly from `phase_route` before the generic ambiguous-task clarifier.
+    - It now owns ambiguous follow-up resolution for:
+      - task delete / complete
+      - event delete / complete
+      - readonly task/event queries
+      - explicit memory store / remove follow-ups
+      - acknowledgement-only turns that should remain chat
+    - `phase_persona` readonly fast-path now uses canonical `card.query`, so resolver-produced readonly decisions stay deterministic instead of drifting into persona.
+    - Removed the unused orchestrator-level memory-followup helper once the new resolver path was in place.
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/followup_resolution.py core/orchestrator_phases.py scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+- 2026-03-14: Added a deterministic state override inside `FollowupResolutionEngine` for obvious pronoun follow-ups when the LLM still preserves a bad memory route.
+  - Problem:
+    - Live logs still showed `How many tasks do I have?` -> `Pending tasks: buy milk.` -> `Remove it.` becoming `MEMORY_WORK` with goal `Remove the user fact 'it' from memory`, then ending as `WORLD STATE LISTED`.
+    - That proved the new resolver alone was still sometimes deferring to the already-bad memory card or a weak LLM answer.
+  - Fix:
+    - `core/engines/followup_resolution.py` now builds a deterministic fallback from:
+      - the latest visible task/event answer in recent history
+      - current operational snapshot
+      - the user’s remove/complete intent
+    - If the LLM returns no usable override, or keeps a generic `MEMORY_WORK` pronoun route like `remove the fact 'it'`, Python now snaps it to the obvious live task/event target instead.
+    - Explicit memory scope (`memory`, `knowledge`, `world state`) still bypasses this override.
+  - Validation:
+    - `python3 -m compileall core/engines/followup_resolution.py scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/llm_memory_followup_refiner_smoke_test.py`
+- 2026-03-14: Paused clarification stages now answer with the proposal text directly instead of letting persona hallucinate success.
+  - Problem:
+    - In the same `What tasks do I have?` -> `Remove it.` live transaction, once the system fell into a clarification pause, persona still produced a false success line like `the memory entry is now cleared` even though the stage outcome was `PAUSED / AWAITING USER INPUT`.
+    - That poisoned the next follow-up because the visible assistant narration no longer matched the actual stage result.
+  - Fix:
+    - `PersonaRuntimePack` now carries `proposal_answer`.
+    - `ContextPackEngine.build_persona_runtime_pack()` always extracts the latest `PROPOSAL:` text.
+    - `ContextPackEngine.build_persona_directive_pack()` now uses that proposal as a deterministic `direct_answer` whenever the outcome is paused.
+    - This forces clarification/user-input pauses to ask the exact missing-detail question instead of leaving it to the model.
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/context_pack.py scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+- 2026-03-14: Removed the obsolete memory-followup refiner path and added a lightweight persona output sanitizer.
+  - Problem:
+    - The old LLM memory-followup refiner logic still existed inside `StateMutationEngine` even after `FollowupResolutionEngine` became the active owner for ambiguous follow-ups, which kept the code path duplicated and misleading.
+    - Persona wording still leaked low-value phrasing after otherwise-correct execution, including `upcoming tasks` for event removals, generic `Would you like...` closings, and stray operational/schedule paragraphs on casual chat turns like `I like cars.`
+    - The first sanitizer smoke imported `core/orchestrator_phases.py`, which dragged in the full runtime and failed under plain `python3` because `psutil` is only present in the Windows runtime environment.
+  - Fix:
+    - Deleted the dead LLM memory-followup helper methods from `core/engines/state_mutation.py`; ambiguous follow-up resolution now belongs to `core/engines/followup_resolution.py`.
+    - Added `core/persona_output.py` with a small deterministic sanitizer and moved `phase_persona` to call it after control-tag stripping.
+    - The sanitizer now:
+      - rewrites `upcoming tasks` -> `upcoming events`
+      - strips forbidden trailing follow-up questions like `Would you like...`
+      - removes the `systems indicate no further mutations were required` sentence
+      - drops extra operational/schedule paragraphs from casual no-mutation chat replies when they are unrelated to the user turn
+    - `scripts/persona_output_sanitizer_smoke_test.py` now imports the lightweight module directly, so it runs in the plain repo test env.
+  - Validation:
+    - `python3 -m compileall core/persona_output.py core/engines/state_mutation.py core/orchestrator_phases.py core/contracts.py core/engines/context_pack.py scripts/context_pack_engine_smoke_test.py scripts/followup_resolution_engine_smoke_test.py scripts/persona_output_sanitizer_smoke_test.py`
+    - `python3 scripts/persona_output_sanitizer_smoke_test.py`
+    - `python3 scripts/context_pack_engine_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+- 2026-03-14: Pruned the dead state-routing block from `core/route_normalizer.py`.
+  - Problem:
+    - `route_normalizer` still contained an older mini-engine for knowledge/task/event follow-ups, retries, reminders, and completion/delete routing even though active ownership had already moved into `StateMutationEngine` plus `FollowupResolutionEngine`.
+    - That code was not on the live path anymore, but it duplicated logic and made future fixes riskier because the file still looked like it owned state semantics.
+  - Fix:
+    - Removed the obsolete route-normalizer helpers for:
+      - knowledge follow-up routing
+      - contextual remember/remove and retry replay
+      - task/event delete/plural follow-ups
+      - task/event completion/status/correction/reminder collapse
+    - Trimmed the now-unused imports and regex constants at the top of `core/route_normalizer.py`.
+    - Left the non-state route helpers in place: direct file work, workspace document lookup, code-target follow-up, and interactive runtime verification.
+  - Validation:
+    - `python3 -m compileall core/route_normalizer.py core/engines/followup_resolution.py core/engines/state_mutation.py scripts/followup_resolution_engine_smoke_test.py scripts/state_mutation_engine_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/route_clarifier_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+- 2026-03-14: Consolidated shared runtime-context history parsing into `core/runtime_context.py`.
+  - Problem:
+    - `extract_latest_runtime_context_fields()` existed three times across `FollowupResolutionEngine`, `StateMutationEngine`, and `RouteClarifier`.
+    - `extract_previous_user_message()` existed twice with slightly different local copies.
+    - This was not large dead code like the old route-normalizer block, but it was still duplicated infrastructure in exactly the engines now carrying the v1 state/follow-up ownership.
+  - Fix:
+    - Added `core/runtime_context.py` with:
+      - `extract_latest_runtime_context_fields()`
+      - `extract_previous_user_message()`
+    - Rewired:
+      - `core/engines/followup_resolution.py`
+      - `core/engines/state_mutation.py`
+      - `core/engines/route_clarity.py`
+    - Removed the local copies and the per-file runtime-context regexes.
+  - Validation:
+    - `python3 -m compileall core/runtime_context.py core/engines/route_clarity.py core/engines/followup_resolution.py core/engines/state_mutation.py scripts/followup_resolution_engine_smoke_test.py scripts/state_mutation_engine_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/route_clarifier_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+- 2026-03-14: Consolidated task/event visible-target extraction into `core/task_event_context.py`.
+  - Problem:
+    - After the larger state-route cleanup, the remaining overlap was still real:
+      - `FollowupResolutionEngine` had its own `extract_recent_visible_targets()` / task/event list parsing
+      - `StateMutationEngine` had its own runtime follow-up subject extraction, visible-list parsing, and latest candidate extraction
+    - That duplication sat directly inside the active state/follow-up ownership seam.
+  - Fix:
+    - Added `core/task_event_context.py` with shared helpers for:
+      - parsing listed tasks/events from rendered text
+      - extracting recent visible task/event targets from history
+      - extracting runtime follow-up subjects from `[LATEST_RUNTIME_CONTEXT]`
+      - extracting latest task/event candidates from recent history
+    - Rewired `core/engines/followup_resolution.py` and `core/engines/state_mutation.py` to use the shared module.
+    - Removed the local copies from both engines.
+  - Validation:
+    - `python3 -m compileall core/task_event_context.py core/engines/followup_resolution.py core/engines/state_mutation.py scripts/followup_resolution_engine_smoke_test.py scripts/state_mutation_engine_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/route_clarifier_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+- 2026-03-14: Heavy repo sweep after Phase 2 state/follow-up consolidation.
+  - Removed:
+    - Repo-side `__pycache__/` directories.
+    - Repo-side `*.pyc` artifacts.
+  - Kept on purpose:
+    - `data/state/*.json.bak` companions, because `memory/stores.py` uses them as part of the JSON store recovery path rather than as disposable clutter.
+    - Intentional empty harness directories under `data/harness/`.
+  - Validation:
+    - `python3 -m compileall core/runtime_context.py core/task_event_context.py core/engines/route_clarity.py core/engines/followup_resolution.py core/engines/state_mutation.py scripts/followup_resolution_engine_smoke_test.py scripts/state_mutation_engine_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/route_clarifier_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+- 2026-03-14: Re-asserted separation-of-concerns as an active repo-wide cleanup rule, not just a doctrine statement.
+  - Added explicit v1 guardrails to keep:
+    - state meaning/classification
+    - mutation/execution
+    - verification
+    - prompt/rendering
+    from collapsing back into mixed owners.
+  - Future cleanup passes should treat duplicated semantic interpretation and shared-state multi-ownership as regressions, not merely style issues.
+- 2026-03-14: Froze the `Piper v1` target around a fixed six-engine set.
+  - `docs/v1/BLUEPRINT.md` and `docs/v1/EXECUTION_ROADMAP.md` now treat these as the only v1 engine targets unless the blueprint is revised first:
+    - `ContextPackEngine`
+    - `StateResolutionEngine`
+    - `StateMutationEngine`
+    - `VerificationEngine`
+    - `FileWorkEngine`
+    - `SummaryEngine`
+  - Retrieval, patching, loop mechanics, and speech shaping are now documented as subordinate responsibilities for v1 rather than standalone engine targets.
+  - This freeze exists to stop future sessions from discovering new architecture mid-bugfix.
+- 2026-03-14: Added the planner boundary explicitly to the v1 docs.
+  - `docs/v1/BLUEPRINT.md`, `docs/v1/EXECUTION_ROADMAP.md`, and `docs/v1/checklists/V1_GUARDRAILS.md` now document planner/executor separation as a contract:
+    - route/workflow decides the job class
+    - planner decides the next step inside the allowed stage
+    - planner may not rewrite domains, invent success, or bypass verification
+- 2026-03-14: Broad repo hygiene audit after the v1 freeze.
+  - Removed clearly dead artifacts:
+    - `data/prompts/tools.txt`
+    - dead helper `build_profile_extraction_prompt()` from `memory/knowledge_prompts.py`
+    - dead helper `render_chat_transcript()` from `ui/controller_render.py`
+    - dead helper `render_domain_guide()` from `tools/registry.py`
+    - dead unused model-message path from `core/prompting.py`:
+      - `PromptBuildConfig`
+      - `build_model_messages()`
+      - `_inject_bootstrap_as_recent()`
+  - Kept intentionally:
+    - standalone `scripts/*.py` harness/utility entry points, because the audit found many are unreferenced as imports but still serve as direct manual/regression entry points
+    - state-store `.json.bak` recovery companions under `data/state/`
+  - Audit result:
+    - no new active duplicate shared-state owners were found outside the intended runtime owners plus harness/test code
+    - the only clearly dead prompt artifact in active v1 was `data/prompts/tools.txt`
+  - Validation:
+    - `python3 -m compileall core/prompting.py memory/knowledge_prompts.py ui/controller_render.py tools/registry.py scripts/persona_system_event_role_smoke_test.py scripts/persona_output_sanitizer_smoke_test.py scripts/followup_resolution_engine_smoke_test.py scripts/state_mutation_engine_smoke_test.py scripts/operational_state_readonly_smoke_test.py scripts/route_clarifier_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py scripts/instructions_loader_smoke_test.py`
+    - `python3 scripts/persona_system_event_role_smoke_test.py`
+    - `python3 scripts/persona_output_sanitizer_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/operational_state_readonly_smoke_test.py`
+    - `python3 scripts/route_clarifier_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/instructions_loader_smoke_test.py`
+  - Harness note:
+    - `scripts/memory_state_harness_smoke_test.py --json --timeout 90` failed because the local llama server crashed during boot (`FATAL: Server crashed with code 15`)
+    - `scripts/state_domain_harness_smoke_test.py --json` stalled during runtime startup and was not counted as proof
+- 2026-03-14: Continued engine `#3` (`StateMutationEngine`) by making mutation stages carry structured mutation contracts.
+  - Problem:
+    - state mutation ownership was still too implicit because task/event/memory stages expressed the operation mostly through natural-language `stage_goal` / `success_condition` strings
+    - `FollowupResolutionEngine` also still rebuilt its own task/event/memory mutation cards, which duplicated mutation-stage shape outside engine `#3`
+  - Fix:
+    - added structured `mutation` payloads to state stage cards via `core/contracts.py`
+    - `core/engines/state_mutation.py` now stamps task/event/knowledge mutation stages with:
+      - `state_owner`
+      - `entity_kind`
+      - `action`
+      - `target`
+      - `value` / `scheduled_date` where applicable
+    - memory-removal target recovery now reads the structured mutation payload before falling back to English stage-text parsing
+    - `core/engines/followup_resolution.py` now delegates task/event/memory mutation-card construction back into `StateMutationEngine`
+  - Validation:
+    - `python3 -m compileall core/contracts.py core/engines/state_mutation.py core/engines/followup_resolution.py scripts/state_mutation_engine_smoke_test.py scripts/followup_resolution_engine_smoke_test.py scripts/knowledge_route_normalizer_smoke_test.py scripts/reminder_event_normalizer_smoke_test.py scripts/vague_task_event_followup_normalizer_smoke_test.py`
+    - `python3 scripts/state_mutation_engine_smoke_test.py`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `python3 scripts/knowledge_route_normalizer_smoke_test.py`
+    - `python3 scripts/reminder_event_normalizer_smoke_test.py`
+    - `python3 scripts/vague_task_event_followup_normalizer_smoke_test.py`
+- 2026-03-15: Fixed Bug B — `consolidate_by_extension` exclusion violations not caught by `LocalFileOpRuleChecker`.
+  - Problem:
+    - When a stage success_condition contained an exclusion clause ("except the FCOM", "leave out X", etc.), the file checker had no mechanism to detect that the excluded file had been moved anyway
+    - `_check_consolidate_by_extension` only verified that destination folders existed and contained the expected extensions; it did not cross-reference exclusion constraints from stage text
+    - This caused Stage 3 to loop 6+ times: planner proposed `[NO_TOOL_PROPOSAL]` thinking work was done, but verifier (correctly) rejected because FCOM had been moved in violation of the success_condition
+  - Fix:
+    - added `_EXCLUSION_CLAUSE_RE` regex at module level in `core/file_checker_rules.py` — detects exclusion verb phrases ("except", "excluding", "leave out", "skip", "ignore", "omit", "not including") and captures the keyword token using a non-greedy group with lookahead terminators
+    - added `_exclusion_patterns_from_stage()` instance method that scans `self.stage_raw_text` and returns lowercase keyword tokens from all exclusion matches
+    - `_check_consolidate_by_extension` now calls `_exclusion_patterns_from_stage()` before the workspace scan; if any pattern matches a filename in `created_files`, returns FAILED with the pattern name, violating path, and a hint to use `exclude_files`
+  - Key lesson: the initial regex used `[A-Za-z0-9_\-. ]{2,40}` which was too greedy (included spaces); fixed to `(\w[\w.\-]{1,30}?)` with a lookahead boundary list so short tokens like "FCOM" are captured cleanly
+  - Validation:
+    - `python scripts/consolidate_exclusion_verifier_smoke_test.py` — all 3 cases pass (violation=FAILED, compliant=VERIFIED, no_exclusion=VERIFIED)
+    - `python scripts/extension_reorg_current_state_verifier_smoke_test.py` — still VERIFIED (no regression)
+    - `python scripts/file_stage_policy_smoke_test.py` — still passing (no regression)
+- 2026-03-15: Fixed Bug C — persona asked "should I reroute?" while engineering escalation was already active.
+  - Problem:
+    - `_build_outcome_block` in `core/engines/context_pack.py` always emitted "you may append [ROUTER] to trigger a fresh routing pass" in the FAILED [INSTRUCTION]
+    - When `latest_codex_escalation` was set, `[ENGINEERING_SUPPORT_RULE]` was injected into the runtime context, but the [ROUTER] permission was still visible to the persona
+    - The persona saw both rules and hedged ("Should you wish to proceed, I can attempt a fresh routing pass"), which caused the router to fire in the same turn — persona and router collided
+  - Fix:
+    - threaded `escalation_active: bool = False` from `orchestrator_phases.py` through `PromptContextService.build_persona_runtime_pack` and `ContextPackEngine.build_persona_runtime_pack` to `_build_outcome_block`
+    - when `escalation_active=True` and FAILED, the [INSTRUCTION] now reads "Do NOT append [ROUTER]. This turn must end here." instead of offering the router option
+  - Validation:
+    - `python -m compileall core/engines/context_pack.py core/prompt_context.py core/orchestrator_phases.py` — clean
+    - no dedicated smoke test (requires live orchestrator run); verified by code inspection of the guard at `orchestrator_phases.py` line 1226
+- 2026-03-15: Extracted FileWorkEngine (Phase 5) — removed file/code evidence-handling mechanics from executor loop.
+  - Problem:
+    - 9 evidence-handling methods + a 29-entry extension constant in `executor.py` had no business being in the step loop
+    - path extraction logic was duplicated across 3 files: `executor._file_result_candidate_paths`, `file_checker._candidate_paths_from_evidence`, `file_stage_policy.tool_result_candidate_paths`
+    - code extension set (`CODE_VIEW_EXTENSIONS`) was defined twice: once in `executor.py` (lines 37-65) and once as `_CODE_FILE_EXTENSIONS` in `file_stage_policy.py` (lines 33-61)
+    - recovery hint generation lived in `FileStagePolicy.file_checker_recovery_hint` but was only called from executor; no single "evidence engine" owner
+  - Fix:
+    - created `core/file_extensions.py` — zero-dependency leaf module with the canonical `CODE_FILE_EXTENSIONS` frozenset
+    - created `core/engines/file_work.py` — `FileWorkEngine` with 7 public static/class methods:
+      - `candidate_paths(tool_result)` — superset path extractor replacing all 3 implementations
+      - `exact_read_paths_from_scratchpad(scratchpad)` — replaces `executor._scratchpad_exact_read_paths`
+      - `render_artifact_view(tool_result)` — replaces `executor._render_code_view` + `_maybe_emit_code_view`
+      - `capture_exact_read(stage, tool_result, existing)` — combines `_should_capture_exact_file_read_for_planner` + `_append_exact_file_read_note_from_result`
+      - `should_block(stage, tool_tag, exact_read_paths)` — combines two block guards; returns `FileWorkBlock` dataclass
+      - `recovery_hint(stage, tool_result, file_check)` — moves from `FileStagePolicy.file_checker_recovery_hint`
+      - `collect_evidence(stage, tool_result, existing)` — convenience combinator returning `FileWorkEvidence`
+    - added `FileWorkEvidence`, `FileWorkBlock` dataclasses and `FileStageKind` Literal to `contracts.py`
+    - `executor.py`: removed 9 methods + 29-line constant, imported `FileWorkEngine`, updated all call sites
+    - `file_checker.py`: removed `_candidate_paths_from_evidence`, uses `FileWorkEngine.candidate_paths()`
+    - `file_stage_policy.py`: `_CODE_FILE_EXTENSIONS` now imports from leaf module; `file_checker_recovery_hint` and `tool_result_candidate_paths` removed (logic in engine)
+    - `FileWorkEngine` added to `core/engines/__init__.py` exports
+  - Validation:
+    - `python scripts/file_work_engine_smoke_test.py` — 28/28 cases pass
+    - `python scripts/consolidate_exclusion_verifier_smoke_test.py` — still passing (no regression)
+    - `python scripts/extension_reorg_current_state_verifier_smoke_test.py` — still VERIFIED
+    - `python scripts/file_stage_policy_smoke_test.py` — still passing

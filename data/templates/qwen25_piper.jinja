@@ -1,0 +1,17 @@
+{# qwen25_piper.jinja - ChatML/Qwen style #}
+{% set bos = bos_token if bos_token is defined else "" %}
+{{ bos }}
+{% for m in messages %}
+{% set role = m['role'] %}
+{% if role == 'system' %}
+<|im_start|>system
+{{ m['content'] }}<|im_end|>
+{% elif role == 'user' %}
+<|im_start|>user
+{{ m['content'] }}<|im_end|>
+{% elif role == 'assistant' %}
+<|im_start|>assistant
+{{ m['content'] }}<|im_end|>
+{% endif %}
+{% endfor %}
+<|im_start|>assistant
