@@ -36,6 +36,10 @@ class StageCard(TypedDict, total=False):
     allowed_tools: List[str]
     mutation: StateMutationRequest
     skill: "SkillDecision"
+    # Planner-boundary fields (may be set by router or filled by PlannerBoundary.validate_input)
+    objective: str          # Parent route-card goal; why this workflow exists
+    active_targets: List[str]   # Files or entities being acted on this stage
+    evidence_required: str      # What constitutes verified completion (defaults to success_condition)
 
 
 class RouteCard(TypedDict, total=False):
@@ -67,6 +71,9 @@ class PlannerDecision(TypedDict, total=False):
     tool: Optional[str]
     is_complete: bool
     proposal: str
+    # Explicit output contract fields (normalized by PlannerBoundary.normalize_output)
+    clarification_requested: bool   # True when the planner needs user input before continuing
+    stop_recommended: bool          # True when the planner believes the stage is unrecoverable
 
 
 class ToolResult(TypedDict, total=False):

@@ -14,6 +14,7 @@ from core.prompting import ScratchpadFormatter, PromptBuilder
 from core.debug_tools import log_prompt_debug
 from llm.llm_server_client import LLMClientError
 from core.contracts import FileCheckDecision, PlannerDecision, StageCard
+from core.planner_boundary import PlannerBoundary
 from core.json_utils import parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
@@ -222,25 +223,23 @@ class StageExecutor:
         self._last_successful_tool_result = None
         self._last_dashboard_thought = ""
         
-        # --- AUTO UNLOCK TOOLS ---
-        # Resolve tools from the domain type if not provided
-        stage_type = stage.get("stage_type", "FILE_WORK")
+        # --- PLANNER BOUNDARY: validate inputs, resolve tools ---
+        # PlannerBoundary.validate_input() enforces the §3.1 input contract:
+        # required fields, tool resolution, active-target extraction, and
+        # evidence_required defaulting.  It writes resolved allowed_tools back
+        # into `stage` so the prompt builder sees the correct list.
+        try:
+            objective = str(stage.get("objective", "") or "")
+            planner_input = PlannerBoundary.validate_input(stage, objective=objective)
+            if not stage_is_chat(stage) and planner_input.allowed_tools != list(stage.get("allowed_tools", [])):
+                self.ui.put(("agent_log", f"   -> Auto-unlocked tools for {planner_input.stage_type}: {planner_input.allowed_tools}"))
+        except ValueError as exc:
+            self.ui.put(("agent_log", f"   -> PLANNER BOUNDARY VALIDATION ERROR: {exc}"))
+            return False, self.scratchpad
+
+        stage_type = planner_input.stage_type
         chat_stage = stage_is_chat(stage)
-
-        # If Router didn't send tools, or sent empty list, we resolve them
-        allowed_tools = stage.get("allowed_tools", [])
-        if chat_stage:
-            if allowed_tools:
-                self.ui.put(("agent_log", "   -> CHAT stage does not expose runtime tools. Clearing routed tool list."))
-            allowed_tools = []
-        elif not allowed_tools:
-            allowed_tools = resolve_domain_tools(stage_type)
-            self.ui.put(("agent_log", f"   -> Auto-unlocked tools for {stage_type}: {allowed_tools}"))
-
-        # Fallback safety
-        if not allowed_tools and not chat_stage:
-            allowed_tools = ["RUN_CODE"]  # Safe default
-        stage["allowed_tools"] = list(allowed_tools)
+        allowed_tools = planner_input.allowed_tools
         
         # Load Planner Template
         prompt_path = CFG.DATA_DIR / "prompts" / "manager.txt"
@@ -306,6 +305,12 @@ class StageExecutor:
                     step=step_count,
                 )
                 continue
+
+            # PLANNER BOUNDARY: normalize output into explicit typed contract.
+            planner_output = PlannerBoundary.normalize_output(decision)
+            if planner_output.stop_recommended:
+                self.ui.put(("agent_log", "   -> Planner signalled stop_recommended — stage cannot proceed."))
+                return False, self.scratchpad
 
             thought = decision.get("thought", "") or ""
             tool_tag = decision.get("tool", "") or ""

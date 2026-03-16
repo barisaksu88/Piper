@@ -784,12 +784,19 @@ def phase_manager(orc) -> None:
         cancel_token=orc.cancel_token,
         signal_emitter=lambda signal: orc.emit_runtime_signal(signal, scratchpad=executor.scratchpad),
     )
+    # Capture the parent objective once so every stage can reference it.
+    objective = str(orc.context_card.get("goal", "") or "").strip()
+
     total_stages = len(stages)
     for index, stage in enumerate(stages):
         orc.raise_if_cancelled()
         stage = dict(stage)
         if orc.context_card.get("context") and "context" not in stage:
             stage["context"] = list(orc.context_card.get("context") or [])
+        # Inject the parent objective into the stage card so PlannerBoundary
+        # can surface it without the executor needing a separate parameter.
+        if "objective" not in stage or not stage.get("objective"):
+            stage["objective"] = objective
         stage_num = index + 1
         orc.ui.put(("agent_log", f"=== STARTING STAGE {stage_num}/{total_stages}: {stage.get('stage_goal')} ==="))
         needs_user_input = stage_requires_user_input(stage)
