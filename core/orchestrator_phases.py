@@ -17,7 +17,7 @@ from core.file_stage_policy import FileStagePolicy
 from core.json_utils import parse_json_response
 from core.persona_output import sanitize_persona_output
 from core.prompting import ScratchpadFormatter, PromptBuilder, build_persona_messages
-from core.route_normalizer import normalize_route_decision
+from core.routing.route_normalizer import normalize_route_decision
 from core.skills import apply_route_skill_layer
 from core.stage_policy import stage_requires_user_approval, stage_requires_user_input
 from core.stream_filter import stream_thinking_filter

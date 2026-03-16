@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import re
 
-from core.route_patterns import DATE_PHRASE_RES
+from core.routing.route_patterns import DATE_PHRASE_RES
 
 
 def extract_date_phrase(text: str) -> str:

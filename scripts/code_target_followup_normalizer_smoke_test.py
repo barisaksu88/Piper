@@ -10,7 +10,7 @@ from _bootstrap import ROOT_DIR
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.route_normalizer import normalize_route_decision  # noqa: E402
+from core.routing.route_normalizer import normalize_route_decision  # noqa: E402
 
 
 @dataclass(frozen=True)

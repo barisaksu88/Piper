@@ -20,7 +20,7 @@ from core.task_event_context import (
     extract_recent_list_subjects,
     extract_runtime_followup_subject,
 )
-from core.route_patterns import (
+from core.routing.route_patterns import (
     CANCEL_HINT_RE,
     COMPLETION_HINT_RE,
     CORRECTION_ONLY_HINT_RE,
@@ -40,8 +40,8 @@ from core.route_patterns import (
     VAGUE_EVENT_FOLLOWUP_RE,
     WORKLIKE_HINT_RE,
 )
-from core.route_dates import extract_date_phrase, resolve_date_phrase
-from core.route_subjects import (
+from core.routing.route_dates import extract_date_phrase, resolve_date_phrase
+from core.routing.route_subjects import (
     extract_event_subject,
     extract_event_reference_subject,
     extract_reference_subject,

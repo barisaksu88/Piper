@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Sequence
 
 from core.contracts import RouteDecision, StageCard
 from core.engines.state_mutation import StateMutationEngine
-from core.route_patterns import (
+from core.routing.route_patterns import (
     DIRECT_FILE_COPY_RE,
     DIRECT_FILE_CREATE_TEXT_RE,
     DIRECT_FILE_DELETE_RE,
@@ -21,7 +21,7 @@ from core.route_patterns import (
     SPECULATIVE_ACTION_RE,
     EXPLICIT_ASSISTANT_REQUEST_RE,
 )
-from core.route_subjects import (
+from core.routing.route_subjects import (
     looks_like_task_creation,
 )
 

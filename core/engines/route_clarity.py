@@ -7,8 +7,8 @@ from typing import Any, Iterable
 from core.contracts import RouteDecision
 from core.json_utils import parse_json_response
 from core.runtime_context import extract_latest_runtime_context_fields
-from core.route_patterns import COMPLETION_HINT_RE
-from core.route_dates import resolve_date_phrase
+from core.routing.route_patterns import COMPLETION_HINT_RE
+from core.routing.route_dates import resolve_date_phrase
 
 _CLEAR_ACTION_HINT_RE = re.compile(
     r"(?i)\b("

@@ -9,8 +9,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.route_dates import extract_date_phrase, resolve_date_phrase  # noqa: E402
-from core.route_normalizer import normalize_route_decision  # noqa: E402
+from core.routing.route_dates import extract_date_phrase, resolve_date_phrase  # noqa: E402
+from core.routing.route_normalizer import normalize_route_decision  # noqa: E402
 
 
 @dataclass(frozen=True)
