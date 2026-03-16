@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
+import fnmatch
 
-# Configuration
-ROOT_DIR = Path(__file__).resolve().parent.parent
-OUTPUT_FILE = Path(__file__).resolve().parent / "PIPER_CODE_DUMP.txt"
+ROOT_DIR = Path(__file__).resolve().parent
+OUTPUT_FILE = ROOT_DIR / "PIPER_CODE_DUMP.txt"
 
-# Folders to ignore completely
+# ---------- DIRECTORY EXCLUDES ----------
 IGNORE_DIRS = {
     "venv",
     ".venv",
@@ -20,22 +20,32 @@ IGNORE_DIRS = {
     "versions",
 }
 
-# Specific files to exclude
-EXCLUDE_FILES = {
-    # boot / infra
+# ---------- FILE NAME EXCLUDES ----------
+EXCLUDE_FILENAMES = {
+    "AGENTS.md",
+    "app.py",
+    "config.py",
+    "export_code.py",
+    "mirror_watcher.py",
+    "mirror_watcher.log",
+    "PIPER_CODE_DUMP.txt",
+    "requirements.txt",
+    "runtime_control.py",
+    "start_piper.bat",
+}
+
+# ---------- PATH EXCLUDES ----------
+EXCLUDE_PATHS = {
     "llm/boot.py",
     "llm/llm_server_client.py",
 
-    # memory infrastructure
     "memory/storage.py",
     "memory/stores.py",
     "memory/codex_repair_store.py",
 
-    # UI visual markup
     "ui/layout.py",
     "ui/windowing.py",
 
-    # workspace tool internals
     "tools/workspace_extension_actions.py",
     "tools/workspace_extension_ops.py",
     "tools/workspace_file_actions.py",
@@ -44,64 +54,110 @@ EXCLUDE_FILES = {
     "tools/workspace_runtime.py",
     "tools/file_ops.py",
 
-    # prompt files
     "memory/knowledge_prompts.py",
     "memory/world_model_prompts.py",
+
+    # Additional exclusions requested
+    "memory/brain.py",
+    "memory/chat_state.py",
+    "memory/documents.py",
+    "memory/state_owner.py",
+    "memory/transient_state.py",
+    "memory/vision_session.py",
+    "memory/world_model.py",
+
+    "tools/image_gen.py",
+    "tools/interpreter.py",
+    "tools/live_screen.py",
+    "tools/registry.py",
+    "tools/screen_capture.py",
+    "tools/search.py",
+    "tools/stt.py",
+    "tools/tts.py",
+    "tools/vision.py",
+
+    "core/skills/selector.py",
+
+    "ui/event_speech.py",
+    "ui/vision_commentary.py",
 }
 
-# Extensions to include
+# ---------- PATTERN EXCLUDES ----------
+EXCLUDE_PATTERNS = [
+    "ui/controller*.py",
+    "memory/knowledge_*.py",
+]
+
+# ---------- FILE TYPES TO KEEP ----------
 INCLUDE_EXTENSIONS = {".py", ".txt", ".style", ".json", ".jinja"}
 
 
+def should_exclude(file_path: Path):
+
+    # skip __init__
+    if file_path.name == "__init__.py":
+        return True
+
+    if file_path.name in EXCLUDE_FILENAMES:
+        return True
+
+    rel = file_path.relative_to(ROOT_DIR).as_posix()
+
+    if rel in EXCLUDE_PATHS:
+        return True
+
+    for pattern in EXCLUDE_PATTERNS:
+        if fnmatch.fnmatch(rel, pattern):
+            return True
+
+    return False
+
+
 def gather_files():
-    print(f"Scanning {ROOT_DIR}...")
-    collected_files = []
+    print(f"Scanning {ROOT_DIR}")
+    collected = []
 
     for root, dirs, files in os.walk(ROOT_DIR):
-        # Remove ignored directories
+
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
 
         for file in files:
-            file_path = Path(root) / file
 
-            # skip __init__.py
-            if file == "__init__.py":
-                continue
+            file_path = Path(root) / file
 
             if file_path.suffix not in INCLUDE_EXTENSIONS:
                 continue
 
-            relative = file_path.relative_to(ROOT_DIR).as_posix()
-
-            # skip specific excluded files
-            if relative in EXCLUDE_FILES:
+            if should_exclude(file_path):
                 continue
 
-            # skip output file itself
             if file_path.name == OUTPUT_FILE.name:
                 continue
 
-            collected_files.append(file_path)
+            collected.append(file_path)
 
-    collected_files.sort(key=lambda x: (x.parent.name, x.name))
-    return collected_files
+    collected.sort(key=lambda x: (x.parent.name, x.name))
+    return collected
 
 
 def write_dump(files):
-    print(f"Writing {len(files)} files to {OUTPUT_FILE}...")
+
+    print(f"Writing {len(files)} files to {OUTPUT_FILE}")
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write("# PIPER CORE CODEBASE DUMP\n")
-        f.write("# Reduced dump for architecture / logic debugging\n\n")
+
+        f.write("# PIPER LOGIC LAYER DUMP\n")
+        f.write("# Reduced architecture export for LLM analysis\n\n")
 
         for file_path in files:
-            relative_path = file_path.relative_to(ROOT_DIR)
 
-            print(f"  - Adding: {relative_path}")
+            rel = file_path.relative_to(ROOT_DIR)
 
-            f.write(f"{'=' * 60}\n")
-            f.write(f"FILE: {relative_path}\n")
-            f.write(f"{'=' * 60}\n")
+            print("  +", rel)
+
+            f.write("=" * 60 + "\n")
+            f.write(f"FILE: {rel}\n")
+            f.write("=" * 60 + "\n")
 
             try:
                 with open(file_path, "r", encoding="utf-8", errors="replace") as src:
@@ -114,7 +170,7 @@ def write_dump(files):
 
             f.write("\n\n")
 
-    print("\nDone! Copy PIPER_CODE_DUMP.txt into the new thread.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":

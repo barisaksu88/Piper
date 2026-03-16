@@ -30,6 +30,9 @@ data/state/
 data/debug/
 data/vector_store/
 
+# ── Benchmark artifacts ───────────────────────────────────────────────────────
+data/benchmarks/bench_pids.txt
+
 # ── User workspace (agent-generated files, not source) ────────────────────────
 data/workspace/
 
@@ -46,3 +49,4 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+PIPER_CODE_DUMP.txt
