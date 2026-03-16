@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -31,7 +32,8 @@ class _DummyKnowledge:
 
 
 class _DummyBrain:
-    workspace = ROOT_DIR / "data" / "workspace"
+    def __init__(self, workspace: Path | None = None) -> None:
+        self.workspace = workspace or (ROOT_DIR / "data" / "workspace")
 
     def recall(self, user_msg: str, n_results: int = 5):
         return [{"text": "remember the grocery list flow", "metadata": {"date": "Mar 10, 2026"}}]
@@ -62,7 +64,7 @@ class _DummyTransient:
 
 
 class _DummyOrchestrator:
-    def __init__(self) -> None:
+    def __init__(self, brain: "_DummyBrain | None" = None) -> None:
         self.user_msg = "Remove bread from grocery_list.txt and read it back."
         self.route_decision = {
             "decision": "TASK",
@@ -83,17 +85,27 @@ class _DummyOrchestrator:
             "OBSERVATION_TEXT: Read text file: grocery_list.txt",
             "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: Removed bread from grocery_list.txt.",
         ]
-        self.brain = _DummyBrain()
+        self.brain = brain if brain is not None else _DummyBrain()
 
 
 def main() -> int:
+    # Create a self-contained temp workspace so path-normalisation tests don't
+    # depend on grocery_list.txt existing in the live data/workspace/ directory.
+    with tempfile.TemporaryDirectory(prefix="piper-cpe-smoke-") as _tmpdir:
+        tmp_workspace = Path(_tmpdir)
+        (tmp_workspace / "grocery_list.txt").write_text("Bread\nMilk\nApples\n")
+        return _run(tmp_workspace)
+
+
+def _run(tmp_workspace: Path) -> int:
+    brain = _DummyBrain(workspace=tmp_workspace)
     service = PromptContextService(
         instruction_loader=InstructionLoader(ROOT_DIR / "data" / "prompts" / "instructions.txt"),
         environment_service=_DummyEnv(),
         operational_state_service=_DummyOps(),
         knowledge_mgr=_DummyKnowledge(),
         transient_state_mgr=_DummyTransient(),
-        brain=_DummyBrain(),
+        brain=brain,
         document_memory=_DummyDocs(),
         vision_session_memory=_DummyVision(),
     )
@@ -112,7 +124,7 @@ def main() -> int:
     file_work_pack = service.clear_memory_for_file_work(base_pack)
     prompt_context = service.to_prompt_context(focused_pack)
     persona_runtime = service.build_persona_runtime_pack(
-        _DummyOrchestrator().scratchpad,
+        _DummyOrchestrator(brain=brain).scratchpad,
         latest_stage={
             "stage_goal": "Edit grocery_list.txt to remove bread.",
             "stage_type": "FILE_WORK",
@@ -179,8 +191,8 @@ def main() -> int:
         persona_runtime=paused_runtime,
     )
 
-    runtime_message = service.build_runtime_context_message(_DummyOrchestrator())
-    search_orc = _DummyOrchestrator()
+    runtime_message = service.build_runtime_context_message(_DummyOrchestrator(brain=brain))
+    search_orc = _DummyOrchestrator(brain=brain)
     search_orc.route_decision = {
         "decision": "SEARCH",
         "card": {

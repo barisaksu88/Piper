@@ -20,7 +20,7 @@ The redesign must reduce drift, not merely move code around.
 - Keep [AGENTS.md](../../AGENTS.md) doctrine intact.
 - Keep verification authoritative.
 - Do not keep permanent dual-path architecture behind long-lived switches.
-- Use [versions/piper_v0](../../versions/piper_v0) as rollback/reference baseline.
+- Use git tag `v1-engine-redesign-complete` as rollback/reference baseline (versions/piper_v0 has been removed from disk; restore with `git checkout v1-engine-redesign-complete -- versions/piper_v0`).
 - Remove duplicated old paths after parity is proven.
 
 ## 3. Frozen v1 Engine Set
@@ -81,9 +81,9 @@ Status:
 - done
 
 Artifacts:
-- [versions/piper_v0](/mnt/c/Projects/Piper/versions/piper_v0)
-- [docs/v1/BLUEPRINT.md](/mnt/c/Projects/Piper/docs/v1/BLUEPRINT.md)
-- [docs/v1/checklists](/mnt/c/Projects/Piper/docs/v1/checklists)
+- git tag `v1-engine-redesign-complete` (versions/piper_v0 snapshot; removed from disk 2026-03-17)
+- [docs/v1/BLUEPRINT.md](BLUEPRINT.md)
+- [docs/v1/checklists](checklists)
 
 Exit criteria:
 - v0 snapshot exists
