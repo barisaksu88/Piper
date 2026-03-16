@@ -241,6 +241,10 @@ class PersonaRuntimePack:
     latest_stage_is_targeted_read: bool = False
     latest_stage_is_targeted_lookup: bool = False
     needs_file_work_report_rule: bool = False
+    # Typed verification result surfaced directly from VerificationEngine —
+    # not inferred from scratchpad text.  Empty string when not evaluated.
+    verification_verdict: str = ""      # "VERIFIED", "PARTIAL", "FAILED", or ""
+    verification_evidence: str = ""     # evidence_summary from VerificationResult
 
 
 @dataclass(frozen=True)

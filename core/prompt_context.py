@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, List
 from core.engines.context_pack import ContextPackEngine
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.summary import SummaryEngine
+from core.engines.verification import VerificationResult
 from core.contracts import (
     PersonaContextPack,
     PersonaDirectivePack,
@@ -121,12 +122,14 @@ class PromptContextService:
         latest_stage: dict[str, Any] | None = None,
         reporter_just_ran: bool = False,
         escalation_active: bool = False,
+        verification_result: VerificationResult | None = None,
     ) -> PersonaRuntimePack:
         return self.engine.build_persona_runtime_pack(
             scratchpad,
             latest_stage=latest_stage,
             reporter_just_ran=reporter_just_ran,
             escalation_active=escalation_active,
+            verification_result=verification_result,
         )
 
     def build_persona_directive_pack(

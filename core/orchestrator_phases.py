@@ -803,6 +803,9 @@ def phase_manager(orc) -> None:
         needs_user_approval = stage_requires_user_approval(stage)
 
         success, stage_log = executor.run(stage, stage_num, total_stages)
+        # Surface the typed VerificationResult so phase_persona uses the
+        # authoritative verdict rather than re-inferring from scratchpad text.
+        orc.last_verification = getattr(executor, "_last_verification", None)
         if (
             not success
             and FileStagePolicy.stage_requires_analysis_report(stage)
@@ -1126,6 +1129,7 @@ def phase_persona(orc) -> None:
         latest_stage=latest_stage,
         reporter_just_ran=reporter_just_ran,
         escalation_active=bool(getattr(orc, "latest_codex_escalation", None)),
+        verification_result=getattr(orc, "last_verification", None),
     )
     outcome_block = persona_runtime.outcome_block
     persona_directives = orc.prompt_context.build_persona_directive_pack(

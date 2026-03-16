@@ -15,6 +15,7 @@ from core.contracts import (
     RuntimeContextPack,
 )
 from core.engines.summary import SummaryEngine
+from core.engines.verification import VerificationResult
 from core.file_stage_policy import FileStagePolicy
 
 _LATEST_RUNTIME_CONTEXT_PREFIX = "[LATEST_RUNTIME_CONTEXT]"
@@ -208,11 +209,23 @@ class ContextPackEngine:
         latest_stage: Dict[str, Any] | None = None,
         reporter_just_ran: bool = False,
         escalation_active: bool = False,
+        verification_result: VerificationResult | None = None,
     ) -> PersonaRuntimePack:
         stage = dict(latest_stage or {})
         outcome_block = SummaryEngine.build_outcome_block(scratchpad, escalation_active=escalation_active)
         outcome_upper = outcome_block.upper()
-        outcome_failed = "FAILED / INCOMPLETE" in outcome_upper or "RESULT: FAILED" in outcome_upper
+        # Primary source: typed VerificationResult from VerificationEngine.
+        # Fallback: infer from scratchpad text (for stages where verification
+        # was not run, e.g. CHAT, MEMORY_WORK).
+        verification_verdict = ""
+        verification_evidence = ""
+        if verification_result is not None:
+            verification_verdict = str(verification_result.verdict or "")
+            verification_evidence = str(verification_result.evidence_summary or "")
+            # PARTIAL is not success — authoritative override.
+            outcome_failed = verification_verdict in ("PARTIAL", "FAILED")
+        else:
+            outcome_failed = "FAILED / INCOMPLETE" in outcome_upper or "RESULT: FAILED" in outcome_upper
         outcome_paused = "PAUSED / AWAITING USER" in outcome_upper
         proposal_answer = SummaryEngine.extract_proposal(scratchpad)
         exact_file_read_answer = SummaryEngine.extract_exact_file_read(scratchpad)
@@ -226,10 +239,13 @@ class ContextPackEngine:
         latest_stage_is_targeted_read = bool(stage) and FileStagePolicy.stage_requires_targeted_read(stage)
         latest_stage_is_targeted_lookup = bool(stage) and FileStagePolicy.stage_requires_targeted_lookup(stage)
         latest_stage_requires_analysis_report = bool(stage) and FileStagePolicy.stage_requires_analysis_report(stage)
+        # PARTIAL verdict: stage is file-work that needs reporting (partial evidence
+        # is still evidence — persona must narrate what was and wasn't verified).
+        is_partial = verification_verdict == "PARTIAL"
         needs_file_work_report_rule = (
             bool(stage)
             and FileStagePolicy.stage_is_file_work(stage)
-            and not outcome_failed
+            and (not outcome_failed or is_partial)
             and not outcome_paused
             and not exact_file_read_answer
             and not file_lookup_answer
@@ -248,6 +264,8 @@ class ContextPackEngine:
             latest_stage_is_targeted_read=latest_stage_is_targeted_read,
             latest_stage_is_targeted_lookup=latest_stage_is_targeted_lookup,
             needs_file_work_report_rule=needs_file_work_report_rule,
+            verification_verdict=verification_verdict,
+            verification_evidence=verification_evidence,
         )
 
     def build_persona_directive_pack(
@@ -301,15 +319,30 @@ class ContextPackEngine:
                 f"Escalation log: {str(codex_escalation.get('brief_path') or '').strip()}"
             )
         if runtime.needs_file_work_report_rule:
-            tail_system_blocks.append(
-                "[FILE_WORK_REPORT_RULE]\n"
-                "This completed turn was a FILE_WORK task.\n"
-                "Use LAST_LOG and the stage success condition as the only authoritative completion evidence.\n"
-                "Do not restate or infer full file contents unless the current runtime evidence explicitly contains an exact readback.\n"
-                "If the evidence only proves a state change, report the verified change only.\n"
-                "Do not claim that code, a file, or an executable is ready merely because RUN_CODE or FILE_OP executed.\n"
-                "If current runtime evidence does not verify the requested artifact state, say only what was actually verified."
-            )
+            if runtime.verification_verdict == "PARTIAL":
+                evidence_note = (
+                    f" Evidence gap: {runtime.verification_evidence}"
+                    if runtime.verification_evidence
+                    else ""
+                )
+                tail_system_blocks.append(
+                    "[PARTIAL_VERIFICATION_RULE]\n"
+                    "Verification returned PARTIAL — the stage executed but artifact state is not fully confirmed."
+                    + evidence_note + "\n"
+                    "Report only what was actually verified. Do not narrate full success.\n"
+                    "Acknowledge the gap explicitly: say what was done and what could not be confirmed.\n"
+                    "Do not claim the file, code, or task is complete unless the outcome block says VERIFIED."
+                )
+            else:
+                tail_system_blocks.append(
+                    "[FILE_WORK_REPORT_RULE]\n"
+                    "This completed turn was a FILE_WORK task.\n"
+                    "Use LAST_LOG and the stage success condition as the only authoritative completion evidence.\n"
+                    "Do not restate or infer full file contents unless the current runtime evidence explicitly contains an exact readback.\n"
+                    "If the evidence only proves a state change, report the verified change only.\n"
+                    "Do not claim that code, a file, or an executable is ready merely because RUN_CODE or FILE_OP executed.\n"
+                    "If current runtime evidence does not verify the requested artifact state, say only what was actually verified."
+                )
 
         direct_answer = ""
         if runtime.outcome_paused and runtime.proposal_answer:
