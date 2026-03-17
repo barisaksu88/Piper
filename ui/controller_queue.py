@@ -5,6 +5,7 @@ import time
 
 import dearpygui.dearpygui as dpg
 
+from config import CFG
 from ui.controller_actions import handle_search_result, handle_show_image, refresh_live_screen_ui
 from ui.controller_render import append_bounded_line_block
 from ui.controller_status import classify_runtime_mode
