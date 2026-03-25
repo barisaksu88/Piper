@@ -37,6 +37,13 @@ from tools.vision import VisionError, VisionRequest, analyze_image, resolve_visi
 from .tts_probe import RecordingTTS
 
 
+def _clear_conversation_summary_file() -> None:
+    try:
+        CFG.CONVERSATION_SUMMARY_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 @dataclass(frozen=True)
 class HarnessEvent:
     kind: str
@@ -122,14 +129,27 @@ class _HarnessDataOverlay:
 
     def _clear_debug_files(self) -> None:
         for rel_path in (
+            # per-layer debug files (current)
+            "router_debug.txt",
+            "persona_debug.txt",
+            "planner_debug.txt",
+            "doc_focus_debug.txt",
+            # legacy combined file — kept so old copies are cleaned up too
             "llm_prompt_debug.txt",
             "llm_http_payload_debug.txt",
             "manager_debug.txt",
             "tts_debug.txt",
+            "stats_alerts.log",
         ):
             path = data_debug_path(self.data_dir, rel_path)
             if path.exists():
                 path.unlink()
+        stats_path = self.data_dir / "stats.jsonl"
+        if stats_path.exists():
+            stats_path.unlink()
+        change_journal_path = self.data_dir / "change_journal.json"
+        if change_journal_path.exists():
+            change_journal_path.unlink()
         for rel_path in (
             self.data_dir / "state" / "codex_repair_request.json",
             self.data_dir / "state" / "codex_repair_status.json",
@@ -224,6 +244,7 @@ class PiperHarness:
             chat_upsert_fn=self.chat_state.upsert_streaming_assistant,
             persist_turn_fn=self._persist_turn,
             set_status_fn=self._set_status,
+            finalize_stream_fn=self.chat_state.finalize_streaming_assistant,
         )
         self.code_session = EmbeddedCodeSession(
             self.data_dir / "workspace",
@@ -235,6 +256,8 @@ class PiperHarness:
         self._images: List[str] = []
         self._active_runs = 0
         self._active_lock = threading.Lock()
+        self._search_in_flight_count = 0
+        self._active_search_query = ""
         self._last_activity = time.monotonic()
         self._started = False
         self._boot_report: Optional[HarnessBootReport] = None
@@ -314,6 +337,19 @@ class PiperHarness:
         snapshot = self.chat_state.get_messages_snapshot()
         new_messages = snapshot[msg_start:]
         assistant_messages = [m for m in new_messages if m.get("role") == "assistant"]
+        if not assistant_messages:
+            # Hidden system upserts/removals can shrink the snapshot during a turn,
+            # which makes a raw msg_start slice miss the assistant reply even
+            # though it was actually appended after the latest user turn.
+            latest_user_idx = -1
+            for idx in range(len(snapshot) - 1, -1, -1):
+                message = snapshot[idx]
+                if message.get("role") == "user" and str(message.get("content") or "") == text:
+                    latest_user_idx = idx
+                    break
+            if latest_user_idx >= 0:
+                new_messages = snapshot[latest_user_idx + 1 :]
+                assistant_messages = [m for m in new_messages if m.get("role") == "assistant"]
         assistant_text = assistant_messages[-1]["content"] if assistant_messages else ""
         system_messages = [
             str(m.get("content", ""))
@@ -346,11 +382,16 @@ class PiperHarness:
                 "kept_data_dir": str(self.kept_data_dir) if self.kept_data_dir else None,
             },
             "debug_files": {
-                "llm_prompt": str(data_debug_path(self.data_dir, "llm_prompt_debug.txt")),
+                "router": str(data_debug_path(self.data_dir, "router_debug.txt")),
+                "persona": str(data_debug_path(self.data_dir, "persona_debug.txt")),
+                "planner": str(data_debug_path(self.data_dir, "planner_debug.txt")),
+                "doc_focus": str(data_debug_path(self.data_dir, "doc_focus_debug.txt")),
                 "llm_http": str(data_debug_path(self.data_dir, "llm_http_payload_debug.txt")),
                 "manager": str(data_debug_path(self.data_dir, "manager_debug.txt")),
                 "tts": str(data_debug_path(self.data_dir, "tts_debug.txt")),
+                "stats_alerts": str(data_debug_path(self.data_dir, "stats_alerts.log")),
             },
+            "stats": str(self.data_dir / "stats.jsonl"),
             "messages": self.chat_state.get_messages_snapshot(),
             "events": [asdict(event) for event in self._events],
             "statuses": list(self._statuses),
@@ -364,8 +405,10 @@ class PiperHarness:
         if not res.handled:
             return False
         if res.action == "clear":
+            _clear_conversation_summary_file()
             self.chat_state.clear()
         elif res.action == "new_session":
+            _clear_conversation_summary_file()
             self.chat_state.new_session()
         elif res.action == "codex_support":
             messages = self.chat_state.get_messages_snapshot()
@@ -425,6 +468,10 @@ class PiperHarness:
                 boot_mgr=self.boot_mgr,
                 img_gen=self.img_gen,
                 prompt_context_service=self.prompt_context_service,
+                is_search_in_flight_fn=self.is_search_in_flight,
+                retain_search_in_flight_fn=self.retain_search_in_flight,
+                release_search_in_flight_fn=self.release_search_in_flight,
+                current_search_query_fn=self.current_search_query,
             )
         except Exception as exc:
             self.ui_queue.put(("error", f"Harness Orchestrator Error: {exc}"))
@@ -488,8 +535,10 @@ class PiperHarness:
             self._pump_ui_queue()
             with self._active_lock:
                 active_runs = self._active_runs
+                search_in_flight = self._search_in_flight_count > 0
             if (
                 active_runs == 0
+                and not search_in_flight
                 and self.ui_queue.empty()
                 and (time.monotonic() - self._last_activity) >= idle_grace_s
             ):
@@ -547,6 +596,33 @@ class PiperHarness:
             if kind == "search_result":
                 self._handle_search_result(payload)
                 continue
+
+    def retain_search_in_flight(self, query: str = "") -> None:
+        with self._active_lock:
+            self._search_in_flight_count += 1
+            clean_query = str(query or "").strip()
+            if clean_query:
+                self._active_search_query = clean_query
+        self._last_activity = time.monotonic()
+
+    def release_search_in_flight(self) -> None:
+        with self._active_lock:
+            if self._search_in_flight_count > 0:
+                self._search_in_flight_count -= 1
+            if self._search_in_flight_count <= 0:
+                self._search_in_flight_count = 0
+                self._active_search_query = ""
+        self._last_activity = time.monotonic()
+
+    def is_search_in_flight(self) -> bool:
+        with self._active_lock:
+            return self._search_in_flight_count > 0
+
+    def current_search_query(self) -> str:
+        with self._active_lock:
+            if self._search_in_flight_count <= 0:
+                return ""
+            return self._active_search_query
 
     def _handle_search_result(self, payload: Any) -> None:
         if not isinstance(payload, dict):

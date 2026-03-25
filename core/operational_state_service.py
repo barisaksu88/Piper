@@ -72,16 +72,55 @@ class OperationalStateService:
             if str(item.get("date") or "").strip() == str(target_date).strip()
         ]
 
+    def find_references(self, path: str) -> list[dict]:
+        """Return active tasks/events whose stored text contains ``path``.
+
+        Used by FileWorkEngine to detect cross-domain dependencies before a
+        DELETE or MOVE operation proceeds.  Matches are case-insensitive and
+        substring-based so partial path segments (e.g. a filename) will match.
+
+        Both the full relative path and the bare filename (basename) are tested
+        so that a task referencing "alpha.txt" is found even when the tool tag
+        specifies "docs/alpha.txt".
+
+        Returns a list of conflict dicts, each with a ``kind`` key of
+        ``"task"`` or ``"event"`` plus whatever fields the store provides.
+        An empty list means the path is safe to delete or move.
+        """
+        target = str(path or "").strip().lower()
+        if not target:
+            return []
+        # Derive the bare filename as a secondary search term.  Skip when it
+        # equals target (already a bare filename) to avoid double-matching.
+        import posixpath as _pp
+        basename = _pp.basename(target.replace("\\", "/"))
+        search_terms = [target]
+        if basename and basename != target:
+            search_terms.append(basename)
+
+        # Use a wide horizon so long-running tasks/events are included.
+        snapshot = self.snapshot(horizon_days=3650)
+        refs: list[dict] = []
+        for task in snapshot.tasks:
+            blob = " ".join(str(v or "").lower() for v in task.values())
+            if any(term in blob for term in search_terms):
+                refs.append({"kind": "task", **task})
+        for event in snapshot.events:
+            blob = " ".join(str(v or "").lower() for v in event.values())
+            if any(term in blob for term in search_terms):
+                refs.append({"kind": "event", **event})
+        return refs
+
     def render_block(self, *, query: str = "", horizon_days: int = 45) -> str:
         snapshot = self.snapshot(query=query, horizon_days=horizon_days)
-        payload = {}
-        if snapshot.events:
-            payload["events"] = snapshot.events
-        if snapshot.tasks:
-            payload["tasks"] = snapshot.tasks
-        if not payload:
-            return ""
-        return f"[OPERATIONAL STATE]\n{json.dumps(payload, indent=2)}"
+        # Always emit the block so the model sees an explicit empty state rather
+        # than having no operational context at all (which causes it to guess).
+        events = list(snapshot.events) if snapshot.events else None
+        tasks = list(snapshot.tasks) if snapshot.tasks else None
+        lines = ["[OPERATIONAL STATE]"]
+        lines.append(f"Tasks: {json.dumps(tasks) if tasks else 'No pending tasks'}")
+        lines.append(f"Events: {json.dumps(events) if events else 'No upcoming events'}")
+        return "\n".join(lines)
 
     def build_readonly_answer(self, query: str) -> str:
         text = str(query or "").strip()
@@ -89,7 +128,12 @@ class OperationalStateService:
             return ""
         lower = text.lower()
         wants_tasks = bool(re.search(r"\b(task|tasks|to-?do|to-?dos|pending)\b", lower))
-        wants_events = bool(re.search(r"\b(event|events|calendar|schedule|schedules|scheduled)\b", lower))
+        wants_events = bool(
+            re.search(
+                r"\b(event|events|calendar|schedule|schedules|scheduled|appointment|appointments|deadline|deadlines|reminder|reminders)\b",
+                lower,
+            )
+        )
         wants_event_countdown = bool(
             wants_events
             and (
@@ -100,7 +144,7 @@ class OperationalStateService:
         )
         readonly_query = bool(
             re.search(
-                r"\b(?:what|which|show|list|tell me|do i have|what do i have|what's|whats|how many days|days? left|how long until|are there|anything on|anything in|any)\b",
+                r"\b(?:what|which|when|show|list|tell me|do i have|what do i have|what's|whats|how many days|days? left|how long until|are there|anything on|anything in|any)\b",
                 lower,
             )
         )
@@ -163,11 +207,20 @@ class OperationalStateService:
         return f"Pending tasks ({len(names)}): " + "; ".join(names[:6]) + "; ..."
 
     @staticmethod
+    def _format_event_label(item: dict[str, str]) -> str:
+        name = str(item.get("name") or "").strip()
+        date = str(item.get("date") or "").strip()
+        time = str(item.get("time") or "").strip()
+        if not name or not date:
+            return ""
+        return f"{name} on {date} at {time}" if time else f"{name} on {date}"
+
+    @staticmethod
     def _render_event_answer(events: List[dict[str, str]]) -> str:
         items = [
-            f"{str(item.get('name') or '').strip()} on {str(item.get('date') or '').strip()}"
+            OperationalStateService._format_event_label(item)
             for item in events
-            if str(item.get("name") or "").strip() and str(item.get("date") or "").strip()
+            if OperationalStateService._format_event_label(item)
         ]
         if not items:
             return "No upcoming events."
@@ -200,4 +253,6 @@ class OperationalStateService:
         delta_days = max((event_date - dt.datetime.now().date()).days, 0)
         day_label = "day" if delta_days == 1 else "days"
         name = str(first.get("name") or "").strip()
-        return f"Your first upcoming event is {name} in {delta_days} {day_label}."
+        time = str(first.get("time") or "").strip()
+        suffix = f" at {time}" if time else ""
+        return f"Your first upcoming event is {name} in {delta_days} {day_label}{suffix}."

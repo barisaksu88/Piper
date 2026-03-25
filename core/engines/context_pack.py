@@ -4,24 +4,95 @@ import os
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from config import CFG
 from core.contracts import (
+    PERSONA_CONTEXT_ARBITRATION_TABLE,
+    PersonaArbitrationProfile,
     PersonaContextPack,
     PersonaDirectivePack,
     PersonaRuntimePack,
+    PersonaTurnType,
     PromptContext,
     RuntimeContextPack,
 )
 from core.engines.summary import SummaryEngine
 from core.engines.verification import VerificationResult
 from core.file_stage_policy import FileStagePolicy
+from core.turn_explanation import render_explain_last_turn_block
 
 _LATEST_RUNTIME_CONTEXT_PREFIX = "[LATEST_RUNTIME_CONTEXT]"
 _RUNTIME_CONTEXT_PATH_RE = re.compile(
     r"(?i)(?:[A-Za-z]:[\\/][^\s`\"'<>|]+|/mnt/[a-z]/[^\s`\"'<>|]+|[\w./\\-]+\.[A-Za-z0-9]{1,8})"
 )
+_PACK_BLOCK_FIELD_MAP: dict[str, tuple[str, ...]] = {
+    "[ENVIRONMENT]": ("env_block",),
+    "[WORLD STATE]": ("world_state",),
+    "[SITUATIONAL STATE]": ("situational_state",),
+    "[INTENT STATE]": ("intent_state",),
+    "[OPERATIONAL STATE]": ("operational_state",),
+    "[RETRIEVED MEMORY]": ("brain_hits",),
+    "[DOCUMENT MATCHES]": ("document_hits",),
+    "[DOCUMENT FOCUS]": ("document_focus", "document_references", "document_sources"),
+}
+
+
+def resolve_persona_turn_type(
+    *,
+    route_decision: Dict[str, Any] | None = None,
+    reporter_just_ran: bool = False,
+    ingested_document_chat: bool = False,
+    document_focus_active: bool = False,
+) -> PersonaTurnType:
+    route = dict(route_decision or {})
+    notice = dict(route.get("system_notice") or {})
+    notice_kind = str(notice.get("kind") or "").strip().lower()
+    if notice_kind == "proactive_trigger":
+        return "PROACTIVE_TRIGGER"
+    if notice_kind == "explain_last_turn":
+        return "EXPLAIN"
+    if reporter_just_ran:
+        return "REPORTER"
+    if ingested_document_chat or document_focus_active:
+        return "DOC_FOCUS"
+    decision = str(route.get("decision") or "").strip().upper()
+    if decision == "TASK":
+        return "TASK"
+    if decision == "SEARCH":
+        return "SEARCH_FIRST_PASS"
+    return "CHAT"
+
+
+def _clear_pack_field_value(field_name: str) -> Any:
+    if field_name in {"brain_hits", "vision_notes", "document_hits", "document_references", "document_sources"}:
+        return []
+    if field_name == "knowledge":
+        return {}
+    return ""
+
+
+def render_context_arbitration_block(turn_type: PersonaTurnType) -> str:
+    profile = PERSONA_CONTEXT_ARBITRATION_TABLE.get(turn_type, PersonaArbitrationProfile())
+    lines = ["[CONTEXT_ARBITRATION_RULE]"]
+    lines.append(f"Turn type: {turn_type}")
+    if profile.primary:
+        lines.append("Primary blocks: " + " | ".join(profile.primary))
+    if profile.secondary:
+        lines.append("Secondary blocks: " + " | ".join(profile.secondary))
+    if profile.suppressed:
+        lines.append("Suppressed unless needed: " + " | ".join(profile.suppressed))
+    lines.append("Prefer primary blocks first. Use secondary blocks only when they directly help.")
+    if turn_type == "REPORTER":
+        lines.append("This is the completed-search follow-on turn.")
+        lines.append("Extend, sharpen, or correct the earlier answer. Do not restart the topic as a fresh speaker.")
+    elif turn_type == "SEARCH_FIRST_PASS":
+        lines.append("Give a useful immediate answer from the current context while the web search is still running.")
+    elif turn_type == "EXPLAIN":
+        lines.append("Explain the last turn only. Ignore unrelated context.")
+    elif turn_type == "PROACTIVE_TRIGGER":
+        lines.append("Deliver the reminder cleanly and do not wander into unrelated context.")
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -84,6 +155,26 @@ class ContextPackRenderer:
         return "\n".join(line for line in lines if str(line or "").strip())
 
 
+@dataclass(frozen=True)
+class TailBlockContext:
+    route: Dict[str, Any]
+    runtime: PersonaRuntimePack
+    ingested_document_chat: bool
+    document_focus_active: bool
+    reporter_just_ran: bool
+    skill: Dict[str, Any]
+    codex_escalation: Dict[str, Any]
+
+
+TailBlockBuilder = Callable[[TailBlockContext], str]
+_TAIL_BLOCK_REGISTRY: list[TailBlockBuilder] = []
+
+
+def register_tail_block(fn: TailBlockBuilder) -> TailBlockBuilder:
+    _TAIL_BLOCK_REGISTRY.append(fn)
+    return fn
+
+
 @dataclass
 class ContextPackEngine:
     instruction_loader: Any
@@ -102,7 +193,7 @@ class ContextPackEngine:
         user_msg: str,
         style_overlay: str = "",
         knowledge_enabled: bool = True,
-        brain_limit: int = 5,
+        brain_limit: int = 9,
         document_limit: int = 5,
     ) -> PersonaContextPack:
         instructions = self.instruction_loader.load()
@@ -125,17 +216,67 @@ class ContextPackEngine:
             except Exception:
                 brain_hits = []
 
+        # Strip memories that assert a specific calendar date ("today is X") when
+        # they are older than 1 day.  These become actively misleading once stale —
+        # the model may trust them over the live [ENVIRONMENT] block.
+        import datetime as _dt, re as _re
+        _DATE_CLAIM_RE = _re.compile(
+            r"\btoday is\b|\bcurrent(?:ly)?[,\s]+(?:the\s+)?date|\bthe date is\b",
+            _re.IGNORECASE,
+        )
+        _today = _dt.date.today()
+
+        def _is_stale_date_claim(hit: Dict[str, Any]) -> bool:
+            text = str(hit.get("text") or "")
+            if not _DATE_CLAIM_RE.search(text):
+                return False
+            meta_date = str((hit.get("metadata") or {}).get("date") or "").strip()
+            if not meta_date:
+                return False
+            try:
+                mem_date = _dt.datetime.strptime(meta_date, "%b %d, %Y").date()
+                return (_today - mem_date).days > 1
+            except ValueError:
+                return False
+
+        def _brain_hit_relevant(hit: Dict[str, Any]) -> bool:
+            raw_distance = hit.get("distance")
+            if raw_distance is None:
+                return True
+            try:
+                return float(raw_distance) < 0.40
+            except (TypeError, ValueError):
+                return True
+
+        brain_hits = [
+            h for h in brain_hits
+            if _brain_hit_relevant(h) and not _is_stale_date_claim(h)
+        ]
+
         vision_notes: List[str] = []
-        if self.vision_session_memory is not None and self.vision_session_memory.is_active():
+        if knowledge_enabled and self.vision_session_memory is not None and self.vision_session_memory.is_active():
             vision_notes = self.vision_session_memory.recent_notes(limit=5)
 
         document_hits: List[Dict[str, Any]] = []
         if knowledge_enabled and int(document_limit) > 0:
             try:
-                document_hits = self.document_memory.render_prompt_hits(
+                raw_hits = self.document_memory.render_prompt_hits(
                     user_msg,
                     limit=max(int(document_limit), 0),
                 )
+                # Filter out low-relevance hits.
+                # Threshold 0.35: cosine distance ≥ 0.35 means the query has no
+                # meaningful overlap with the document chunk.  0.45 was too loose —
+                # unrelated queries (e.g. "check if file exists") were pulling in
+                # FCOM chunks that happen to contain generic terms.
+                # Exact/mock hits have no distance field and always pass.
+                def _hit_relevant(h: Dict[str, Any]) -> bool:
+                    raw = h.get("distance")
+                    if raw is None:
+                        return True  # no distance → treat as relevant (exact/mock)
+                    return float(raw) < 0.35
+
+                document_hits = [h for h in raw_hits if _hit_relevant(h)]
             except Exception:
                 document_hits = []
 
@@ -179,6 +320,33 @@ class ContextPackEngine:
             document_hits=[],
         )
 
+    def apply_context_arbitration(
+        self,
+        pack: PersonaContextPack,
+        *,
+        route_decision: Dict[str, Any] | None = None,
+        ingested_document_chat: bool = False,
+        reporter_just_ran: bool = False,
+        document_focus_active: bool = False,
+    ) -> PersonaContextPack:
+        turn_type = resolve_persona_turn_type(
+            route_decision=route_decision,
+            reporter_just_ran=reporter_just_ran,
+            ingested_document_chat=ingested_document_chat,
+            document_focus_active=document_focus_active,
+        )
+        profile = PERSONA_CONTEXT_ARBITRATION_TABLE.get(turn_type, PersonaArbitrationProfile())
+        allowed_blocks = set(profile.primary) | set(profile.secondary)
+        updates: dict[str, Any] = {}
+        for block_name, field_names in _PACK_BLOCK_FIELD_MAP.items():
+            if block_name in allowed_blocks:
+                continue
+            for field_name in field_names:
+                updates[field_name] = _clear_pack_field_value(field_name)
+        if not updates:
+            return pack
+        return replace(pack, **updates)
+
     def to_prompt_context(self, pack: PersonaContextPack) -> PromptContext:
         return self.renderer.to_prompt_context(pack)
 
@@ -210,20 +378,30 @@ class ContextPackEngine:
         reporter_just_ran: bool = False,
         escalation_active: bool = False,
         verification_result: VerificationResult | None = None,
+        outcome_pack: Any | None = None,
     ) -> PersonaRuntimePack:
         stage = dict(latest_stage or {})
-        outcome_block = SummaryEngine.build_outcome_block(scratchpad, escalation_active=escalation_active)
+        allow_persona_reroute = bool(getattr(outcome_pack, "allow_persona_reroute", True))
+        outcome_block = SummaryEngine.build_outcome_block(
+            scratchpad,
+            escalation_active=escalation_active,
+            allow_persona_reroute=allow_persona_reroute,
+        )
         outcome_upper = outcome_block.upper()
         # Primary source: typed VerificationResult from VerificationEngine.
         # Fallback: infer from scratchpad text (for stages where verification
         # was not run, e.g. CHAT, MEMORY_WORK).
         verification_verdict = ""
         verification_evidence = ""
+        verification_recommendation = ""
+        verification_checker_path = ""
         if verification_result is not None:
             verification_verdict = str(verification_result.verdict or "")
             verification_evidence = str(verification_result.evidence_summary or "")
-            # PARTIAL is not success — authoritative override.
-            outcome_failed = verification_verdict in ("PARTIAL", "FAILED")
+            verification_recommendation = str(verification_result.recommendation or "")
+            verification_checker_path = str(verification_result.checker_path or "")
+            # Typed verification is authoritative for task-turn success/failure.
+            outcome_failed = not bool(getattr(verification_result, "effective_success", False))
         else:
             outcome_failed = "FAILED / INCOMPLETE" in outcome_upper or "RESULT: FAILED" in outcome_upper
         outcome_paused = "PAUSED / AWAITING USER" in outcome_upper
@@ -255,6 +433,7 @@ class ContextPackEngine:
             outcome_block=outcome_block,
             outcome_failed=outcome_failed,
             outcome_paused=outcome_paused,
+            allow_persona_reroute=allow_persona_reroute,
             proposal_answer=proposal_answer,
             analysis_report_answer=analysis_report_answer,
             exact_file_read_answer=exact_file_read_answer,
@@ -266,6 +445,8 @@ class ContextPackEngine:
             needs_file_work_report_rule=needs_file_work_report_rule,
             verification_verdict=verification_verdict,
             verification_evidence=verification_evidence,
+            verification_recommendation=verification_recommendation,
+            verification_checker_path=verification_checker_path,
         )
 
     def build_persona_directive_pack(
@@ -273,6 +454,7 @@ class ContextPackEngine:
         *,
         route_decision: Dict[str, Any] | None = None,
         ingested_document_chat: bool = False,
+        document_focus_active: bool = False,
         reporter_just_ran: bool = False,
         active_skill: Dict[str, Any] | None = None,
         latest_codex_escalation: Dict[str, Any] | None = None,
@@ -282,67 +464,20 @@ class ContextPackEngine:
         route = dict(route_decision or {})
         skill = dict(active_skill or {})
         codex_escalation = dict(latest_codex_escalation or {})
+        tail_context = TailBlockContext(
+            route=route,
+            runtime=runtime,
+            ingested_document_chat=bool(ingested_document_chat),
+            document_focus_active=bool(document_focus_active),
+            reporter_just_ran=bool(reporter_just_ran),
+            skill=skill,
+            codex_escalation=codex_escalation,
+        )
         tail_system_blocks: list[str] = []
-
-        if not runtime.outcome_block and str(route.get("decision") or "").upper() == "CHAT":
-            tail_system_blocks.append(
-                "[NO_MUTATION_RULE]\n"
-                "This turn did not execute any task, event, or record update.\n"
-                "Do not claim that you updated records, logged anything, scheduled anything, "
-                "or changed the user's state unless a completed system outcome explicitly says so."
-            )
-        if ingested_document_chat:
-            tail_system_blocks.append(
-                "[DOCUMENT_QA_RULE]\n"
-                "This is a read-only question about ingested document memory already supplied in system context.\n"
-                "Use [DOCUMENT FOCUS] as the only authoritative document evidence for this turn.\n"
-                "Do not supplement from raw [INGESTED DOCUMENTS], retrieved memory, earlier turns, or general/world knowledge.\n"
-                "Do not narrate file-tool failures, PDF read attempts, or timeout errors unless the current outcome block explicitly says they happened in this turn.\n"
-                "If [DOCUMENT FOCUS] says no grounded answer could be extracted, say you do not know from the supplied document instead of inventing missing content."
-            )
-        if reporter_just_ran:
-            tail_system_blocks.append(
-                "[SEARCH_REPORT_RULE]\n"
-                "This turn is the final user-facing summary of a search that already completed.\n"
-                "Answer directly from the completed search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this completed search."
-            )
-        skill_block = self._render_persona_active_skill_block(skill)
-        if skill_block:
-            tail_system_blocks.append(skill_block)
-        if codex_escalation and runtime.outcome_failed:
-            tail_system_blocks.append(
-                "[ENGINEERING_SUPPORT_RULE]\n"
-                "This task prepared an engineering support brief because the runtime detected a real execution issue.\n"
-                "Be honest that engineering support has been prepared.\n"
-                "Do not claim the issue is already fixed.\n"
-                f"Escalation summary: {str(codex_escalation.get('summary') or '').strip()}\n"
-                f"Escalation log: {str(codex_escalation.get('brief_path') or '').strip()}"
-            )
-        if runtime.needs_file_work_report_rule:
-            if runtime.verification_verdict == "PARTIAL":
-                evidence_note = (
-                    f" Evidence gap: {runtime.verification_evidence}"
-                    if runtime.verification_evidence
-                    else ""
-                )
-                tail_system_blocks.append(
-                    "[PARTIAL_VERIFICATION_RULE]\n"
-                    "Verification returned PARTIAL — the stage executed but artifact state is not fully confirmed."
-                    + evidence_note + "\n"
-                    "Report only what was actually verified. Do not narrate full success.\n"
-                    "Acknowledge the gap explicitly: say what was done and what could not be confirmed.\n"
-                    "Do not claim the file, code, or task is complete unless the outcome block says VERIFIED."
-                )
-            else:
-                tail_system_blocks.append(
-                    "[FILE_WORK_REPORT_RULE]\n"
-                    "This completed turn was a FILE_WORK task.\n"
-                    "Use LAST_LOG and the stage success condition as the only authoritative completion evidence.\n"
-                    "Do not restate or infer full file contents unless the current runtime evidence explicitly contains an exact readback.\n"
-                    "If the evidence only proves a state change, report the verified change only.\n"
-                    "Do not claim that code, a file, or an executable is ready merely because RUN_CODE or FILE_OP executed.\n"
-                    "If current runtime evidence does not verify the requested artifact state, say only what was actually verified."
-                )
+        for builder in _TAIL_BLOCK_REGISTRY:
+            block = builder(tail_context)
+            if block:
+                tail_system_blocks.append(block)
 
         direct_answer = ""
         if runtime.outcome_paused and runtime.proposal_answer:
@@ -354,7 +489,10 @@ class ContextPackEngine:
                 direct_answer = runtime.exact_file_read_answer
             elif runtime.file_lookup_answer and runtime.latest_stage_is_targeted_lookup:
                 direct_answer = runtime.file_lookup_answer
-            elif runtime.verified_file_work_answer:
+            elif runtime.verified_file_work_answer and runtime.outcome_block.count("=== STAGE") <= 1:
+                # For multi-stage tasks (more than one STAGE block) let the LLM
+                # produce a full summary that covers every stage.  The fast-path
+                # only covers single-stage, single-file completions reliably.
                 direct_answer = runtime.verified_file_work_answer
 
         return PersonaDirectivePack(
@@ -383,6 +521,24 @@ class ContextPackEngine:
             lines.append("Procedure: " + " -> ".join(procedure))
         if persona_hint:
             lines.append(persona_hint)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_verification_result_block(runtime: PersonaRuntimePack) -> str:
+        verdict = str(runtime.verification_verdict or "").strip().upper()
+        if not verdict:
+            return ""
+        lines = ["[VERIFICATION_RESULT]"]
+        lines.append(f"Verdict: {verdict}")
+        if runtime.verification_checker_path:
+            lines.append(f"Checker path: {runtime.verification_checker_path}")
+        if runtime.verification_recommendation:
+            lines.append(f"Recommendation: {runtime.verification_recommendation}")
+        if runtime.verification_evidence:
+            lines.append(f"Evidence: {runtime.verification_evidence}")
+        lines.append("Treat this block as the authoritative verification outcome for the latest stage.")
+        if verdict != "VERIFIED":
+            lines.append("Do not narrate full success unless this block says VERIFIED.")
         return "\n".join(lines)
 
     def _collect_runtime_context_paths(self, orc) -> List[str]:
@@ -453,3 +609,169 @@ class ContextPackEngine:
                 return ""
 
         return normalized
+
+
+@register_tail_block
+def _tail_block_no_mutation_rule(ctx: TailBlockContext) -> str:
+    if ctx.runtime.outcome_block or str(ctx.route.get("decision") or "").upper() != "CHAT":
+        return ""
+    return (
+        "[NO_MUTATION_RULE]\n"
+        "This turn did not execute any task, event, or record update.\n"
+        "Do not claim that you updated records, logged anything, scheduled anything, "
+        "or changed the user's state unless a completed system outcome explicitly says so."
+    )
+
+
+@register_tail_block
+def _tail_block_context_arbitration(ctx: TailBlockContext) -> str:
+    return render_context_arbitration_block(
+        resolve_persona_turn_type(
+            route_decision=ctx.route,
+            reporter_just_ran=ctx.reporter_just_ran,
+            ingested_document_chat=ctx.ingested_document_chat,
+            document_focus_active=ctx.document_focus_active,
+        )
+    )
+
+
+@register_tail_block
+def _tail_block_document_qa_rule(ctx: TailBlockContext) -> str:
+    if not ctx.ingested_document_chat:
+        return ""
+    return (
+        "[DOCUMENT_QA_RULE]\n"
+        "This is a read-only question about ingested document memory already supplied in system context.\n"
+        "Use [DOCUMENT FOCUS] as the only authoritative document evidence for this turn.\n"
+        "Do not supplement from raw [INGESTED DOCUMENTS], retrieved memory, earlier turns, or general/world knowledge.\n"
+        "Do not narrate file-tool failures, PDF read attempts, or timeout errors unless the current outcome block explicitly says they happened in this turn.\n"
+        "If [DOCUMENT FOCUS] says no grounded answer could be extracted, say you do not know from the supplied document instead of inventing missing content."
+    )
+
+
+@register_tail_block
+def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
+    if not ctx.reporter_just_ran:
+        return ""
+    return (
+        "[SEARCH_REPORT_RULE]\n"
+        "This turn is the final user-facing summary of a search that already completed.\n"
+        "The user already received an initial response while the search was running.\n"
+        "Use the completed search summary to extend, refine, or correct that earlier response.\n"
+        "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
+        "Answer directly from the completed search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this completed search."
+    )
+
+
+@register_tail_block
+def _tail_block_explain_last_turn(ctx: TailBlockContext) -> str:
+    notice = dict((ctx.route or {}).get("system_notice") or {})
+    if str(notice.get("kind") or "").strip().lower() != "explain_last_turn":
+        return ""
+    return render_explain_last_turn_block(
+        dict(notice.get("snapshot") or {}),
+        detail_level=str(notice.get("detail_level") or "default").strip().lower() or "default",
+    )
+
+
+@register_tail_block
+def _tail_block_active_skill(ctx: TailBlockContext) -> str:
+    return ContextPackEngine._render_persona_active_skill_block(ctx.skill)
+
+
+@register_tail_block
+def _tail_block_verification_result(ctx: TailBlockContext) -> str:
+    return ContextPackEngine._render_verification_result_block(ctx.runtime)
+
+
+@register_tail_block
+def _tail_block_engineering_support(ctx: TailBlockContext) -> str:
+    if not ctx.codex_escalation or not ctx.runtime.outcome_failed:
+        return ""
+    return (
+        "[ENGINEERING_SUPPORT_RULE]\n"
+        "This task prepared an engineering support brief because the runtime detected a real execution issue.\n"
+        "Be honest that engineering support has been prepared.\n"
+        "Do not claim the issue is already fixed.\n"
+        f"Escalation summary: {str(ctx.codex_escalation.get('summary') or '').strip()}\n"
+        f"Escalation log: {str(ctx.codex_escalation.get('brief_path') or '').strip()}"
+    )
+
+
+@register_tail_block
+def _tail_block_file_work_report(ctx: TailBlockContext) -> str:
+    if not ctx.runtime.needs_file_work_report_rule:
+        return ""
+    if ctx.runtime.verification_verdict == "PARTIAL":
+        detail_parts: list[str] = []
+        if ctx.runtime.verification_checker_path:
+            detail_parts.append(f"Checker path: {ctx.runtime.verification_checker_path}.")
+        if ctx.runtime.verification_recommendation:
+            detail_parts.append(f"Recommendation: {ctx.runtime.verification_recommendation}.")
+        if ctx.runtime.verification_evidence:
+            detail_parts.append(f"Evidence gap: {ctx.runtime.verification_evidence}")
+        return (
+            "[PARTIAL_VERIFICATION_RULE]\n"
+            "Verification returned PARTIAL - the stage executed but artifact state is not fully confirmed.\n"
+            + ("\n".join(detail_parts) + "\n" if detail_parts else "")
+            + "Report only what was actually verified. Do not narrate full success.\n"
+            + "Acknowledge the gap explicitly: say what was done and what could not be confirmed.\n"
+            + "Do not claim the file, code, or task is complete unless the outcome block says VERIFIED."
+        )
+    return (
+        "[FILE_WORK_REPORT_RULE]\n"
+        "This completed turn was a FILE_WORK task.\n"
+        "Use LAST_LOG and the stage success condition as the only authoritative completion evidence.\n"
+        "Do not restate or infer full file contents unless the current runtime evidence explicitly contains an exact readback.\n"
+        "If the evidence only proves a state change, report the verified change only.\n"
+        "Do not claim that code, a file, or an executable is ready merely because RUN_CODE or FILE_OP executed.\n"
+        "If current runtime evidence does not verify the requested artifact state, say only what was actually verified."
+    )
+
+
+@register_tail_block
+def _tail_block_failed_verification(ctx: TailBlockContext) -> str:
+    if ctx.runtime.verification_verdict != "FAILED":
+        return ""
+    detail_parts: list[str] = []
+    if ctx.runtime.verification_checker_path:
+        detail_parts.append(f"Checker path: {ctx.runtime.verification_checker_path}.")
+    if ctx.runtime.verification_recommendation:
+        detail_parts.append(f"Recommendation: {ctx.runtime.verification_recommendation}.")
+    if ctx.runtime.verification_evidence:
+        detail_parts.append(f"Failure evidence: {ctx.runtime.verification_evidence}")
+    return (
+        "[FAILED_VERIFICATION_RULE]\n"
+        "Verification returned FAILED for the latest stage.\n"
+        + ("\n".join(detail_parts) + "\n" if detail_parts else "")
+        + "Report the failure honestly. Do not claim the requested change, update, or completion happened.\n"
+        + "Do not claim any file was moved, copied, renamed, created, or deleted unless "
+        + "FILE_CHECKER VERIFIED evidence explicitly confirms it — the tool ran, but the "
+        + "requested end state was not reached.\n"
+        + "If a state mutation was attempted, do not say records were changed unless the verification result says VERIFIED."
+    )
+
+
+@register_tail_block
+def _tail_block_failed_outcome_no_verification(ctx: TailBlockContext) -> str:
+    """Fire when the stage outcome is FAILED but no typed verification verdict was recorded.
+
+    This covers the gap where the verifier never ran (e.g. the source file was missing,
+    the planner exhausted its steps before reaching the mutating action, or the stage
+    failed during planning rather than execution).  Without this block the persona only
+    sees the [INSTRUCTION] directive in the outcome block — no tail rule reinforces it.
+    """
+    if not ctx.runtime.outcome_failed:
+        return ""
+    # _tail_block_failed_verification already fires when a typed verdict exists — skip.
+    if ctx.runtime.verification_verdict:
+        return ""
+    if not ctx.runtime.outcome_block:
+        return ""
+    return (
+        "[FAILED_OUTCOME_RULE]\n"
+        "This stage FAILED or was incomplete before file-state verification could confirm any mutation.\n"
+        "Do not claim any file was moved, copied, renamed, created, or deleted.\n"
+        "Only report what FILE_CHECKER VERIFIED evidence explicitly confirms.\n"
+        "Use LAST_LOG as the sole authoritative cause of the failure — do not invent a reason."
+    )

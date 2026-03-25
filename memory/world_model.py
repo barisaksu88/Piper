@@ -39,8 +39,11 @@ _ROOT_ATTRIBUTE_LABELS = {
     "likes_interests": "Likes/Interests",
     "future plans": "Future Plans",
     "future_plans": "Future Plans",
-    "date of birth": "Date of Birth",
-    "date_of_birth": "Date of Birth",
+    "date of birth": "Birthday",
+    "date_of_birth": "Birthday",
+    # canonical storage key — label is "Birthday" not "Date of Birth" to avoid the model
+    # confusing it with today's date when the user asks "what's the date?"
+    "birth_date": "Birthday",
     "vehicle": "Vehicle",
     "gender": "Gender",
 }

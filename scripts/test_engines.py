@@ -208,6 +208,51 @@ class TestSummaryEngine:
 
         assert result == ""
 
+    def test_extract_verified_result_uses_operation_label_created(self):
+        """operation_label='created' should produce 'Created …' not 'Updated …'."""
+        import json
+        from core.engines.summary import SummaryEngine
+
+        payload = {
+            "kind": "mutation_verified",
+            "action": "write_text",
+            "paths": ["keep_me.txt", "move_me.txt"],
+            "operation_label": "created",
+            "summary": "Wrote text file: move_me.txt",
+            "reason": "Files exist.",
+        }
+        scratchpad = [
+            "=== STAGE 1 START ===",
+            f"FILE_WORK_VERIFIED_RESULT: {json.dumps(payload)}",
+        ]
+        result = SummaryEngine.extract_verified_result(scratchpad)
+
+        assert result.startswith("Created ")
+        assert "keep_me.txt" in result
+        assert "move_me.txt" in result
+
+    def test_extract_verified_result_uses_operation_label_updated(self):
+        """operation_label='updated' should still produce 'Updated …'."""
+        import json
+        from core.engines.summary import SummaryEngine
+
+        payload = {
+            "kind": "mutation_verified",
+            "action": "write_text",
+            "paths": ["config.txt"],
+            "operation_label": "updated",
+            "summary": "Wrote text file: config.txt",
+            "reason": "File updated.",
+        }
+        scratchpad = [
+            "=== STAGE 1 START ===",
+            f"FILE_WORK_VERIFIED_RESULT: {json.dumps(payload)}",
+        ]
+        result = SummaryEngine.extract_verified_result(scratchpad)
+
+        assert result.startswith("Updated ")
+        assert "config.txt" in result
+
     def test_extract_proposal_finds_proposal(self, sample_scratchpad_with_proposal):
         """Should extract proposal text."""
         from core.engines.summary import SummaryEngine
@@ -1225,6 +1270,22 @@ class TestContextPackEngine:
         mock_brain.recall.assert_called_once()
         call_args = mock_brain.recall.call_args
         assert "name" in call_args[0][0].lower() or "what is my name" in call_args[0][0].lower()
+        assert call_args.kwargs.get("n_results") == 9
+
+    def test_build_persona_pack_filters_low_relevance_brain_hits(self, context_pack_engine, mock_brain):
+        """Should drop low-relevance recall hits from the first-pass pack."""
+        mock_brain.recall.return_value = [
+            {"text": "keep me", "metadata": {"date": "Mar 10, 2026"}, "distance": 0.21},
+            {"text": "drop me", "metadata": {"date": "Mar 10, 2026"}, "distance": 0.61},
+            {"text": "no distance exact hit", "metadata": {"date": "Mar 10, 2026"}},
+        ]
+
+        result = context_pack_engine.build_persona_pack(user_msg="test query")
+
+        assert result.brain_hits == [
+            {"text": "keep me", "metadata": {"date": "Mar 10, 2026"}, "distance": 0.21},
+            {"text": "no distance exact hit", "metadata": {"date": "Mar 10, 2026"}},
+        ]
 
     def test_apply_document_focus(self, context_pack_engine):
         """Should apply document focus."""
@@ -1293,6 +1354,25 @@ class TestContextPackEngine:
 
         assert result.outcome_paused is True
 
+    def test_build_persona_runtime_pack_surfaces_typed_verification_fields(self, context_pack_engine):
+        """Should carry the full typed verification contract into persona runtime."""
+        from core.engines.verification import VerificationResult
+
+        result = context_pack_engine.build_persona_runtime_pack(
+            [],
+            verification_result=VerificationResult.partial(
+                "Current state could not confirm the final artifact.",
+                retry_budget=1,
+                checker_path="STATE_CHECK",
+            ),
+        )
+
+        assert result.outcome_failed is True
+        assert result.verification_verdict == "PARTIAL"
+        assert result.verification_evidence == "Current state could not confirm the final artifact."
+        assert result.verification_recommendation == "RETRY"
+        assert result.verification_checker_path == "STATE_CHECK"
+
     def test_build_persona_directive_pack(self, context_pack_engine):
         """Should build directive pack."""
         from core.contracts import PersonaDirectivePack
@@ -1308,10 +1388,15 @@ class TestContextPackEngine:
             route_decision={"decision": "CHAT"},
         )
 
+        has_arbitration = any(
+            "CONTEXT_ARBITRATION_RULE" in block
+            for block in result.tail_system_blocks
+        )
         has_no_mutation = any(
             "NO_MUTATION_RULE" in block
             for block in result.tail_system_blocks
         )
+        assert has_arbitration
         assert has_no_mutation
 
     def test_build_persona_directive_pack_includes_search_rule(self, context_pack_engine):
@@ -1320,11 +1405,60 @@ class TestContextPackEngine:
             reporter_just_ran=True,
         )
 
+        has_arbitration = any(
+            "CONTEXT_ARBITRATION_RULE" in block
+            for block in result.tail_system_blocks
+        )
         has_search_rule = any(
             "SEARCH_REPORT_RULE" in block
             for block in result.tail_system_blocks
         )
+        assert has_arbitration
         assert has_search_rule
+
+    def test_build_persona_directive_pack_includes_partial_verification_rule(self, context_pack_engine):
+        """Should include typed partial verification guidance for persona."""
+        from core.contracts import PersonaRuntimePack
+
+        runtime = PersonaRuntimePack(
+            outcome_failed=True,
+            needs_file_work_report_rule=True,
+            verification_verdict="PARTIAL",
+            verification_evidence="Current state could not confirm the final artifact.",
+            verification_recommendation="RETRY",
+            verification_checker_path="STATE_CHECK",
+        )
+        result = context_pack_engine.build_persona_directive_pack(
+            persona_runtime=runtime,
+        )
+
+        verification_block = next((block for block in result.tail_system_blocks if "[VERIFICATION_RESULT]" in block), "")
+        partial_block = next((block for block in result.tail_system_blocks if "[PARTIAL_VERIFICATION_RULE]" in block), "")
+        assert "Checker path: STATE_CHECK" in verification_block
+        assert "Recommendation: RETRY" in verification_block
+        assert "Evidence gap: Current state could not confirm the final artifact." in partial_block
+
+    def test_build_persona_directive_pack_includes_failed_verification_rule(self, context_pack_engine):
+        """Should include typed failed verification guidance for persona."""
+        from core.contracts import PersonaRuntimePack
+
+        runtime = PersonaRuntimePack(
+            outcome_failed=True,
+            verification_verdict="FAILED",
+            verification_evidence="Key not found: favorite drink",
+            verification_recommendation="STOP_FAILED",
+            verification_checker_path="MUTATION",
+        )
+        result = context_pack_engine.build_persona_directive_pack(
+            persona_runtime=runtime,
+        )
+
+        verification_block = next((block for block in result.tail_system_blocks if "[VERIFICATION_RESULT]" in block), "")
+        failed_block = next((block for block in result.tail_system_blocks if "[FAILED_VERIFICATION_RULE]" in block), "")
+        assert "Verdict: FAILED" in verification_block
+        assert "Checker path: MUTATION" in verification_block
+        assert "Recommendation: STOP_FAILED" in failed_block
+        assert "Failure evidence: Key not found: favorite drink" in failed_block
 
 
 # =============================================================================
@@ -1600,6 +1734,326 @@ class TestPerformance:
 
         # 100 extractions should complete in under 50ms
         assert elapsed < 0.05, f"Path extraction too slow: {elapsed:.3f}s"
+
+
+# =============================================================================
+# EXECUTOR SPIN-LOOP ESCAPE HINT TESTS
+# =============================================================================
+
+class TestExecutorNonMutatingHints:
+    """
+    Verify that the executor's non-mutating FILE_WORK SECURITY VIOLATION handler
+    always injects an escape hint regardless of stage sub-type.
+
+    These tests use FileStagePolicy directly to validate the conditions that
+    determine which hint branch fires, without spinning up the full executor.
+    """
+
+    def _make_inspection_stage(self) -> dict:
+        """A plain inspection stage: INSPECTION kind, no planning/approval language."""
+        return {
+            "stage_goal": "Inspect the workspace and build an extension inventory with a destination folder chosen for each extension.",
+            "stage_type": "FILE_WORK",
+            "stage_kind": "INSPECTION",
+            "success_condition": "Extension inventory is built.",
+            "allowed_tools": ["FILE_OP"],
+        }
+
+    def _make_planning_stage(self) -> dict:
+        """A planning stage that proposes changes but doesn't execute them."""
+        return {
+            "stage_goal": "Propose a plan for reorganising the project files.",
+            "stage_type": "FILE_WORK",
+            "success_condition": "Proposal is ready for approval.",
+            "allowed_tools": ["FILE_OP"],
+        }
+
+    def test_inspection_stage_is_non_mutating(self):
+        """stage_is_non_mutating_file_stage must be True for an INSPECTION stage."""
+        from core.file_stage_policy import FileStagePolicy
+
+        stage = self._make_inspection_stage()
+        assert FileStagePolicy.stage_is_non_mutating_file_stage(stage), (
+            "INSPECTION stage should be classified as non-mutating"
+        )
+
+    def test_inspection_stage_is_not_planning(self):
+        """is_file_planning_stage must be False for a plain INSPECTION stage."""
+        from core.file_stage_policy import FileStagePolicy
+
+        stage = self._make_inspection_stage()
+        assert not FileStagePolicy.is_file_planning_stage(stage), (
+            "INSPECTION stage (no proposal/plan keywords) must not be a planning stage"
+        )
+
+    def test_inspection_stage_does_not_require_user_approval(self):
+        """stage_requires_user_approval must be False for a plain INSPECTION stage."""
+        from core.file_stage_policy import FileStagePolicy
+
+        stage = self._make_inspection_stage()
+        assert not FileStagePolicy.stage_requires_user_approval(stage), (
+            "INSPECTION stage must not require user approval"
+        )
+
+    def test_planning_stage_is_non_mutating(self):
+        """Planning stages must also be classified as non-mutating."""
+        from core.file_stage_policy import FileStagePolicy
+
+        stage = self._make_planning_stage()
+        assert FileStagePolicy.stage_is_non_mutating_file_stage(stage), (
+            "Planning/proposal stage should be classified as non-mutating"
+        )
+
+    def test_planning_stage_is_planning(self):
+        """is_file_planning_stage must be True for a stage with proposal language."""
+        from core.file_stage_policy import FileStagePolicy
+
+        stage = self._make_planning_stage()
+        assert FileStagePolicy.is_file_planning_stage(stage), (
+            "Planning/proposal stage should be classified as a planning stage"
+        )
+
+    def test_inspection_hint_differs_from_planning_hint(self):
+        """
+        Confirm the two hint strings the executor injects are meaningfully different.
+        This documents the branching contract: inspection stages get a different
+        message than planning/approval stages.
+        """
+        planning_hint = (
+            "SYSTEM HINT: Proposal/approval stages must not write files. "
+            "Return tool null with is_complete true and put the proposal text in the optional proposal field."
+        )
+        inspection_hint = (
+            "SYSTEM HINT: This stage is inspection-only — no file writes are permitted. "
+            "Return tool null with is_complete true and summarise your findings in the proposal field."
+        )
+        assert planning_hint != inspection_hint
+        assert "inspection-only" in inspection_hint
+        assert "Proposal/approval" in planning_hint
+
+    def test_inspection_hint_contains_is_complete_directive(self):
+        """The inspection-stage escape hint must tell the planner to set is_complete true."""
+        hint = (
+            "SYSTEM HINT: This stage is inspection-only — no file writes are permitted. "
+            "Return tool null with is_complete true and summarise your findings in the proposal field."
+        )
+        assert "is_complete true" in hint
+        assert "proposal" in hint
+
+    def test_run_code_inspection_hint_contains_is_complete_directive(self):
+        """The RUN_CODE variant of the escape hint must also carry is_complete true."""
+        hint = (
+            "SYSTEM HINT: This stage is inspection-only — no code execution or file writes are permitted. "
+            "Return tool null with is_complete true and summarise your findings in the proposal field."
+        )
+        assert "is_complete true" in hint
+        assert "proposal" in hint
+        assert "code execution" in hint
+
+
+# =============================================================================
+# EXCLUDE_FILES PREFIX MATCHING TESTS
+# =============================================================================
+
+class TestConsolidateExcludePrefix:
+    """
+    Verify that consolidate_by_extension's exclusion logic handles glob-prefix
+    patterns (e.g. "keep_*") in addition to exact filenames.
+
+    These tests exercise only the exclusion parsing + move-planning path; they
+    do not execute real file moves (the workspace files are created in tmp_path
+    so shutil.move calls are safe, and the after_inventory is a no-op stub).
+    """
+
+    _EMPTY_INVENTORY = {
+        "files_by_extension": {},
+        "destination_hints": {},
+        "extension_counts": {},
+        "folder_extension_counts": {},
+        "empty_dirs": [],
+    }
+
+    def _fake_runtime(self, ws):
+        """Return a FakeRuntime configured for the given workspace Path."""
+        empty_inv = self._EMPTY_INVENTORY
+
+        class FakeRuntime:
+            workspace = ws
+            _call_count = 0
+
+            def _normalize_extension_list(self, v):
+                return v or []
+
+            def _raise_if_cancelled(self, t=None):
+                pass
+
+            def _build_extension_inventory(self, root, ws_root, extensions=None):
+                # First call: real inventory for planning; second call (after moves): empty.
+                FakeRuntime._call_count += 1
+                if FakeRuntime._call_count > 1:
+                    return empty_inv
+                files_by_ext: dict = {}
+                for f in root.iterdir():
+                    if f.is_file():
+                        ext = f.suffix.lower() or "[no_ext]"
+                        files_by_ext.setdefault(ext, []).append(f)
+                hints = {ext: "dest_" + ext.lstrip(".") for ext in files_by_ext}
+                return {
+                    "files_by_extension": files_by_ext,
+                    "destination_hints": hints,
+                    "extension_counts": {e: len(v) for e, v in files_by_ext.items()},
+                    "folder_extension_counts": {},
+                    "empty_dirs": [],
+                }
+
+            def _normalize_extension_token(self, v):
+                return v
+
+            def _is_within_dir(self, src, dst):
+                return src.parent == dst
+
+            def _workspace_rel(self, p, workspace_root=None):
+                try:
+                    return str(p.relative_to(ws))
+                except ValueError:
+                    return str(p)
+
+            def _sha1_file(self, p):
+                return "unique_" + p.name
+
+        return FakeRuntime()
+
+    def test_exact_exclusion_still_works(self, tmp_path):
+        """Exact filename in exclude_files must still be excluded."""
+        from tools.workspace_extension_actions import handle_consolidate_by_extension
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "keep_me.txt").write_text("keep")
+        (ws / "move_me.txt").write_text("move")
+
+        result = handle_consolidate_by_extension(
+            self._fake_runtime(ws),
+            {"root": ".", "exclude_files": ["keep_me.txt"]},
+            "consolidate_by_extension",
+            lambda m, **kw: {"error": m},
+        )
+        moved_srcs = [m["src"] for m in result.get("requested_moves", [])]
+        assert not any("keep_me" in s for s in moved_srcs), "keep_me.txt should be excluded"
+        assert any("move_me" in s for s in moved_srcs), "move_me.txt should be moved"
+
+    def test_glob_prefix_exclusion(self, tmp_path):
+        """'keep_*' in exclude_files must exclude all files starting with 'keep_'."""
+        from tools.workspace_extension_actions import handle_consolidate_by_extension
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "keep_me.txt").write_text("keep1")
+        (ws / "keep_notes.txt").write_text("keep2")
+        (ws / "move_me.txt").write_text("move")
+
+        result = handle_consolidate_by_extension(
+            self._fake_runtime(ws),
+            {"root": ".", "exclude_files": ["keep_*"]},
+            "consolidate_by_extension",
+            lambda m, **kw: {"error": m},
+        )
+        moved_srcs = [m["src"] for m in result.get("requested_moves", [])]
+        assert not any("keep_" in s for s in moved_srcs), \
+            f"No keep_ files should be moved, got: {moved_srcs}"
+        assert any("move_me" in s for s in moved_srcs), "move_me.txt should be moved"
+
+    def test_glob_prefix_case_insensitive(self, tmp_path):
+        """Prefix matching must be case-insensitive."""
+        from tools.workspace_extension_actions import handle_consolidate_by_extension
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "Keep_upper.txt").write_text("k")
+        (ws / "normal.txt").write_text("n")
+
+        result = handle_consolidate_by_extension(
+            self._fake_runtime(ws),
+            {"root": ".", "exclude_files": ["keep_*"]},
+            "consolidate_by_extension",
+            lambda m, **kw: {"error": m},
+        )
+        moved_srcs = [m["src"] for m in result.get("requested_moves", [])]
+        assert not any("Keep_upper" in s for s in moved_srcs), \
+            "Case-insensitive prefix should exclude Keep_upper.txt"
+        assert any("normal" in s for s in moved_srcs)
+
+
+# =============================================================================
+# ENGINEERING ESCALATION DETECTOR TESTS
+# =============================================================================
+
+class TestEngineeringEscalation:
+    """
+    Verify EngineeringEscalationDetector suppresses escalation for terminal
+    'file not found' file_checker_failed signals and still fires for genuine
+    repeated failures.
+    """
+
+    def _detector(self, tmp_path):
+        from core.engineering_support import EngineeringEscalationDetector
+        return EngineeringEscalationDetector(tmp_path / "signals.jsonl")
+
+    def _signal(self, details: str) -> dict:
+        return {
+            "kind": "file_checker_failed",
+            "severity": "error",
+            "source": "file_checker",
+            "summary": f"FILE_CHECKER FAILED: {details}",
+            "details": details,
+            "stage_goal": "Edit stent_file.txt",
+            "stage_type": "FILE_WORK",
+            "tool": "EDIT_FILE",
+        }
+
+    def _record(self, detector, signal):
+        return detector.record_signal(
+            signal,
+            user_msg="Edit stent_file.txt",
+            route_decision=None,
+            context_card=None,
+            scratchpad=None,
+        )
+
+    def test_missing_file_suppresses_escalation(self, tmp_path):
+        """Repeated file_checker_failed with 'is missing at' details must NOT escalate."""
+        det = self._detector(tmp_path)
+        sig = self._signal("Expected text file is missing at workspace/stent_file.txt.")
+        r1 = self._record(det, sig)
+        r2 = self._record(det, sig)
+        assert r1 is None, "First signal should never escalate"
+        assert r2 is None, "Missing-file terminal failure must not escalate"
+
+    def test_genuine_failure_still_escalates(self, tmp_path):
+        """Repeated file_checker_failed with a real edit problem MUST escalate."""
+        det = self._detector(tmp_path)
+        sig = self._signal("Text state at stent_file.txt does not satisfy the stage (missing required text: test).")
+        r1 = self._record(det, sig)
+        r2 = self._record(det, sig)
+        assert r1 is None, "First signal should not escalate"
+        assert r2 is not None, "Genuine repeated failure should escalate"
+        assert r2["decision"] == "ask_codex"
+
+    def test_not_found_phrase_suppresses(self, tmp_path):
+        """'not found' in details also suppresses escalation."""
+        det = self._detector(tmp_path)
+        sig = self._signal("Target file not found in workspace.")
+        r1 = self._record(det, sig)
+        r2 = self._record(det, sig)
+        assert r2 is None, "'not found' details must suppress escalation"
+
+    def test_does_not_exist_suppresses(self, tmp_path):
+        """'does not exist at' in details suppresses escalation."""
+        det = self._detector(tmp_path)
+        sig = self._signal("File does not exist at workspace/foo.txt.")
+        self._record(det, sig)
+        r2 = self._record(det, sig)
+        assert r2 is None
 
 
 # =============================================================================

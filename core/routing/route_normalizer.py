@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 import re
-from typing import Any, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 from core.contracts import RouteDecision, StageCard
+from core.file_target_confirmation import (
+    build_confirmed_route_decision,
+    classify_pending_file_target_confirmation_reply,
+    extract_pending_file_target_confirmation,
+)
+from core.engines.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
+from core.routing.environment_queries import looks_like_live_environment_query
+from core.runtime_context import extract_latest_runtime_context_fields
+from core.turn_explanation import (
+    extract_last_turn_explanation_snapshot,
+    looks_like_turn_explanation_followup,
+    looks_like_turn_explanation_request,
+)
 from core.routing.route_patterns import (
     DIRECT_FILE_COPY_RE,
     DIRECT_FILE_CREATE_TEXT_RE,
@@ -20,6 +34,7 @@ from core.routing.route_patterns import (
     FILE_TYPE_GROUPING_RE,
     SPECULATIVE_ACTION_RE,
     EXPLICIT_ASSISTANT_REQUEST_RE,
+    _FILE_PATH_TOKEN,
 )
 from core.routing.route_subjects import (
     looks_like_task_creation,
@@ -35,10 +50,15 @@ _DOCUMENT_NAMING_HINT_RE = re.compile(
     r"(?i)\b(name|naming|filename|title)\b.*\b(match|matching|different|mismatch)\b|\bdifferent filename\b|\bnot found under that specific name\b"
 )
 _QUOTED_TEXT_RE = re.compile(r"'([^']+)'|\"([^\"]+)\"")
-_FILE_TARGET_RE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]{1,8}")
+_FILE_TARGET_RE = re.compile(r"[\w./\\-]+\.(?=[A-Za-z0-9]{1,8}\b)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,8}")
+_DELETE_REQUEST_RE = re.compile(
+    r"(?is)^(?:in the workspace,\s*)?(?:please\s+)?(?:delete|remove)\s+(?P<body>.+?)[.?!]*$"
+)
 _GENERIC_LOOKUP_SUBJECTS = {
     "document",
     "doc",
+    "eg",
+    "e g",
     "file",
     "list",
     "note",
@@ -81,10 +101,81 @@ _PRONOUN_LOOKUP_SUBJECTS = {
     "what s in that",
     "what is in that",
 }
+_GENERIC_DELETE_SUBJECTS = {
+    "it",
+    "this",
+    "that",
+    "file",
+    "the file",
+    "this file",
+    "that file",
+    "document",
+    "the document",
+    "this document",
+    "that document",
+}
+_FILEISH_DELETE_HINT_RE = re.compile(
+    r"(?i)\b(file|files|doc|docs|document|documents|note|notes|list|lists|txt|text|log|logs|config|configs|report|reports|script|scripts|code|folder|folders|directory|directories|image|images|photo|photos|pdf|json|yaml|yml|csv)\b"
+)
 _INTERACTIVE_VERIFY_RE = re.compile(r"\b(verify|confirm|check|observe|test|try|report)\b", re.IGNORECASE)
 _INTERACTIVE_CONTROL_RE = re.compile(
     r"\b(controls?|input|movement|left|right|up|down|keyboard|mouse|responsive|respond|press|click|catch|gameplay|works?)\b",
     re.IGNORECASE,
+)
+_FILE_EDIT_REQUEST_RE = re.compile(r"\b(edit|update|modify|change|rewrite)\b", re.IGNORECASE)
+_SECOND_LINE_APPEND_RE = re.compile(
+    r"\b(?:also\s+)?add\s+(?:a\s+)?(?:second|new|another)\s+line\b",
+    re.IGNORECASE,
+)
+_APPEND_LINE_REQUEST_RE = re.compile(
+    r"\b(?:append|add|insert)\s+(?:a\s+)?(?:new\s+)?line(?:\s+(?:saying|with|containing))?\b",
+    re.IGNORECASE,
+)
+_LOOKUP_SOURCE_REQUEST_RE = re.compile(
+    r"(?is)^\s*(?:maybe\s+|just\s+)?(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
+    r"(?P<verb>search for|look for|look up|find|locate|check(?: again)?)\s+"
+    r"(?P<subject>.+?)[.?!]*\s*$"
+)
+_WEB_SOURCE_HINT_RE = re.compile(
+    r"(?i)\b(web|internet|online|website|websites|site|sites|google|bing|search engine|latest|current|news|headlines?)\b"
+)
+_WORKSPACE_SOURCE_HINT_RE = re.compile(
+    r"(?i)\b(workspace|file|files|folder|folders|directory|directories|path|paths|filename|filenames|document|documents|doc|docs|pdf|txt|json|yaml|yml|csv|md|note|notes|script|scripts|code)\b"
+)
+_STATEISH_LOOKUP_SUBJECT_RE = re.compile(
+    r"(?i)\b(memory|knowledge|world state|world model|records?|operational logs?)\b"
+)
+_WEB_SOURCE_CHOICE_RE = re.compile(
+    r"(?is)^\s*(?:the\s+)?(?:web|internet|online|web search|search the web|online search)\s*[.!?]*\s*$"
+)
+_WORKSPACE_SOURCE_CHOICE_RE = re.compile(
+    r"(?is)^\s*(?:the\s+)?(?:workspace|workspace files?|workspace file lookup|workspace lookup|file|files|document|documents|docs?)\s*[.!?]*\s*$"
+)
+_LOOKUP_SOURCE_CLARIFICATION_GOAL_RE = re.compile(
+    r"(?is)^clarify lookup source \(web vs workspace\) for:\s*(?P<subject>.+?)\s*$"
+)
+_FINAL_STATE_CORRECTION_RE = re.compile(
+    r"(?is)^\s*(?:i\s+think\s+)?(?:its|it's|the)\s+final\s+state\s+should\s+be\s+(?P<state>.+?)\s*[.?!]*\s*$"
+)
+_FILE_TARGET_CORRECTION_RE = re.compile(
+    r"(?is)^\s*(?:it|that|this|the\s+file)?\s*was\s+(?P<correct>[\w./\\-]+)\s+not\s+(?P<wrong>[\w./\\-]+)\s*[.?!]*\s*$"
+)
+_UNDO_REQUEST_RE = re.compile(
+    r"(?is)^\s*(?:please\s+)?(?:undo(?:\s+(?:that|last\s+task))?|revert(?:\s+(?:that|last\s+task))?)\s*[.!?]*\s*$"
+)
+_COMPOUND_FILE_UNDO_REDO_RE = re.compile(
+    r"(?is)\b(?:create|make|write)\b.*\bfile\b.*\b(?:delete|remove)\b.*\bundo\b.*\bredo\b"
+)
+_COMPOUND_FILE_CREATE_WITH_CONTENT_RE = re.compile(
+    rf"(?is)^(?:in the workspace,\s*)?(?:please\s+)?(?:create|write|make)(?:\s+(?:a|the))?\s+(?:text\s+)?file\s+"
+    rf"(?P<path>{_FILE_PATH_TOKEN})\s+with\s+(?:the\s+)?exact\s+contents?\s*:\s*(?P<content>.+?)\s+(?:and then|then)\b"
+)
+_COMPOUND_FILE_NAMED_WRITE_RE = re.compile(
+    rf"(?is)^(?:in the workspace,\s*)?(?:please\s+)?create\s+(?:a\s+)?file\s+(?:named|called)\s+"
+    rf"(?P<path>{_FILE_PATH_TOKEN})\s+and\s+(?:write|put)\s+(?P<content>.+?)\s+(?:and then|then)\b"
+)
+_ABSENT_STATE_HINT_RE = re.compile(
+    r"(?i)\b(non[- ]?existing|nonexistent|not\s+existing|deleted|removed|gone|absent|missing)\b"
 )
 
 _STATE_MUTATION_ENGINE = StateMutationEngine()
@@ -135,6 +226,22 @@ _CODE_EDIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+NormalizerFn = Callable[[RouteDecision, str, Sequence[dict[str, Any]]], RouteDecision | None]
+RouteInterceptorFn = Callable[[str, Sequence[dict[str, Any]]], dict[str, Any] | None]
+
+_NORMALIZER_REGISTRY: list[NormalizerFn] = []
+_ROUTE_INTERCEPTOR_REGISTRY: list[RouteInterceptorFn] = []
+
+
+def register_normalizer(fn: NormalizerFn) -> NormalizerFn:
+    _NORMALIZER_REGISTRY.append(fn)
+    return fn
+
+
+def register_route_interceptor(fn: RouteInterceptorFn) -> RouteInterceptorFn:
+    _ROUTE_INTERCEPTOR_REGISTRY.append(fn)
+    return fn
+
 
 def normalize_route_decision(
     decision: RouteDecision,
@@ -142,46 +249,896 @@ def normalize_route_decision(
     recent_history: Sequence[dict[str, Any]] | None = None,
 ) -> RouteDecision:
     history = [dict(item) for item in (recent_history or []) if isinstance(item, dict)]
-    speculative_chat = _normalize_speculative_task_idea_to_chat(decision, user_msg)
-    if speculative_chat is not None:
-        return speculative_chat
+    for normalizer in _NORMALIZER_REGISTRY:
+        normalized = normalizer(decision, user_msg, history)
+        if normalized is not None:
+            return normalized
+    return decision
 
-    direct_file_work = _normalize_direct_file_work(user_msg)
-    if direct_file_work is not None:
-        return direct_file_work
 
-    document_lookup = _normalize_workspace_document_lookup(decision, user_msg, history)
-    if document_lookup is not None:
-        return document_lookup
+def detect_route_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    history = [dict(item) for item in (recent_history or []) if isinstance(item, dict)]
+    for interceptor in _ROUTE_INTERCEPTOR_REGISTRY:
+        result = interceptor(text, history)
+        if result is not None:
+            return result
+    return None
 
-    code_target_followup = _normalize_code_target_followup(decision, user_msg, history)
-    if code_target_followup is not None:
-        return code_target_followup
 
-    interactive_runtime = _normalize_interactive_runtime_verification(decision, user_msg)
-    if interactive_runtime is not None:
-        return interactive_runtime
+def annotate_file_stage_kinds(decision: RouteDecision) -> RouteDecision:
+    if not decision or str(decision.get("decision") or "").strip().upper() != "TASK":
+        return decision
 
-    state_normalized = _STATE_MUTATION_ENGINE.normalize_route_decision(
+    card = dict(decision.get("card") or {})
+    stages = card.get("stages") or []
+    if not isinstance(stages, list) or not stages:
+        return decision
+
+    updated_stages: list[StageCard] = []
+    changed = False
+    for raw_stage in stages:
+        if not isinstance(raw_stage, dict):
+            updated_stages.append(raw_stage)
+            continue
+        stage = dict(raw_stage)
+        if str(stage.get("stage_type") or "").strip().upper() == "FILE_WORK":
+            file_stage_kind = str(stage.get("file_stage_kind") or "").strip().upper()
+            if file_stage_kind not in {
+                "INSPECTION",
+                "CONTENT_EDIT",
+                "STRUCTURE_PREP",
+                "BROAD_REORG",
+                "SCRIPT_LAUNCH",
+                "DEPENDENCY_RECOVERY",
+                "UNKNOWN",
+            }:
+                stage["file_stage_kind"] = FileWorkEngine.classify(stage)
+                changed = True
+        updated_stages.append(stage)
+
+    if not changed:
+        return decision
+
+    card["stages"] = updated_stages
+    updated = dict(decision)
+    updated["card"] = card
+    return updated
+
+
+@register_normalizer
+def _registered_speculative_task_chat(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del recent_history
+    return _normalize_speculative_task_idea_to_chat(decision, user_msg)
+
+
+@register_normalizer
+def _registered_live_environment_chat(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del recent_history
+    return _normalize_live_environment_chat(decision, user_msg)
+
+
+@register_normalizer
+def _registered_lookup_source_choice_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_lookup_source_choice_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_explicit_web_search(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del recent_history
+    return _normalize_explicit_web_search(decision, user_msg)
+
+
+@register_normalizer
+def _registered_direct_file_work(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision, recent_history
+    return _normalize_direct_file_work(user_msg)
+
+
+@register_normalizer
+def _registered_ambiguous_lookup_source_clarification(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_ambiguous_lookup_source_clarification(
+        decision,
+        user_msg,
+        recent_history,
+    )
+
+
+@register_normalizer
+def _registered_workspace_document_lookup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_workspace_document_lookup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_workspace_file_delete_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_workspace_file_delete_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_code_target_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_code_target_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_interactive_runtime_verification(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del recent_history
+    return _normalize_interactive_runtime_verification(decision, user_msg)
+
+
+@register_normalizer
+def _registered_state_mutation_normalization(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _STATE_MUTATION_ENGINE.normalize_route_decision(
         decision=decision,
         user_msg=user_msg,
-        recent_history=history,
+        recent_history=recent_history,
     )
-    if state_normalized is not None:
-        return state_normalized
 
+
+@register_normalizer
+def _registered_extension_file_work(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del recent_history
     if not decision or decision.get("decision") != "TASK":
-        return decision
+        return None
 
     card = dict(decision.get("card") or {})
     stages = [dict(stage) for stage in card.get("stages") or []]
     if not stages:
-        return decision
+        return None
+    return _normalize_extension_file_work(decision, card, stages, user_msg)
 
-    extension_file_work = _normalize_extension_file_work(decision, card, stages, user_msg)
-    if extension_file_work is not None:
-        return extension_file_work
-    return decision
+
+@register_route_interceptor
+def _registered_pending_file_target_confirmation_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    pending = extract_pending_file_target_confirmation(recent_history)
+    if pending is None:
+        return None
+    resolution = classify_pending_file_target_confirmation_reply(user_msg, pending)
+    if resolution is None:
+        return None
+
+    exact_target = str(pending.get("exact_target") or "").strip()
+    candidates = [str(item).strip() for item in (pending.get("candidates") or []) if str(item).strip()]
+    chosen_target = str(resolution.get("chosen_target") or "").strip()
+    decision = str(resolution.get("decision") or "").strip().lower()
+
+    if decision in {"confirm", "choose"} and exact_target and chosen_target:
+        base_route = dict(pending.get("route_decision") or {})
+        confirmed_route = build_confirmed_route_decision(
+            base_route,
+            exact_target=exact_target,
+            chosen_target=chosen_target,
+        )
+        return {
+            "kind": "FILE_TARGET_CONFIRMATION",
+            "next_stage": "MANAGER",
+            "stats_decision": str((confirmed_route.get("decision") or "TASK")).strip().upper(),
+            "bypass": "file_target_confirmation",
+            "log_message": f"   -> File-target confirmation resolved to '{chosen_target}'. Skipping Secretary/router LLM.",
+            "route_decision": confirmed_route,
+        }
+
+    if decision == "decline":
+        reply = "Understood. I will leave the workspace unchanged."
+        if exact_target and candidates:
+            reply = f"Understood. I will not substitute `{candidates[0]}` for `{exact_target}`."
+        return {
+            "kind": "FILE_TARGET_CONFIRMATION_CANCELLED",
+            "next_stage": "PERSONA",
+            "stats_decision": "CHAT",
+            "bypass": "file_target_confirmation_cancelled",
+            "log_message": "   -> File-target confirmation declined. Skipping Secretary/router LLM.",
+            "route_decision": {
+                "decision": "CHAT",
+                "interceptor": "FILE_TARGET_CONFIRMATION_CANCELLED",
+                "system_notice": {
+                    "kind": "file_target_confirmation_cancelled",
+                    "reply": reply,
+                    "exact_target": exact_target,
+                    "candidates": candidates[:3],
+                },
+            },
+        }
+
+    return None
+
+
+@register_route_interceptor
+def _registered_file_state_correction_ack_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    notice = _build_file_state_correction_notice(user_msg, recent_history)
+    if notice is None:
+        return None
+    return {
+        "kind": "FILE_STATE_CORRECTION_ACK",
+        "next_stage": "PERSONA",
+        "stats_decision": "CHAT",
+        "bypass": "file_state_correction_ack",
+        "log_message": "   -> File-state correction matched. Skipping Secretary/router LLM.",
+        "route_decision": {
+            "decision": "CHAT",
+            "interceptor": "FILE_STATE_CORRECTION_ACK",
+            "system_notice": notice,
+        },
+    }
+
+
+@register_route_interceptor
+def _registered_file_target_correction_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    notice = _build_file_target_correction_notice(user_msg, recent_history)
+    if notice is None:
+        return None
+    wrong_target = str(notice.get("wrong_target") or "").strip()
+    correct_target = str(notice.get("correct_target") or "").strip()
+    return {
+        "kind": "FILE_TARGET_CORRECTION",
+        "next_stage": "UNDO",
+        "stats_decision": "TASK",
+        "bypass": "file_target_correction",
+        "log_message": "   -> File-target correction matched. Undoing the mistaken file mutation before continuing.",
+        "route_decision": {
+            "decision": "TASK",
+            "interceptor": "FILE_TARGET_CORRECTION",
+            "system_notice": notice,
+            "card": {
+                "goal": f"Undo the mistaken change to '{wrong_target}' after the user corrected the target to '{correct_target}'.",
+                "context": [
+                    f"The previous successful file action targeted '{wrong_target}', but the user corrected the intended target to '{correct_target}'.",
+                    "First undo the mistaken file mutation so the workspace returns to the pre-mistake state.",
+                    "After the undo, report whether the corrected target already satisfies the intended final state.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": f"Undo the mistaken file mutation affecting '{wrong_target}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": f"The mistaken mutation affecting '{wrong_target}' is reverted.",
+                        "file_stage_kind": "CONTENT_EDIT",
+                    }
+                ],
+            },
+        },
+    }
+
+
+@register_route_interceptor
+def _registered_undo_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    del recent_history
+    if _UNDO_REQUEST_RE.match(str(user_msg or "").strip()):
+        return {
+            "kind": "UNDO",
+            "next_stage": "UNDO",
+            "stats_decision": "TASK",
+            "bypass": "undo",
+            "log_message": "   -> Undo interceptor matched. Skipping Secretary/router LLM.",
+            "route_decision": {
+                "decision": "TASK",
+                "interceptor": "UNDO",
+                "card": {
+                    "goal": "Undo the last mutating file task.",
+                    "stages": [
+                        {
+                            "stage_goal": "Undo the most recent mutating file task.",
+                            "stage_type": "FILE_WORK",
+                            "success_condition": "The latest recorded reversible file changes are restored.",
+                            "file_stage_kind": "CONTENT_EDIT",
+                        }
+                    ],
+                },
+            },
+        }
+    return None
+
+
+@register_route_interceptor
+def _registered_explain_last_turn_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+
+    explicit_request = looks_like_turn_explanation_request(text)
+    followup_request = looks_like_turn_explanation_followup(text)
+    if not explicit_request and not followup_request:
+        return None
+
+    snapshot = extract_last_turn_explanation_snapshot(recent_history)
+    if followup_request and not bool((snapshot or {}).get("explain_active")):
+        return None
+
+    detail_level = "detailed" if followup_request else "default"
+    return {
+        "kind": "EXPLAIN",
+        "next_stage": "EXPLAIN",
+        "stats_decision": "CHAT",
+        "bypass": "explain_last_turn",
+        "log_message": "   -> Explain interceptor matched. Skipping Secretary/router LLM.",
+        "route_decision": {
+            "decision": "CHAT",
+            "interceptor": "EXPLAIN",
+            "system_notice": {
+                "kind": "explain_last_turn",
+                "detail_level": detail_level,
+                "available": bool(snapshot),
+                "snapshot": dict(snapshot or {}),
+            },
+        },
+    }
+
+
+def _normalize_live_environment_chat(
+    decision: RouteDecision,
+    user_msg: str,
+) -> RouteDecision | None:
+    if not decision or str(decision.get("decision") or "").strip().upper() != "SEARCH":
+        return None
+
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+
+    # Keep route-time behavior aligned with the readonly-state guard: current
+    # date/time/day questions should stay in CHAT so persona can answer from
+    # [ENVIRONMENT] instead of invoking background search.
+    if not looks_like_live_environment_query(text):
+        return None
+
+    return {"decision": "CHAT"}
+
+
+def _build_file_state_correction_notice(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    match = _FINAL_STATE_CORRECTION_RE.match(text)
+    if not match:
+        return None
+    requested_state = str(match.group("state") or "").strip()
+    if not _ABSENT_STATE_HINT_RE.search(requested_state):
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    if str(runtime.get("previous_route") or "").strip().upper() != "TASK":
+        return None
+    if "FILE OPERATION SUCCESS" not in str(runtime.get("execution_status") or "").upper():
+        return None
+
+    task_goal = str(runtime.get("task_goal") or "").strip()
+    runtime_note = str(runtime.get("runtime_note") or "").strip()
+    target = _extract_named_runtime_file_target(task_goal) or _extract_runtime_note_target(runtime_note)
+    if not target or not _runtime_note_indicates_absent(runtime_note, target):
+        return None
+
+    return {
+        "kind": "file_state_correction_ack",
+        "target": target,
+        "desired_state": "absent",
+        "reply": f"Indeed. The verified final state was already that `{target}` did not exist.",
+    }
+
+
+def _build_file_target_correction_notice(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    match = _FILE_TARGET_CORRECTION_RE.match(text)
+    if not match:
+        return None
+
+    correct_target = _clean_route_path(match.group("correct"))
+    wrong_target = _clean_route_path(match.group("wrong"))
+    if not correct_target or not wrong_target or correct_target.lower() == wrong_target.lower():
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    if str(runtime.get("previous_route") or "").strip().upper() != "TASK":
+        return None
+    if "FILE OPERATION SUCCESS" not in str(runtime.get("execution_status") or "").upper():
+        return None
+
+    task_goal = str(runtime.get("task_goal") or "").strip()
+    runtime_note = str(runtime.get("runtime_note") or "").strip()
+    goal_target = _extract_named_runtime_file_target(task_goal)
+    runtime_target = _extract_runtime_note_target(runtime_note)
+    if goal_target and not _route_targets_match(correct_target, goal_target):
+        return None
+    if runtime_target and not _route_targets_match(wrong_target, runtime_target):
+        return None
+    if not goal_target and not runtime_target:
+        return None
+
+    desired_state = "absent" if _goal_requests_absent_file_state(task_goal) else ""
+    return {
+        "kind": "file_target_correction",
+        "correct_target": goal_target or correct_target,
+        "wrong_target": runtime_target or wrong_target,
+        "desired_state": desired_state,
+    }
+
+
+def _goal_requests_absent_file_state(task_goal: str) -> bool:
+    goal = str(task_goal or "").strip().lower()
+    if not goal:
+        return False
+    return any(
+        phrase in goal
+        for phrase in (
+            "does not exist",
+            "remain deleted",
+            "is deleted",
+            "be deleted",
+            "non-existing final state",
+        )
+    )
+
+
+def _extract_named_runtime_file_target(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    for pattern in (
+        r"(?is)\bfile\s+['\"](?P<target>[^'\"]+)['\"]",
+        r"(?is)\bcreate\s+['\"](?P<target>[^'\"]+)['\"]",
+        r"(?is)\bdelete(?:\s+the\s+file)?\s+['\"](?P<target>[^'\"]+)['\"]",
+        r"(?is)\brestore(?:\s+the\s+file)?\s+['\"](?P<target>[^'\"]+)['\"]",
+    ):
+        match = re.search(pattern, raw)
+        if not match:
+            continue
+        candidate = _clean_route_path(match.group("target"))
+        if candidate:
+            return candidate
+    return _extract_file_target_from_texts([raw])
+
+
+def _extract_runtime_note_target(runtime_note: str) -> str:
+    raw = str(runtime_note or "").strip()
+    if not raw:
+        return ""
+    for pattern in (
+        r"(?is)\b(?:deleted|removed|restored|updated|moved|copied)\s+(?P<target>[\w./\\-]+)",
+        r"(?is)\bin\s+(?P<target>[\w./\\-]+)\b",
+    ):
+        match = re.search(pattern, raw)
+        if not match:
+            continue
+        candidate = _clean_route_path(match.group("target"))
+        if candidate:
+            return candidate
+    return _extract_named_runtime_file_target(raw)
+
+
+def _runtime_note_indicates_absent(runtime_note: str, target: str) -> bool:
+    note = str(runtime_note or "").strip()
+    if not note or not target:
+        return False
+    lowered = note.lower()
+    if not any(token in lowered for token in ("deleted", "removed", "already absent", "already satisfied")):
+        return False
+    noted_target = _extract_runtime_note_target(note)
+    return not noted_target or _route_targets_match(target, noted_target)
+
+
+def _route_targets_match(left: str, right: str) -> bool:
+    left_clean = _clean_route_path(left).lower()
+    right_clean = _clean_route_path(right).lower()
+    if not left_clean or not right_clean:
+        return False
+    if left_clean == right_clean:
+        return True
+
+    left_name = PurePosixPath(left_clean).name
+    right_name = PurePosixPath(right_clean).name
+    if left_name == right_name:
+        return True
+
+    left_stem = PurePosixPath(left_name).stem
+    right_stem = PurePosixPath(right_name).stem
+    return bool(left_stem and right_stem and left_stem == right_stem)
+
+
+def _normalize_explicit_web_search(
+    decision: RouteDecision,
+    user_msg: str,
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text or not _request_explicitly_scopes_lookup_to_web(text):
+        return None
+
+    subject = _extract_lookup_source_subject(text)
+    if not subject:
+        subject = text
+
+    if _request_has_strong_workspace_scope(text):
+        return _build_lookup_source_clarification_card(subject)
+
+    existing_query = str(((decision or {}).get("card") or {}).get("query") or "").strip()
+    query = str(subject or existing_query or text).strip()
+    if not query:
+        return None
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": query,
+        },
+    }
+
+
+def _normalize_lookup_source_choice_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    task_goal = str(runtime.get("task_goal") or "").strip()
+    match = _LOOKUP_SOURCE_CLARIFICATION_GOAL_RE.match(task_goal)
+    if not match:
+        return None
+
+    # A genuine source choice is short ("web", "web pls", "workspace files").
+    # A longer message is a new search intent that should not be hijacked by
+    # this normalizer — let it fall through to _normalize_explicit_web_search.
+    normalized_text = _normalize_lookup_text(text)
+    if len(normalized_text.split()) > 6:
+        return None
+
+    source_choice = _classify_lookup_source_choice(text)
+    if not source_choice:
+        return None
+
+    subject = _clean_document_lookup_subject(match.group("subject"))
+    if not subject:
+        previous_request = str(runtime.get("previous_user_request") or "").strip()
+        subject = _extract_lookup_source_subject(previous_request)
+    if not subject:
+        return None
+
+    if source_choice == "web":
+        return {
+            "decision": "SEARCH",
+            "card": {
+                "query": subject,
+            },
+        }
+
+    explicit_target = _extract_file_target_from_texts([subject])
+    if explicit_target:
+        return _build_explicit_workspace_file_search_card(explicit_target)
+    if _subject_looks_like_workspace_document(subject):
+        return _build_workspace_document_search_card(subject)
+    return None
+
+
+def _classify_lookup_source_choice(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if _WEB_SOURCE_CHOICE_RE.match(raw):
+        return "web"
+    if _WORKSPACE_SOURCE_CHOICE_RE.match(raw):
+        return "workspace"
+
+    normalized = _normalize_lookup_text(raw)
+    if not normalized:
+        return ""
+    tokens = set(normalized.split())
+    if not tokens:
+        return ""
+
+    web_markers = {"web", "internet", "online"}
+    workspace_markers = {
+        "workspace",
+        "file",
+        "files",
+        "document",
+        "documents",
+        "doc",
+        "docs",
+        "folder",
+        "folders",
+        "directory",
+        "directories",
+    }
+
+    has_web = bool(tokens & web_markers) or "search the web" in normalized or "web search" in normalized
+    has_workspace = bool(tokens & workspace_markers) or "my files" in normalized
+
+    if has_web and not has_workspace:
+        return "web"
+    if has_workspace and not has_web:
+        return "workspace"
+    return ""
+
+
+def _normalize_ambiguous_lookup_source_clarification(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+
+    subject = _extract_lookup_source_subject(text)
+    if not subject:
+        return None
+    explicit_web = _request_explicitly_scopes_lookup_to_web(text)
+    explicit_workspace = _request_explicitly_scopes_lookup_to_workspace(text)
+    if explicit_web and _request_has_strong_workspace_scope(text):
+        return _build_lookup_source_clarification_card(subject)
+    if explicit_web or explicit_workspace:
+        return None
+    if _lookup_source_is_resolved_by_context(
+        decision=decision,
+        subject=subject,
+        recent_history=recent_history,
+        current_text=text,
+    ):
+        return None
+
+    return _resolve_ambiguous_lookup_source_from_router(decision, subject)
+
+
+def _resolve_ambiguous_lookup_source_from_router(
+    decision: RouteDecision,
+    subject: str,
+) -> RouteDecision:
+    # This function is only called when the request has no explicit web or
+    # workspace keywords, making the source genuinely ambiguous.  Always ask
+    # for clarification regardless of the router's confidence field — the LLM
+    # over-confidently assigns high confidence to phrasing like "search for X"
+    # even when the source is not determinable from the wording alone.
+    return _build_lookup_source_clarification_card(
+        subject,
+        question_override=str((decision or {}).get("question_if_uncertain") or "").strip(),
+    )
+
+
+def _extract_lookup_source_subject(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = _LOOKUP_SOURCE_REQUEST_RE.match(raw)
+    if not match:
+        return ""
+    subject = _clean_document_lookup_subject(match.group("subject"))
+    if subject:
+        return subject
+    fallback = str(match.group("subject") or "").strip()
+    fallback = re.sub(r"(?i)\b(?:again|please|online|on the web|on web|in the workspace|in my workspace|in workspace)\b", "", fallback).strip(" ,.;:!?")
+    return fallback
+
+
+def _request_explicitly_scopes_lookup_to_web(text: str) -> bool:
+    return bool(_WEB_SOURCE_HINT_RE.search(str(text or "")))
+
+
+def _request_has_strong_workspace_scope(text: str) -> bool:
+    return bool(_WORKSPACE_SOURCE_HINT_RE.search(str(text or "")))
+
+
+def _request_explicitly_scopes_lookup_to_workspace(text: str) -> bool:
+    raw = str(text or "")
+    return bool(_request_has_strong_workspace_scope(raw))
+
+
+def _lookup_source_is_resolved_by_context(
+    *,
+    decision: RouteDecision,
+    subject: str,
+    recent_history: Sequence[dict[str, Any]],
+    current_text: str,
+) -> bool:
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    previous_route = str(runtime.get("previous_route") or "").strip().upper()
+    normalized_subject = _normalize_lookup_text(subject)
+    if not normalized_subject:
+        return False
+
+    recent_file_targets = _collect_recent_file_targets(decision, recent_history, current_text=current_text)
+    recent_subject = _extract_recent_document_lookup_subject(recent_history, current_text=current_text)
+    generic_reference = _lookup_subject_is_generic_reference(normalized_subject)
+
+    if previous_route == "SEARCH":
+        prior_search_text = _normalize_lookup_text(
+            str(runtime.get("search_query") or runtime.get("previous_user_request") or "")
+        )
+        if generic_reference:
+            return True
+        if prior_search_text and (
+            normalized_subject in prior_search_text or prior_search_text in normalized_subject
+        ):
+            return True
+
+    decision_source_scope = str((decision or {}).get("source_scope") or "").strip().lower()
+    explicit_target = ""
+    if decision_source_scope == "workspace" or _request_has_strong_workspace_scope(current_text):
+        explicit_target = _extract_explicit_file_target_from_decision(decision)
+    if explicit_target and _lookup_subject_matches_file_reference(normalized_subject, explicit_target):
+        return True
+
+    if generic_reference and (recent_file_targets or recent_subject or _extract_runtime_relevant_file_targets(recent_history)):
+        return True
+
+    if recent_subject:
+        recent_normalized = _normalize_lookup_text(recent_subject)
+        if recent_normalized and (
+            normalized_subject in recent_normalized or recent_normalized in normalized_subject
+        ):
+            return True
+
+    for target in recent_file_targets:
+        if _lookup_subject_matches_file_reference(normalized_subject, target):
+            return True
+
+    return False
+
+
+def _lookup_subject_matches_file_reference(normalized_subject: str, file_reference: str) -> bool:
+    clean_target = _clean_route_path(file_reference)
+    if not clean_target:
+        return False
+    basename = PurePosixPath(clean_target).name
+    stem = PurePosixPath(clean_target).stem
+    variants = {
+        _normalize_lookup_text(clean_target),
+        _normalize_lookup_text(basename),
+        _normalize_lookup_text(stem),
+    }
+    return any(
+        normalized_subject and variant and (
+            normalized_subject == variant
+            or normalized_subject in variant
+            or variant in normalized_subject
+        )
+        for variant in variants
+    )
+
+
+def _lookup_subject_is_generic_reference(normalized_subject: str) -> bool:
+    return normalized_subject in _GENERIC_LOOKUP_SUBJECTS or normalized_subject in _PRONOUN_LOOKUP_SUBJECTS
+
+
+def _route_looks_like_workspace_lookup(decision: RouteDecision) -> bool:
+    if not decision or str(decision.get("decision") or "").strip().upper() != "TASK":
+        return False
+    stages = [dict(stage) for stage in ((decision.get("card") or {}).get("stages") or []) if isinstance(stage, dict)]
+    if not stages:
+        return False
+    return any(str(stage.get("stage_type") or "").strip().upper() == "FILE_WORK" for stage in stages)
+
+
+def _build_high_confidence_workspace_lookup_route(
+    decision: RouteDecision,
+    subject: str,
+) -> RouteDecision:
+    if _route_looks_like_workspace_lookup(decision):
+        preserved = dict(decision)
+        preserved.pop("question_if_uncertain", None)
+        return preserved
+
+    explicit_target = _extract_file_target_from_texts([subject])
+    if explicit_target:
+        return _build_explicit_workspace_file_search_card(explicit_target)
+    return _build_workspace_document_search_card(subject)
+
+
+def _build_lookup_source_clarification_card(
+    subject: str,
+    *,
+    question_override: str = "",
+) -> RouteDecision:
+    clean_subject = " ".join(str(subject or "").split()).strip()
+    override = " ".join(str(question_override or "").split()).strip()
+    override_lower = override.lower()
+    if override and "web" in override_lower and "workspace" in override_lower:
+        question = override
+        if clean_subject:
+            goal = f"Clarify lookup source (web vs workspace) for: {clean_subject}"
+        else:
+            goal = "Clarify lookup source (web vs workspace) for: the requested item"
+    elif clean_subject:
+        question = (
+            f'Did you want me to search the web for "{clean_subject}", '
+            "or look for it in your workspace files?"
+        )
+        goal = f"Clarify lookup source (web vs workspace) for: {clean_subject}"
+    else:
+        question = "Did you want me to search the web, or look in your workspace files?"
+        goal = "Clarify lookup source (web vs workspace) for: the requested item"
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": goal,
+            "context": [
+                "The latest request asks Piper to find or search for something, but the source is ambiguous.",
+                "Do not guess between web search and workspace file lookup when the user's intent is unclear.",
+                f"Preferred clarification question: {question}",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Ask the user: {question}",
+                    "stage_type": "CHAT",
+                    "success_condition": "A concise source-clarification question is ready for the user.",
+                    "allowed_tools": [],
+                }
+            ],
+        },
+    }
 
 
 def _normalize_speculative_task_idea_to_chat(
@@ -237,6 +1194,35 @@ def _normalize_workspace_document_lookup(
     text = (user_msg or "").strip()
     if not text:
         return None
+    workspace_scoped = _request_has_strong_workspace_scope(text)
+    if _request_explicitly_scopes_lookup_to_web(text) and not workspace_scoped:
+        return None
+
+    recent_subject = _extract_recent_document_lookup_subject(
+        recent_history,
+        current_text=text,
+    )
+    recent_workspace_context = bool(
+        (recent_subject and _subject_looks_like_workspace_document(recent_subject))
+        or _extract_recent_explicit_file_target(recent_history, current_text=text)
+        or _extract_runtime_relevant_file_targets(recent_history)
+    )
+    if (
+        str((decision or {}).get("decision") or "").strip().upper() == "SEARCH"
+        and not workspace_scoped
+        and not recent_workspace_context
+    ):
+        return None
+
+    current_subject = _extract_document_lookup_subject(text)
+    if _subject_looks_like_workspace_document(current_subject):
+        if _looks_like_document_read_request(text):
+            return _build_workspace_document_read_card(current_subject)
+        if _looks_like_document_search_request(text, decision):
+            return _build_workspace_document_search_card(current_subject)
+
+    if _looks_like_document_read_request(text) and _subject_looks_like_workspace_document(recent_subject):
+        return _build_workspace_document_read_card(recent_subject)
 
     explicit_target = _extract_explicit_file_target_from_decision(decision) or _extract_recent_explicit_file_target(
         recent_history,
@@ -249,10 +1235,7 @@ def _normalize_workspace_document_lookup(
     if explicit_target and _looks_like_document_search_request(text, decision):
         return _build_explicit_workspace_file_search_card(explicit_target)
 
-    subject = _extract_document_lookup_subject(text) or _extract_recent_document_lookup_subject(
-        recent_history,
-        current_text=text,
-    )
+    subject = current_subject or recent_subject
     if not _subject_looks_like_workspace_document(subject):
         return None
 
@@ -317,6 +1300,36 @@ def _normalize_interactive_runtime_verification(
     new_card["stages"] = updated_stages
     normalized["card"] = new_card
     return normalized
+
+
+def _normalize_workspace_file_delete_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+
+    match = _DELETE_REQUEST_RE.match(text)
+    if not match:
+        return None
+
+    explicit_target = _extract_file_target_from_texts([text, str(match.group("body") or "")])
+    if explicit_target:
+        return _build_explicit_workspace_file_delete_card(explicit_target)
+
+    body = _clean_delete_followup_subject(match.group("body"))
+    if not body:
+        return None
+
+    recent_targets = _collect_recent_file_targets(decision, recent_history, current_text=text)
+    resolved_target = _resolve_delete_followup_target(body, recent_targets)
+    if not resolved_target:
+        if not _subject_looks_like_file_delete_reference(body):
+            return None
+        return _build_workspace_file_delete_search_card(body)
+    return _build_explicit_workspace_file_delete_card(resolved_target)
 
 
 def _normalize_code_target_followup(
@@ -620,13 +1633,61 @@ def _build_explicit_workspace_file_read_card(path: str) -> RouteDecision:
     }
 
 
+def _build_explicit_workspace_file_delete_card(path: str) -> RouteDecision:
+    clean_path = _clean_route_path(path)
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Delete '{clean_path}'.",
+            "context": [
+                "The workspace root is '.'.",
+                f"The target file path is '{clean_path}'.",
+                f"Use the exact target path '{clean_path}' directly. Do not search for a different file unless that exact path is first confirmed missing.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Delete the file '{clean_path}'.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"'{clean_path}' does not exist in the workspace.",
+                    "allowed_tools": ["FILE_OP"],
+                    "active_targets": [clean_path],
+                }
+            ],
+        },
+    }
+
+
+def _build_workspace_file_delete_search_card(subject: str) -> RouteDecision:
+    quoted_subject = json.dumps(subject, ensure_ascii=False)
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Locate the workspace file that best matches {quoted_subject} and delete it.",
+            "context": [
+                "The workspace root is '.'.",
+                f"The requested file reference is {quoted_subject}.",
+                "Prefer filename matching before assuming the file is absent.",
+                "Delete only the best workspace file match for this reference. If no plausible match exists, report that no such file was found.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Find the workspace file that best matches {quoted_subject} and delete it if found.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": "A matching file is deleted, or the absence of any plausible file match is confirmed.",
+                    "allowed_tools": ["FILE_OP"],
+                }
+            ],
+        },
+    }
+
+
 def _extract_document_lookup_subject(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
         return ""
     patterns = (
-        re.compile(r"(?i)\b(?:tell me what it says in|what does it say in|what(?:'s| is) in)\s+(?:the\s+)?(?P<subject>.+?)(?:[?!.]|$)"),
-        re.compile(r"(?i)\b(?:search for|look for|find|locate|open|read|show me)\s+(?:the\s+)?(?P<subject>.+?)(?:[?!.]|$)"),
+        re.compile(r"(?is)\b(?:tell me what it says in|what does it say in|what(?:'s| is) in)\s+(?:the\s+)?(?P<subject>.+?)\s*$"),
+        re.compile(r"(?is)\b(?:search for|look for|find|locate|open|read|show me)\s+(?:the\s+)?(?P<subject>.+?)\s*$"),
     )
     for pattern in patterns:
         match = pattern.search(raw)
@@ -689,6 +1750,8 @@ def _subject_looks_like_workspace_document(subject: str) -> bool:
     normalized = _normalize_lookup_text(subject)
     if not normalized or normalized in _GENERIC_LOOKUP_SUBJECTS or normalized in _PRONOUN_LOOKUP_SUBJECTS:
         return False
+    if _STATEISH_LOOKUP_SUBJECT_RE.search(normalized):
+        return False
     return normalized not in _BLOCKED_LOOKUP_SUBJECTS
 
 
@@ -696,13 +1759,20 @@ def _extract_explicit_file_target_from_decision(decision: RouteDecision) -> str:
     if not decision or decision.get("decision") != "TASK":
         return ""
     card = dict(decision.get("card") or {})
+    for stage in card.get("stages") or []:
+        if not isinstance(stage, dict):
+            continue
+        for target in stage.get("active_targets") or []:
+            cleaned = _clean_route_path(target)
+            if cleaned:
+                return cleaned
     blobs = [str(card.get("goal") or "")]
     blobs.extend(str(item) for item in (card.get("context") or []))
     for stage in card.get("stages") or []:
         if isinstance(stage, dict):
             blobs.append(str(stage.get("stage_goal") or ""))
             blobs.append(str(stage.get("success_condition") or ""))
-    return _extract_file_target_from_texts(blobs)
+    return _extract_named_runtime_file_target(" ".join(blobs)) or _extract_file_target_from_texts(blobs)
 
 
 def _extract_recent_explicit_file_target(
@@ -710,14 +1780,24 @@ def _extract_recent_explicit_file_target(
     *,
     current_text: str,
 ) -> str:
+    matches = _extract_recent_explicit_file_targets(recent_history, current_text=current_text)
+    return matches[0] if matches else ""
+
+
+def _extract_recent_explicit_file_targets(
+    recent_history: Sequence[dict[str, Any]],
+    *,
+    current_text: str,
+) -> list[str]:
+    matches: list[str] = []
     for message in reversed(recent_history):
         content = str(message.get("content") or "").strip()
         if not content or content == current_text:
             continue
         target = _extract_file_target_from_texts([content])
         if target:
-            return target
-    return ""
+            matches.append(target)
+    return matches
 
 
 def _extract_file_target_from_texts(texts: Sequence[str]) -> str:
@@ -727,6 +1807,85 @@ def _extract_file_target_from_texts(texts: Sequence[str]) -> str:
             if cleaned:
                 return cleaned
     return ""
+
+
+def _extract_runtime_relevant_file_targets(
+    recent_history: Sequence[dict[str, Any]],
+) -> list[str]:
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    raw = str(runtime.get("relevant_paths") or "").strip()
+    if not raw:
+        return []
+    targets: list[str] = []
+    for part in raw.split("|"):
+        cleaned = _clean_route_path(part)
+        if cleaned:
+            targets.append(cleaned)
+    return targets
+
+
+def _collect_recent_file_targets(
+    decision: RouteDecision,
+    recent_history: Sequence[dict[str, Any]],
+    *,
+    current_text: str,
+) -> list[str]:
+    ordered: list[str] = []
+    decision_source_scope = str((decision or {}).get("source_scope") or "").strip().lower()
+    current_decision_target = ""
+    if decision_source_scope == "workspace" or _request_has_strong_workspace_scope(current_text):
+        current_decision_target = _extract_explicit_file_target_from_decision(decision)
+    for candidate in (
+        current_decision_target,
+        *_extract_recent_explicit_file_targets(recent_history, current_text=current_text),
+        *_extract_runtime_relevant_file_targets(recent_history),
+    ):
+        cleaned = _clean_route_path(candidate)
+        if cleaned and cleaned not in ordered:
+            ordered.append(cleaned)
+    return ordered
+
+
+def _clean_delete_followup_subject(raw_subject: str) -> str:
+    subject = str(raw_subject or "").strip().strip(".,;:!?")
+    subject = re.sub(r"(?i)^(?:the|this|that)\s+", "", subject).strip()
+    subject = re.sub(r"(?i)\s+(?:from the workspace|in the workspace)$", "", subject).strip()
+    return subject
+
+
+def _resolve_delete_followup_target(subject: str, recent_targets: Sequence[str]) -> str:
+    normalized_subject = _normalize_lookup_text(subject)
+    if not normalized_subject or not recent_targets:
+        return ""
+    if normalized_subject in _GENERIC_DELETE_SUBJECTS:
+        return str(recent_targets[0]).strip()
+
+    for target in recent_targets:
+        clean_target = _clean_route_path(target)
+        basename = PurePosixPath(clean_target).name
+        stem = PurePosixPath(clean_target).stem
+        variants = {
+            _normalize_lookup_text(clean_target),
+            _normalize_lookup_text(basename),
+            _normalize_lookup_text(stem),
+        }
+        if normalized_subject in variants:
+            return clean_target
+    return ""
+
+
+def _subject_looks_like_file_delete_reference(subject: str) -> bool:
+    normalized_subject = _normalize_lookup_text(subject)
+    if not normalized_subject:
+        return False
+    if normalized_subject in _GENERIC_DELETE_SUBJECTS or normalized_subject in _BLOCKED_LOOKUP_SUBJECTS:
+        return False
+    raw_subject = str(subject or "").strip()
+    if not raw_subject:
+        return False
+    if re.search(r"[/\\.]", raw_subject) or "_" in raw_subject:
+        return True
+    return bool(_FILEISH_DELETE_HINT_RE.search(raw_subject))
 
 
 def _decision_already_targets_file(decision: RouteDecision, path: str) -> bool:
@@ -743,6 +1902,20 @@ def _normalize_direct_file_work(user_msg: str) -> RouteDecision | None:
     text = (user_msg or "").strip()
     if not text:
         return None
+
+    compound_sequence = _normalize_compound_file_undo_redo_sequence(text)
+    if compound_sequence is not None:
+        return compound_sequence
+
+    compound_replace_append = _extract_direct_file_replace_append_request(text)
+    if compound_replace_append is not None:
+        path, old_text, new_text, appended_line = compound_replace_append
+        return _build_explicit_file_text_replace_append_card(path, old_text, new_text, appended_line)
+
+    append_line_request = _extract_direct_file_append_line_request(text)
+    if append_line_request is not None:
+        path, appended_line = append_line_request
+        return _build_explicit_file_append_line_card(path, appended_line)
 
     create_match = DIRECT_FILE_CREATE_TEXT_RE.match(text)
     if create_match:
@@ -860,25 +2033,154 @@ def _normalize_direct_file_work(user_msg: str) -> RouteDecision | None:
     delete_match = DIRECT_FILE_DELETE_RE.match(text)
     if delete_match:
         path = _clean_route_path(delete_match.group("path"))
-        return {
-            "decision": "TASK",
-            "card": {
-                "goal": f"Delete '{path}'.",
-                "context": [
-                    "The workspace root is '.'.",
-                ],
-                "stages": [
-                    {
-                        "stage_goal": f"Delete the file '{path}'.",
-                        "stage_type": "FILE_WORK",
-                        "success_condition": f"'{path}' does not exist in the workspace.",
-                        "allowed_tools": ["FILE_OP"],
-                    }
-                ],
-            },
-        }
+        return _build_explicit_workspace_file_delete_card(path)
 
     return None
+
+
+def _normalize_compound_file_undo_redo_sequence(text: str) -> RouteDecision | None:
+    if not _COMPOUND_FILE_UNDO_REDO_RE.search(text or ""):
+        return None
+
+    path = _extract_compound_file_sequence_path(text)
+    content = _extract_compound_file_sequence_content(text)
+    if not path or not content:
+        return _build_compound_file_sequence_clarification_card(
+            path=path,
+            needs_path=not path,
+            needs_content=not content,
+        )
+    return _build_compound_file_sequence_card(path, content)
+
+
+def _extract_compound_file_sequence_path(text: str) -> str:
+    for pattern in (_COMPOUND_FILE_CREATE_WITH_CONTENT_RE, _COMPOUND_FILE_NAMED_WRITE_RE):
+        match = pattern.match(text or "")
+        if match:
+            candidate = _clean_route_path(match.group("path"))
+            if candidate:
+                return candidate
+
+    candidate = _extract_file_target_from_texts([text])
+    if candidate:
+        return _clean_route_path(candidate)
+
+    named_match = re.search(
+        rf"(?is)\bfile\s+(?:named|called)\s+(?P<path>{_FILE_PATH_TOKEN})\b",
+        text or "",
+    )
+    if named_match:
+        return _clean_route_path(named_match.group("path"))
+    return ""
+
+
+def _extract_compound_file_sequence_content(text: str) -> str:
+    for pattern in (_COMPOUND_FILE_CREATE_WITH_CONTENT_RE, _COMPOUND_FILE_NAMED_WRITE_RE):
+        match = pattern.match(text or "")
+        if match:
+            candidate = _clean_route_content(match.group("content"))
+            if candidate:
+                return candidate
+
+    write_match = re.search(
+        r"(?is)\b(?:write|put)\s+(?P<content>.+?)\s+(?:and then|then)\s+(?:delete|remove)\b",
+        text or "",
+    )
+    if write_match:
+        candidate = _clean_route_content(write_match.group("content"))
+        if candidate:
+            return candidate
+
+    content_match = re.search(
+        r"(?is)\bwith\s+(?:the\s+)?exact\s+contents?\s*:\s*(?P<content>.+?)\s+(?:and then|then)\s+(?:delete|remove)\b",
+        text or "",
+    )
+    if content_match:
+        candidate = _clean_route_content(content_match.group("content"))
+        if candidate:
+            return candidate
+    return ""
+
+
+def _build_compound_file_sequence_clarification_card(
+    *,
+    path: str,
+    needs_path: bool,
+    needs_content: bool,
+) -> RouteDecision:
+    if needs_path and needs_content:
+        question = "Which filename and exact content should I use for the create, delete, undo, and redo file sequence?"
+    elif needs_path:
+        question = "Which filename should I use for the create, delete, undo, and redo file sequence?"
+    else:
+        question = f"What exact content should I write into '{path}' before I run the create, delete, undo, and redo file sequence?"
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": "Clarify the target details for the requested create/delete/undo/redo file sequence.",
+            "context": [
+                "The user requested a multi-step file sequence: create, delete, undo, and redo.",
+                "Do not invent a placeholder filename or file content when the user did not specify them.",
+                "Pause and ask only for the missing file details needed to execute the sequence safely.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Ask the user: {question}",
+                    "stage_type": "CHAT",
+                    "success_condition": "A concise clarification question for the missing file details is ready for the user.",
+                    "allowed_tools": [],
+                }
+            ],
+        },
+    }
+
+
+def _build_compound_file_sequence_card(path: str, content: str) -> RouteDecision:
+    clean_path = _clean_route_path(path)
+    clean_content = _clean_route_content(content)
+    quoted_content = json.dumps(clean_content, ensure_ascii=False)
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Create '{clean_path}', delete it, restore it, and then delete it again.",
+            "context": [
+                "The workspace root is '.'.",
+                f"The target file path is '{clean_path}'.",
+                "This is a single-turn file-sequence request.",
+                "Keep the workflow in FILE_WORK; do not reinterpret undo/redo as task or event mutations.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Create or overwrite the text file '{clean_path}' with the exact contents {quoted_content}.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"The file '{clean_path}' exists and its exact contents are {quoted_content}.",
+                    "allowed_tools": ["FILE_OP"],
+                    "active_targets": [clean_path],
+                },
+                {
+                    "stage_goal": f"Delete the file '{clean_path}'.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"'{clean_path}' does not exist in the workspace.",
+                    "allowed_tools": ["FILE_OP"],
+                    "active_targets": [clean_path],
+                },
+                {
+                    "stage_goal": f"Restore the file '{clean_path}' with the exact contents {quoted_content} after the deletion.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"The file '{clean_path}' exists again and its exact contents are {quoted_content}.",
+                    "allowed_tools": ["FILE_OP"],
+                    "active_targets": [clean_path],
+                },
+                {
+                    "stage_goal": f"Delete the restored file '{clean_path}' again.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"'{clean_path}' does not exist in the workspace after the second deletion.",
+                    "allowed_tools": ["FILE_OP"],
+                    "active_targets": [clean_path],
+                },
+            ],
+        },
+    }
 
 
 def _build_explicit_file_text_remove_card(path: str, needle: str, *, read_back: bool = False) -> RouteDecision:
@@ -1015,6 +2317,122 @@ def _build_subject_file_text_replace_card(subject: str, old_text: str, new_text:
             ],
         },
     }
+
+
+def _build_explicit_file_text_replace_append_card(
+    path: str,
+    old_text: str,
+    new_text: str,
+    appended_line: str,
+) -> RouteDecision:
+    clean_path = _clean_route_path(path)
+    quoted_old = json.dumps(old_text, ensure_ascii=False)
+    quoted_new = json.dumps(new_text, ensure_ascii=False)
+    quoted_appended = json.dumps(appended_line, ensure_ascii=False)
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": (
+                f"Edit '{clean_path}' by replacing {quoted_old} with {quoted_new} and adding a second line {quoted_appended}."
+            ),
+            "context": [
+                "The workspace root is '.'.",
+                f"The target file path is '{clean_path}'.",
+                "Treat the quoted replacement text and appended line as literal file contents, not task or event status keywords.",
+                "Keep all other file content unchanged beyond the requested replacement and the requested appended second line.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": (
+                        f"Read '{clean_path}', replace the exact text {quoted_old} with {quoted_new}, "
+                        f"ensure the updated file includes a second line exactly {quoted_appended}, and save the file."
+                    ),
+                    "stage_type": "FILE_WORK",
+                    "success_condition": (
+                        f"The file '{clean_path}' contains {quoted_new} in place of {quoted_old} and has a second line exactly {quoted_appended}."
+                    ),
+                    "allowed_tools": ["FILE_OP"],
+                }
+            ],
+        },
+    }
+
+
+def _build_explicit_file_append_line_card(path: str, appended_line: str) -> RouteDecision:
+    clean_path = _clean_route_path(path)
+    quoted_appended = json.dumps(appended_line, ensure_ascii=False)
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Edit the existing file '{clean_path}' by appending a new line {quoted_appended}.",
+            "context": [
+                "The workspace root is '.'.",
+                f"The target file path is '{clean_path}'.",
+                "This request is to edit an existing file, not to create a new file.",
+                "If the target file does not already exist, stop and report that it was not found instead of creating it.",
+                "Keep all existing file content unchanged beyond appending the requested new line at the end.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Read the existing file '{clean_path}', append a new line exactly {quoted_appended} to the end, and save the updated file.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"The existing file '{clean_path}' was updated by appending a new line exactly {quoted_appended}; do not create a new file if it is missing.",
+                    "allowed_tools": ["FILE_OP"],
+                }
+            ],
+        },
+    }
+
+
+def _extract_direct_file_replace_append_request(text: str) -> tuple[str, str, str, str] | None:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return None
+    if not _FILE_EDIT_REQUEST_RE.search(candidate):
+        return None
+    if "replace" not in candidate.lower():
+        return None
+    if not _SECOND_LINE_APPEND_RE.search(candidate):
+        return None
+
+    explicit_path = _extract_file_target_from_texts([candidate])
+    if not explicit_path:
+        return None
+
+    quoted_values = [
+        str(next((part for part in match if part), "")).strip()
+        for match in _QUOTED_TEXT_RE.findall(candidate)
+    ]
+    quoted_values = [value for value in quoted_values if value]
+    if len(quoted_values) < 3:
+        return None
+
+    old_text, new_text, appended_line = quoted_values[:3]
+    if not old_text or not new_text or not appended_line:
+        return None
+    return (explicit_path, old_text, new_text, appended_line)
+
+
+def _extract_direct_file_append_line_request(text: str) -> tuple[str, str] | None:
+    candidate = str(text or "").strip()
+    if not candidate:
+        return None
+    if not _APPEND_LINE_REQUEST_RE.search(candidate):
+        return None
+    explicit_path = _extract_file_target_from_texts([candidate])
+    if not explicit_path:
+        return None
+    quoted_values = [
+        str(next((part for part in match if part), "")).strip()
+        for match in _QUOTED_TEXT_RE.findall(candidate)
+    ]
+    quoted_values = [value for value in quoted_values if value]
+    if not quoted_values:
+        return None
+    appended_line = quoted_values[-1]
+    if not appended_line:
+        return None
+    return (explicit_path, appended_line)
 
 
 def _clean_route_path(raw_path: str) -> str:

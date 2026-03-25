@@ -75,6 +75,14 @@ class FileWorkChecker:
                 "requested_root": ".",
                 "destinations": inventory.get("destination_hints", {}),
             }
+            # Carry exclusion info from the original tool_result so files that were
+            # intentionally skipped (e.g. exclude_files: ["keep*"]) are not flagged
+            # as off-target when the rule checker re-evaluates current state.
+            if isinstance(tool_result, dict):
+                if tool_result.get("excluded_names"):
+                    synthetic["excluded_names"] = tool_result["excluded_names"]
+                if tool_result.get("excluded_prefixes"):
+                    synthetic["excluded_prefixes"] = tool_result["excluded_prefixes"]
         return self.run_local_file_op_checker(stage, synthetic)
 
     def build_current_file_stage_read_result(self, stage: StageCard, tool_result: Any | None = None) -> dict[str, Any] | None:

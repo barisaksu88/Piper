@@ -6,7 +6,7 @@ Verifies the FileWorkEngine public API:
   2.  exact_read_paths_from_scratchpad — parses FILE_READ_EXACT_PATH entries
   3.  render_artifact_view   — returns code preview for .py/.ts files, empty for .pdf
   4.  capture_exact_read     — read_text captured, read_many budget respected
-  5.  should_block           — redundant-read guard, write-text guard, no-block cases
+  5.  should_block           — redundant-read guard, write-text guard, RUN_CODE domain-escape guard
   6.  recovery_hint          — FAILED verdict returns hint; non-FAILED returns ""
   7.  classify               — maps stage types to FileStageKind constants
   8.  CODE_FILE_EXTENSIONS   — .py in set, .pdf not in set
@@ -58,6 +58,8 @@ class FileWorkEngineReport:
     block_redundant_read_code: bool
     block_redundant_read_plain: bool
     block_write_text_code: bool
+    block_run_code_task_event_escape: bool
+    no_block_run_code_file_only: bool
     no_block_no_overlap: bool
     no_block_non_edit_stage: bool
 
@@ -216,7 +218,7 @@ def _test_capture_exact_read() -> tuple[bool, bool, bool, bool]:
 # 5. should_block
 # ---------------------------------------------------------------------------
 
-def _test_should_block() -> tuple[bool, bool, bool, bool, bool]:
+def _test_should_block() -> tuple[bool, bool, bool, bool, bool, bool, bool]:
     content_edit_stage = _stage(
         "FILE_WORK",
         "Edit the source code to add a new function",
@@ -251,6 +253,24 @@ def _test_should_block() -> tuple[bool, bool, bool, bool, bool]:
     block_write = FileWorkEngine.should_block(content_edit_stage, tool_tag_write, ["src/main.py"])
     ok_block_write = block_write.blocked and "RUN_CODE" in block_write.reason
 
+    run_code_escape = """[RUN_CODE]
+from workspace import list_events, close_event
+events = list_events()
+for event in events:
+    if "keep_me.txt" in event.get("name", ""):
+        close_event(event["id"])
+        break
+[/RUN_CODE]"""
+    block_escape = FileWorkEngine._check_run_code_task_event_escape(run_code_escape)
+    ok_block_escape = block_escape.blocked and "TASK_EVENT_WORK" in block_escape.reason
+
+    run_code_file_only = """[RUN_CODE]
+from pathlib import Path
+Path("keep_me.txt").rename("archive/beta.txt")
+[/RUN_CODE]"""
+    block_file_only = FileWorkEngine._check_run_code_task_event_escape(run_code_file_only)
+    ok_no_block_file_only = not block_file_only.blocked
+
     # No block: different file not in exact_paths
     tool_tag_new = '[FILE_OP: {"action":"read_text","path":"src/new_file.py"}]'
     block_new = FileWorkEngine.should_block(content_edit_stage, tool_tag_new, ["src/main.py"])
@@ -260,7 +280,15 @@ def _test_should_block() -> tuple[bool, bool, bool, bool, bool]:
     block_non_edit = FileWorkEngine.should_block(non_edit_stage, tool_tag_read, exact_paths)
     ok_no_block_non_edit = not block_non_edit.blocked
 
-    return ok_block_code_read, ok_block_plain_read, ok_block_write, ok_no_block, ok_no_block_non_edit
+    return (
+        ok_block_code_read,
+        ok_block_plain_read,
+        ok_block_write,
+        ok_block_escape,
+        ok_no_block_file_only,
+        ok_no_block,
+        ok_no_block_non_edit,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +383,7 @@ def run_smoke() -> FileWorkEngineReport:
     e1, e2 = _test_exact_read_paths()
     r1, r2, r3 = _test_render_artifact_view()
     cap1, cap2, cap3, cap4 = _test_capture_exact_read()
-    b1, b2, b3, b4, b5 = _test_should_block()
+    b1, b2, b3, b4, b5, b6, b7 = _test_should_block()
     h1, h2, h3 = _test_recovery_hint()
     cl1, cl2, cl3, cl4 = _test_classify()
     ex1, ex2 = _test_extensions()
@@ -365,7 +393,7 @@ def run_smoke() -> FileWorkEngineReport:
         e1, e2,
         r1, r2, r3,
         cap1, cap2, cap3, cap4,
-        b1, b2, b3, b4, b5,
+        b1, b2, b3, b4, b5, b6, b7,
         h1, h2, h3,
         cl1, cl2, cl3, cl4,
         ex1, ex2,
@@ -388,8 +416,10 @@ def run_smoke() -> FileWorkEngineReport:
         block_redundant_read_code=b1,
         block_redundant_read_plain=b2,
         block_write_text_code=b3,
-        no_block_no_overlap=b4,
-        no_block_non_edit_stage=b5,
+        block_run_code_task_event_escape=b4,
+        no_block_run_code_file_only=b5,
+        no_block_no_overlap=b6,
+        no_block_non_edit_stage=b7,
         hint_invalid_json=h1,
         hint_run_code_mismatch=h2,
         hint_verified_empty=h3,

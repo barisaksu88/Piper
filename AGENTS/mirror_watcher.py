@@ -49,13 +49,20 @@ def _mirror_path(src_path: Path) -> Path:
 
 
 def _copy(src_path: Path):
-    if not src_path.is_file():
+    try:
+        is_file = src_path.is_file()
+    except OSError:
+        return  # file locked (e.g. chroma.sqlite3-journal) — skip silently
+    if not is_file:
         return
     if not _should_mirror(src_path):
         return
     dst_path = _mirror_path(src_path)
     dst_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src_path, dst_path)
+    try:
+        shutil.copy2(src_path, dst_path)
+    except OSError:
+        return  # locked during copy — skip silently
     log.info("COPY   %s", src_path.relative_to(SRC))
 
 

@@ -40,6 +40,7 @@ from core.routing.route_patterns import (
     VAGUE_EVENT_FOLLOWUP_RE,
     WORKLIKE_HINT_RE,
 )
+from core.routing.environment_queries import looks_like_live_environment_query
 from core.routing.route_dates import extract_date_phrase, resolve_date_phrase
 from core.routing.route_subjects import (
     extract_event_subject,
@@ -62,6 +63,7 @@ _TASK_EVENT_SUCCESS_PREFIXES = (
     ("Task deleted:", "TASK DELETED", "task", "delete"),
     ("Task completed and archived:", "TASK COMPLETED", "task", "complete"),
     ("Event scheduled:", "EVENT SCHEDULED", "event", "schedule"),
+    ("Event rescheduled:", "EVENT RESCHEDULED", "event", "reschedule"),
     ("Event removed:", "EVENT REMOVED", "event", "remove"),
     ("Event completed and archived:", "EVENT COMPLETED", "event", "complete"),
     ("Pending Tasks:", "TASKS LISTED", "task", "inspect"),
@@ -95,10 +97,21 @@ _MEMORY_FAILURE_PREFIXES = (
     "Error: Could not update world model memory.",
     "No knowledge file.",
 )
+_PROPOSAL_ONLY_PREFIX = "PROPOSAL:"
 
 _OBSERVATION_RE = re.compile(r"^OBSERVATION_TEXT:\s*(.+)$", flags=re.MULTILINE | re.DOTALL)
 _MUTATING_STAGE_GOAL_RE = re.compile(
     r"(?i)\b(add|create|schedule|set|mark|complete|archive|remove|delete|cancel|update)\b"
+)
+_SPECIFIC_MEMORY_VALUE_HINT_RE = re.compile(
+    r"(?i)\b("
+    r"exact|specific|precise|actual|verify|confirmed?|confirm|whether|"
+    r"time|date|day|when|where|who|which|what\s+time|what\s+date|what\s+day|"
+    r"did i say|did the user say|what was|what is"
+    r")\b"
+)
+_MEMORY_LISTING_INTENT_RE = re.compile(
+    r"(?i)\b(list|show|display|render|everything|all\b|full world state|world state)\b"
 )
 _MEMORY_REMOVE_TARGET_RE = re.compile(
     r"(?i)\bremove the durable user fact\s+['\"]([^'\"]+)['\"]\s+from memory\b"
@@ -441,7 +454,20 @@ class StateMutationEngine:
 
         query_match = KNOWLEDGE_QUERY_RE.match(text)
         if query_match:
-            subject = self._normalize_knowledge_subject(query_match.group("subject"))
+            raw_subject = query_match.group("subject").strip()
+            # "what is / what's / whats" is too broad — it matches temporal,
+            # environmental, and conversational queries like "What's the date?" or
+            # "What's up with you?".  For these forms, require a personal possessive
+            # (my, your, '<name>'s) in the raw subject so that only genuine
+            # personal-fact lookups ("What's my drink?", "What's Dora's job?")
+            # reach the knowledge fast path.  Everything else falls through to the
+            # persona LLM which can read [ENVIRONMENT] and answer naturally.
+            broad_form = bool(re.match(r"(?i)^(?:so\s+)?(?:what is|what's|whats)\s+", text))
+            if broad_form:
+                has_possessive = bool(re.search(r"(?i)\bmy\b|\byour\b|\b\w+'s\b", raw_subject))
+                if not has_possessive:
+                    return KnowledgeMutationIntent()
+            subject = self._normalize_knowledge_subject(raw_subject)
             return KnowledgeMutationIntent(
                 decision="query_knowledge",
                 subject=subject,
@@ -1234,6 +1260,7 @@ class StateMutationEngine:
         fallback_observation: str = "",
         status_override: str = "",
         stage_entries: Iterable[str] | None = None,
+        stage: StageCard | None = None,
     ) -> StageOutcomePack:
         stage_type_upper = str(stage_type or "").upper()
         entries = [str(entry or "") for entry in (stage_entries or []) if str(entry or "").strip()]
@@ -1251,6 +1278,7 @@ class StateMutationEngine:
                 fallback_observation=fallback_observation,
                 status_override=status_override,
                 entries=entries,
+                stage=stage,
             )
 
         status = status_override or ("SUCCESS" if success else "FAILED / INCOMPLETE")
@@ -1271,12 +1299,14 @@ class StateMutationEngine:
         stage_type: str,
         fallback_observation: str = "",
         stage_entries: Iterable[str] | None = None,
+        stage: StageCard | None = None,
     ) -> bool:
         pack = self.build_outcome_pack(
             success=True,
             stage_type=stage_type,
             fallback_observation=fallback_observation,
             stage_entries=stage_entries,
+            stage=stage,
         )
         return not pack.effective_success
 
@@ -1330,6 +1360,14 @@ class StateMutationEngine:
                 state_owner="task_event",
             )
 
+        if detail.startswith(_PROPOSAL_ONLY_PREFIX):
+            return StageOutcomePack(
+                status="FAILED / INCOMPLETE",
+                detail=detail,
+                effective_success=False,
+                state_owner="task_event",
+            )
+
         return StageOutcomePack(
             status="SUCCESS" if success else "FAILED / INCOMPLETE",
             detail=detail,
@@ -1344,6 +1382,7 @@ class StateMutationEngine:
         fallback_observation: str,
         status_override: str,
         entries: List[str],
+        stage: StageCard | None = None,
     ) -> StageOutcomePack:
         detail = self._extract_latest_state_detail(
             entries,
@@ -1357,6 +1396,14 @@ class StateMutationEngine:
                 detail=detail,
                 effective_success=True,
                 state_owner="memory",
+            )
+
+        if self._memory_stage_requires_specific_value(stage=stage, entries=entries) and self._memory_detail_is_generic_listing(detail):
+            return StageOutcomePack(
+                status="FAILED / INCOMPLETE",
+                detail="Specific requested value was not retrieved from durable memory. LIST_KNOWLEDGE returned only general world-state information.",
+                effective_success=False,
+                state_owner="world_model",
             )
 
         for prefix, status, owner, mutation_kind in _MEMORY_SUCCESS_PREFIXES:
@@ -1377,11 +1424,57 @@ class StateMutationEngine:
                 state_owner="memory",
             )
 
+        if detail.startswith(_PROPOSAL_ONLY_PREFIX):
+            return StageOutcomePack(
+                status="FAILED / INCOMPLETE",
+                detail=detail,
+                effective_success=False,
+                state_owner="memory",
+            )
+
         return StageOutcomePack(
             status=("KNOWLEDGE UPDATED" if success else "FAILED / INCOMPLETE"),
             detail=detail,
             effective_success=bool(success),
             state_owner="world_model",
+        )
+
+    def _memory_stage_requires_specific_value(
+        self,
+        *,
+        stage: StageCard | None,
+        entries: List[str],
+    ) -> bool:
+        if not stage or str((stage or {}).get("stage_type", "")).upper() != "MEMORY_WORK":
+            return False
+        if self._entries_indicate_mutating_state_goal(entries):
+            return False
+        blobs = [
+            str((stage or {}).get("stage_goal") or ""),
+            str((stage or {}).get("success_condition") or ""),
+            str((stage or {}).get("objective") or ""),
+        ]
+        blobs.extend(str(item or "") for item in ((stage or {}).get("context") or []))
+        combined = " ".join(part for part in blobs if part).strip().lower()
+        if not combined:
+            return False
+        if _MEMORY_LISTING_INTENT_RE.search(combined) and not _SPECIFIC_MEMORY_VALUE_HINT_RE.search(combined):
+            return False
+        return bool(_SPECIFIC_MEMORY_VALUE_HINT_RE.search(combined))
+
+    @staticmethod
+    def _memory_detail_is_generic_listing(detail: str) -> bool:
+        clean = str(detail or "").strip()
+        if not clean:
+            return False
+        return any(
+            clean.startswith(prefix)
+            for prefix in (
+                "[WORLD STATE]",
+                "No world model stored.",
+                "User Knowledge:",
+                "No knowledge stored.",
+            )
         )
 
     def _extract_latest_state_detail(
@@ -1433,6 +1526,8 @@ class StateMutationEngine:
     ) -> StateReadonlyPack:
         text = str(query or "").strip()
         if not text:
+            return StateReadonlyPack()
+        if looks_like_live_environment_query(text):
             return StateReadonlyPack()
 
         if self._is_profile_summary_query(text):

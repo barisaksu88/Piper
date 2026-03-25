@@ -127,9 +127,24 @@ class TaskStore(JsonDictStore):
 
 
 class EventStore(JsonDictStore):
-    def add(self, name: str, date_str: str) -> None:
+    @staticmethod
+    def _parse_entry(value: Any) -> tuple[str, Optional[str]]:
+        """Return (date_str, time_str|None) from a stored event value."""
+        if isinstance(value, dict):
+            return str(value.get("date") or ""), value.get("time") or None
+        return str(value or ""), None
+
+    def add(self, name: str, date_str: str, time_str: Optional[str] = None) -> None:
         data = self.load()
-        data[name] = date_str
+        if time_str:
+            data[name] = {"date": date_str, "time": time_str}
+        else:
+            # Preserve existing time if entry already has one
+            existing = data.get(name)
+            if isinstance(existing, dict) and existing.get("time"):
+                data[name] = {"date": date_str, "time": existing["time"]}
+            else:
+                data[name] = date_str
         self.save(data)
 
     def pop(self, name: str) -> Optional[str]:
@@ -152,14 +167,18 @@ class EventStore(JsonDictStore):
         data = self.load()
         current = now or _dt.datetime.now()
         items: List[Dict[str, str]] = []
-        for name, date_str in data.items():
+        for name, raw in data.items():
+            date_str, time_str = self._parse_entry(raw)
             try:
-                event_date = _dt.datetime.strptime(str(date_str), "%Y-%m-%d")
+                event_date = _dt.datetime.strptime(date_str, "%Y-%m-%d")
             except Exception:
                 continue
             if event_date.date() >= current.date():
-                items.append({"name": name, "date": str(date_str)})
-        items.sort(key=lambda item: item["date"])
+                item: Dict[str, str] = {"name": name, "date": date_str}
+                if time_str:
+                    item["time"] = time_str
+                items.append(item)
+        items.sort(key=lambda item: (item["date"], item.get("time") or ""))
         return items
 
     def cleanup_old_events(self, *, now: Optional[_dt.datetime] = None) -> int:
@@ -167,14 +186,15 @@ class EventStore(JsonDictStore):
         data = self.load()
         valid: Dict[str, Any] = {}
         removed = 0
-        for name, date_str in data.items():
+        for name, raw in data.items():
+            date_str, _ = self._parse_entry(raw)
             try:
-                event_date = _dt.datetime.strptime(str(date_str), "%Y-%m-%d")
+                event_date = _dt.datetime.strptime(date_str, "%Y-%m-%d")
             except Exception:
-                valid[name] = date_str
+                valid[name] = raw
                 continue
             if event_date.date() >= current.date():
-                valid[name] = date_str
+                valid[name] = raw
             else:
                 removed += 1
         if removed:
@@ -330,7 +350,65 @@ class SituationalStateStore(StructuredEntryStore):
 
 
 class IntentStateStore(StructuredEntryStore):
-    pass
+    # Maximum lifetime for any intent entry.  Entries without an explicit
+    # expires_at (e.g. migrated from a previous session or written by an older
+    # code path) are capped to this TTL measured from their updated_at timestamp.
+    DEFAULT_TTL_SECONDS: int = 2 * 86400  # 2 days
+
+    def _resolve_expires_at(self, entry: Dict[str, Any]) -> "int | None":
+        """Return the effective expiry timestamp for an entry.
+
+        If the entry carries an explicit ``expires_at`` it is used as-is.
+        Otherwise the expiry is derived from ``updated_at + DEFAULT_TTL_SECONDS``
+        so entries without an explicit TTL do not accumulate indefinitely.
+        """
+        expires_at = entry.get("expires_at")
+        if expires_at is None:
+            updated_at = entry.get("updated_at")
+            if updated_at is not None:
+                try:
+                    return int(updated_at) + self.DEFAULT_TTL_SECONDS
+                except Exception:
+                    return None
+        return expires_at
+
+    def load_active_entries(self) -> Dict[str, Dict[str, Any]]:
+        payload = self.load_payload()
+        now_ts = int(time.time())
+        active: Dict[str, Dict[str, Any]] = {}
+        for key, entry in (payload.get("entries") or {}).items():
+            expires_at = self._resolve_expires_at(entry)
+            if expires_at is not None:
+                try:
+                    if int(expires_at) <= now_ts:
+                        continue
+                except Exception:
+                    continue
+            active[str(key)] = dict(entry)
+        return active
+
+    def prune_expired(self) -> int:
+        """Override to apply DEFAULT_TTL_SECONDS to entries without explicit expires_at."""
+        payload = self.load_payload()
+        entries = dict(payload.get("entries") or {})
+        now_ts = int(time.time())
+        kept: Dict[str, Dict[str, Any]] = {}
+        removed = 0
+        for key, entry in entries.items():
+            expires_at = self._resolve_expires_at(entry)
+            if expires_at is not None:
+                try:
+                    if int(expires_at) <= now_ts:
+                        removed += 1
+                        continue
+                except Exception:
+                    removed += 1
+                    continue
+            kept[key] = entry
+        if removed:
+            payload["entries"] = kept
+            self.save_payload(payload)
+        return removed
 
 
 class WorldModelStore(JsonDictStore):

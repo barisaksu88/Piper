@@ -39,6 +39,21 @@ class ConsolidateExclusionReport:
     no_exclusion_verdict: str
     no_exclusion_pass: bool
 
+    # Case 4: excluded file (keep_me.txt) stays at root, excluded_prefixes set in tool_result
+    # → should be VERIFIED (regression: keep_me.txt was incorrectly flagged as off-target)
+    excluded_prefix_stays_verdict: str
+    excluded_prefix_stays_pass: bool
+
+    # Case 5: excluded file stays at root, excluded_names set in tool_result
+    # → should be VERIFIED
+    excluded_name_stays_verdict: str
+    excluded_name_stays_pass: bool
+
+    # Case 6: excluded file stays at root, no tool_result exclusion fields but stage text
+    # mentions "except keep" → stage-text fallback should still return VERIFIED
+    stage_text_fallback_verdict: str
+    stage_text_fallback_pass: bool
+
     success: bool
 
 
@@ -137,7 +152,69 @@ def run_smoke() -> ConsolidateExclusionReport:
         n_verdict = str(result_no_excl.get("verdict", "")).upper()
         n_pass = n_verdict == "VERIFIED"
 
-    success = v_pass and c_pass and n_pass
+    # Cases 4-6 use a separate workspace that contains keep_me.txt at the root
+    # (intentionally excluded from consolidation).
+    with TemporaryDirectory() as keep_dir:
+        ws_keep = Path(keep_dir)
+        (ws_keep / "pdf").mkdir()
+        (ws_keep / "text_files").mkdir()
+        (ws_keep / "python_scripts").mkdir()
+        (ws_keep / "pdf" / "other_doc.pdf").write_bytes(b"pdf")
+        (ws_keep / "text_files" / "notes.txt").write_text("hi", encoding="utf-8")
+        (ws_keep / "python_scripts" / "script.py").write_text("pass\n", encoding="utf-8")
+        # This file is intentionally kept at the root (excluded from consolidation)
+        (ws_keep / "keep_me.txt").write_text("keep me", encoding="utf-8")
+
+        # --- Case 4: keep_me.txt stays at root, excluded_prefixes: ["keep"] in tool_result ---
+        # Regression test: the rule checker must NOT flag keep_me.txt as off-target when
+        # excluded_prefixes covers it.
+        checker_excl_prefix = _make_checker(
+            ws_keep,
+            goal="Consolidate all files by extension",
+            success_condition="All files are in their destination folders",
+        )
+        tr_excl_prefix = {
+            **_base_tool_result(created=["text_files/notes.txt", "python_scripts/script.py", "pdf/other_doc.pdf"]),
+            "excluded_names": [],
+            "excluded_prefixes": ["keep"],
+        }
+        result_excl_prefix = checker_excl_prefix._check_consolidate_by_extension(tr_excl_prefix)
+        ep_verdict = str(result_excl_prefix.get("verdict", "")).upper()
+        ep_pass = ep_verdict == "VERIFIED"
+
+        # --- Case 5: keep_me.txt stays at root, excluded_names: ["keep_me.txt"] in tool_result ---
+        checker_excl_name = _make_checker(
+            ws_keep,
+            goal="Consolidate all files by extension",
+            success_condition="All files are in their destination folders",
+        )
+        tr_excl_name = {
+            **_base_tool_result(created=["text_files/notes.txt", "python_scripts/script.py", "pdf/other_doc.pdf"]),
+            "excluded_names": ["keep_me.txt"],
+            "excluded_prefixes": [],
+        }
+        result_excl_name = checker_excl_name._check_consolidate_by_extension(tr_excl_name)
+        en_verdict = str(result_excl_name.get("verdict", "")).upper()
+        en_pass = en_verdict == "VERIFIED"
+
+        # --- Case 6: keep_me.txt stays at root, NO tool_result exclusion fields, but stage
+        # text says "except keep files" → stage-text fallback should still give VERIFIED ---
+        checker_stage_fallback = _make_checker(
+            ws_keep,
+            goal="Consolidate all files by extension except keep files",
+            success_condition="All files are in their destination folders except keep files",
+        )
+        tr_no_excl_fields = _base_tool_result(
+            created=["text_files/notes.txt", "python_scripts/script.py", "pdf/other_doc.pdf"]
+        )
+        # Ensure no exclusion fields are present (simulates a synthetic STATE_CHECK result)
+        tr_no_excl_fields.pop("excluded_names", None)
+        tr_no_excl_fields.pop("excluded_prefixes", None)
+        result_stage_fallback = checker_stage_fallback._check_consolidate_by_extension(tr_no_excl_fields)
+        sf_verdict = str(result_stage_fallback.get("verdict", "")).upper()
+        sf_pass = sf_verdict == "VERIFIED"
+
+    success = v_pass and c_pass and n_pass and ep_pass and en_pass and sf_pass
     return ConsolidateExclusionReport(
         violation_verdict=v_verdict,
         violation_reason_contains_pattern=("fcom" in v_reason),
@@ -146,6 +223,12 @@ def run_smoke() -> ConsolidateExclusionReport:
         compliant_pass=c_pass,
         no_exclusion_verdict=n_verdict,
         no_exclusion_pass=n_pass,
+        excluded_prefix_stays_verdict=ep_verdict,
+        excluded_prefix_stays_pass=ep_pass,
+        excluded_name_stays_verdict=en_verdict,
+        excluded_name_stays_pass=en_pass,
+        stage_text_fallback_verdict=sf_verdict,
+        stage_text_fallback_pass=sf_pass,
         success=success,
     )
 

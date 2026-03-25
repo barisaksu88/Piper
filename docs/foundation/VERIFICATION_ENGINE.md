@@ -1,6 +1,6 @@
 # VerificationEngine Contract
 
-Status: Contract defined — extraction pending
+Status: Complete — extracted and frozen 2026-03-15
 Date: 2026-03-15
 
 This file defines the contract for `VerificationEngine` before any code is moved.

@@ -18,6 +18,29 @@ def _looks_like_exact_filename_query(query: str) -> bool:
     return bool(Path(raw).suffix or "/" in raw or "\\" in raw)
 
 
+def _token_prefix_match(query_norm: str, candidate_norm: str) -> bool:
+    """Return True when every query token prefix-matches at least one candidate
+    token (or vice versa).
+
+    Handles STT one-character truncations such as:
+      "grocer list" → "grocery list"   ("grocer" is a prefix of "grocery")
+      "appoint" → "appointment"
+    Requires at least 3 characters per query token to avoid trivial matches.
+    """
+    q_tokens = query_norm.split()
+    c_tokens = candidate_norm.split()
+    if not q_tokens or not c_tokens:
+        return False
+    checked = 0
+    for qt in q_tokens:
+        if len(qt) < 3:
+            continue  # skip very short tokens to avoid noise
+        if not any(ct.startswith(qt) or qt.startswith(ct) for ct in c_tokens):
+            return False
+        checked += 1
+    return checked > 0  # vacuously True if no token long enough → False
+
+
 def handle_list_tree(runtime: Any, payload: dict[str, Any], action: str, file_op_error, *, cancel_token=None) -> dict[str, Any]:
     root_raw = payload.get("root", ".")
     root_path, root_rel = resolve_workspace_path(runtime.workspace, root_raw)
@@ -125,6 +148,14 @@ def handle_find_paths(runtime: Any, payload: dict[str, Any], action: str, file_o
                         query_norm in candidate_name_norm
                         or query_norm in candidate_stem_norm
                     )
+                if not matched and query_norm and not exact_filename_query:
+                    # Token-prefix overlap for STT robustness:
+                    # "grocer list" should find "grocery list.txt" because
+                    # "grocer" is a prefix of "grocery" and "list" == "list".
+                    # Each query token must prefix-match at least one candidate
+                    # token (or the reverse — handles truncations both ways).
+                    matched = _token_prefix_match(query_norm, candidate_name_norm) or \
+                              _token_prefix_match(query_norm, candidate_stem_norm)
         elif mode == "glob":
             matched = fnmatch.fnmatch(candidate_name, query_l) or fnmatch.fnmatch(candidate_rel, query_l)
         elif mode == "substring":

@@ -12,6 +12,7 @@ from AGENTS.harness.session import PiperHarness
 
 LOOKUP_TURNS = (
     ("read_named_list", "Can you tell me what it says in the grocery list?"),
+    ("short_pronoun_followup", "What's in it?"),
     ("read_file_followup", "Yes, but what's in the file?"),
     ("read_it_back", "Read it back."),
     ("recheck_name_mismatch", "I think we already have a document, the naming might not be matching, please check again."),
@@ -69,7 +70,7 @@ def _turn_passed(name: str, assistant_text: str, timed_out: bool) -> bool:
         return False
     text = assistant_text or ""
     text_l = text.lower()
-    if name in {"read_named_list", "read_file_followup", "read_it_back"}:
+    if name in {"read_named_list", "short_pronoun_followup", "read_file_followup", "read_it_back"}:
         return _contains_expected_items(text) and "no file named" not in text_l
     if name == "pronoun_followup":
         return _contains_expected_items(text) and "zero matches" not in text_l and "what's in it" not in text_l

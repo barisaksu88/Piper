@@ -21,6 +21,7 @@ What this engine does NOT own:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,22 @@ class FileWorkEngine:
     EXACT_READ_MAX_FILES: int = 2
     EXACT_READ_MAX_TOTAL_CHARS: int = 14_000
     CODE_WRITE_TEXT_TAG_MAX_CHARS: int = 50_000
+    TASK_EVENT_RUN_CODE_HELPERS: frozenset[str] = frozenset(
+        {
+            "add_event",
+            "add_task",
+            "close_event",
+            "complete_event",
+            "complete_task",
+            "delete_task",
+            "list_events",
+            "list_tasks",
+            "remove_event",
+            "remove_task",
+            "reschedule_event",
+        }
+    )
+    TASK_EVENT_RUN_CODE_STORES: frozenset[str] = frozenset({"event_store", "task_store"})
 
     # ------------------------------------------------------------------ #
     # Candidate path extraction                                           #
@@ -294,18 +311,20 @@ class FileWorkEngine:
         stage: StageCard,
         tool_tag: str,
         exact_read_paths: list[str],
+        *,
+        operational_state_service: Any = None,
     ) -> FileWorkBlock:
         """Check whether the proposed tool call should be suppressed.
 
-        Covers two scenarios (checked in this order, matching executor behaviour):
-          1. Redundant exact read of a file already captured in the scratchpad.
-          2. Full-source embedding inside a FILE_OP write_text payload.
+        Covers three scenarios (checked in this order):
+          1. Cross-domain dependency — DELETE or MOVE targets a path that is
+             referenced by an active task or event (R-6 State Mutex).
+             Returns a *fatal* block — the executor stops the stage entirely.
+          2. Redundant exact read of a file already captured in the scratchpad.
+          3. Full-source embedding inside a FILE_OP write_text payload.
 
         Returns a FileWorkBlock with blocked=True and a SYSTEM ERROR reason string
         when a block applies; otherwise returns FileWorkBlock(blocked=False).
-
-        Combines executor._should_block_redundant_exact_read and
-        executor._should_block_code_file_write_text.
 
         Parameters
         ----------
@@ -316,7 +335,19 @@ class FileWorkEngine:
         exact_read_paths:
             Paths already captured this stage, as returned by
             ``exact_read_paths_from_scratchpad``.
+        operational_state_service:
+            Optional OperationalStateService used for cross-domain dependency
+            checks.  Pass None to skip Guard 1 (safe for tests or contexts
+            where the service is unavailable).
         """
+        # Guard 1 (cross-domain dependency): applies before the content-edit
+        # gate so it fires for RELOCATION and other non-content-edit stages too.
+        if operational_state_service is not None:
+            _dep_block = cls._check_active_dependency(tool_tag, operational_state_service)
+            if _dep_block.blocked:
+                return _dep_block
+
+        # Guards 2 & 3 only apply to CONTENT_EDIT stages.
         if not FileStagePolicy.stage_is_content_edit_stage(stage):
             return FileWorkBlock()
 
@@ -367,6 +398,179 @@ class FileWorkEngine:
                         "Use RUN_CODE to read-modify-write the file in Python instead."
                     )
                     return FileWorkBlock(blocked=True, reason=reason)
+
+        return FileWorkBlock()
+
+    @classmethod
+    def _check_run_code_dependency(cls, tool_tag: str, operational_state_service: Any) -> FileWorkBlock:
+        """Return a fatal FileWorkBlock if a RUN_CODE payload deletes or moves a
+        file that is referenced by an active task or event (R-6 State Mutex).
+
+        Scans the Python code for common deletion and rename/move patterns and
+        extracts string-literal path arguments.  Only straightforward constant
+        paths can be detected — dynamic paths (variables, f-strings) are not
+        checked and pass through silently.
+
+        Called by the executor when ``base_tag == "RUN_CODE"`` and
+        ``operational_state_service`` is available.
+        """
+        import re as _re
+        code = cls._extract_run_code_body(tool_tag)
+        if not code.strip():
+            return FileWorkBlock()
+
+        # Regex patterns that extract a single string-literal path argument.
+        # Only the SOURCE path matters (first argument) for dependency checks.
+        _DELETION_PATTERNS = [
+            r'os\.(?:remove|unlink)\s*\(\s*["\']([^"\']+)["\']',
+            r'Path\s*\(\s*["\']([^"\']+)["\'\s)]+\)\.unlink\s*\(',
+            r'shutil\.rmtree\s*\(\s*["\']([^"\']+)["\']',
+        ]
+        _MOVE_PATTERNS = [
+            r'(?:os\.rename|shutil\.move)\s*\(\s*["\']([^"\']+)["\']',
+            r'Path\s*\(\s*["\']([^"\']+)["\'\s)]+\)\.rename\s*\(',
+        ]
+        paths_to_check: list[str] = []
+        for pattern in _DELETION_PATTERNS + _MOVE_PATTERNS:
+            for m in _re.finditer(pattern, code, _re.IGNORECASE):
+                p = m.group(1).strip().replace("\\", "/")
+                if p and p not in paths_to_check:
+                    paths_to_check.append(p)
+
+        for path in paths_to_check:
+            try:
+                conflicts = operational_state_service.find_references(path)
+            except Exception:
+                continue
+            if conflicts:
+                first = conflicts[0]
+                name = str(first.get("name") or "unknown")
+                kind = str(first.get("kind") or "item")
+                # Determine verb from which pattern list matched.
+                is_delete = any(
+                    _re.search(p, code, _re.IGNORECASE) for p in _DELETION_PATTERNS
+                )
+                verb = "delete" if is_delete else "move"
+                reason = (
+                    f"ACTIVE_TASK_DEPENDENCY: Cannot {verb} '{path}': "
+                    f"referenced by active {kind} '{name}'. "
+                    "Close or update the dependent task/event first, or override explicitly."
+                )
+                return FileWorkBlock(blocked=True, reason=reason, fatal=True)
+
+        return FileWorkBlock()
+
+    @staticmethod
+    def _extract_run_code_body(tool_tag: str) -> str:
+        code_match = re.search(
+            r"\[RUN_CODE\]\s*(.*?)\s*\[/RUN_CODE\]",
+            tool_tag or "",
+            re.DOTALL | re.IGNORECASE,
+        )
+        return code_match.group(1) if code_match else str(tool_tag or "")
+
+    @classmethod
+    def _check_run_code_task_event_escape(cls, tool_tag: str) -> FileWorkBlock:
+        """Block FILE_WORK RUN_CODE payloads that try to mutate or inspect
+        task/event state instead of staying within the file/code domain.
+
+        The router owns domain selection. Once execution is inside FILE_WORK,
+        retrying earlier TASK_EVENT_WORK prerequisites through ad-hoc RUN_CODE
+        is a domain escape and must not proceed.
+        """
+        code = cls._extract_run_code_body(tool_tag)
+        if not code.strip():
+            return FileWorkBlock()
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return FileWorkBlock()
+
+        escape_name = ""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and str(node.module or "") == "workspace":
+                for alias in node.names:
+                    name = str(alias.name or "").strip()
+                    if name in cls.TASK_EVENT_RUN_CODE_HELPERS:
+                        escape_name = name
+                        break
+            elif isinstance(node, ast.Call):
+                func_name = ""
+                if isinstance(node.func, ast.Name):
+                    func_name = str(node.func.id or "").strip()
+                elif isinstance(node.func, ast.Attribute):
+                    func_name = str(node.func.attr or "").strip()
+                if func_name in cls.TASK_EVENT_RUN_CODE_HELPERS:
+                    escape_name = func_name
+            elif isinstance(node, ast.Attribute):
+                attr_name = str(node.attr or "").strip()
+                if attr_name in cls.TASK_EVENT_RUN_CODE_STORES:
+                    escape_name = attr_name
+            if escape_name:
+                break
+
+        if not escape_name:
+            return FileWorkBlock()
+
+        reason = (
+            "SYSTEM ERROR: FILE_WORK RUN_CODE cannot inspect or mutate task/event state "
+            f"(detected '{escape_name}'). "
+            "Prior TASK_EVENT_WORK results already recorded in the scratchpad are authoritative. "
+            "Do not redo task/event work inside this FILE_WORK stage. "
+            "Proceed with file operations only, or stop and let routing create the required TASK_EVENT_WORK stage."
+        )
+        return FileWorkBlock(blocked=True, reason=reason)
+
+    @classmethod
+    def _check_active_dependency(cls, tool_tag: str, operational_state_service: Any) -> FileWorkBlock:
+        """Return a fatal FileWorkBlock if a DELETE or MOVE targets a path that
+        is referenced by an active task or event.
+
+        Called by should_block() when operational_state_service is provided.
+        Returns FileWorkBlock() (not blocked) when the action is safe to proceed.
+        """
+        planned_action = FileStagePolicy.planned_file_op_action(tool_tag)
+        _delete_actions = {"delete_path", "delete_many"}
+        _move_actions = {"move_path", "move_many"}
+        if planned_action not in _delete_actions | _move_actions:
+            return FileWorkBlock()
+
+        paths_to_check: list[str] = []
+        if planned_action == "delete_path":
+            p = FileStagePolicy.planned_file_op_path(tool_tag)
+            if p:
+                paths_to_check.append(p)
+        elif planned_action == "delete_many":
+            # delete_many encodes targets in a "paths" array.
+            for p in FileStagePolicy.planned_file_op_paths(tool_tag):
+                if p and p not in paths_to_check:
+                    paths_to_check.append(p)
+        else:
+            # move_path and move_many both encode source(s) under "src" keys.
+            import re as _re
+            for m in _re.finditer(r'"src"\s*:\s*"([^"]+)"', tool_tag or ""):
+                p = m.group(1).strip()
+                if p and p not in paths_to_check:
+                    paths_to_check.append(p)
+
+        is_delete = planned_action in _delete_actions
+        for path in paths_to_check:
+            try:
+                conflicts = operational_state_service.find_references(path)
+            except Exception:
+                continue
+            if conflicts:
+                first = conflicts[0]
+                name = str(first.get("name") or "unknown")
+                kind = str(first.get("kind") or "item")
+                verb = "delete" if is_delete else "move"
+                reason = (
+                    f"ACTIVE_TASK_DEPENDENCY: Cannot {verb} '{path}': "
+                    f"referenced by active {kind} '{name}'. "
+                    "Close or update the dependent task/event first, or override explicitly."
+                )
+                return FileWorkBlock(blocked=True, reason=reason, fatal=True)
 
         return FileWorkBlock()
 
@@ -477,3 +681,58 @@ class FileWorkEngine:
         view = cls.render_artifact_view(tool_result)
         note = cls.capture_exact_read(stage, tool_result, existing_read_paths) or ""
         return FileWorkEvidence(candidate_paths=paths, artifact_view=view, exact_read_note=note)
+
+    # ------------------------------------------------------------------ #
+    # Constraint derivation                                               #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def derive_constraints(
+        stage: StageCard,
+        tool_result: Any = None,
+    ) -> list[dict]:
+        """Derive a PlanConstraint list for VerificationEngine to check.
+
+        Priority:
+          1. Explicit ``constraints`` field on the stage card (router- or
+             planner-emitted). Returned as-is if present and non-empty.
+          2. Structural derivation from the tool result for unambiguous
+             single-operation cases (one MOVED pair, one DELETED/CREATED file).
+          3. Empty list — no constraints determinable; caller falls through
+             to the existing RULES → LLM verification path.
+
+        Only derive from tool results when the mapping is unambiguous.
+        Bulk operations (50 moves) still go to LocalFileOpRuleChecker.
+        """
+        # Priority 1: explicit constraints already set
+        explicit = [c for c in (stage.get("constraints") or []) if isinstance(c, dict)]
+        if explicit:
+            return explicit
+
+        if not isinstance(tool_result, dict):
+            return []
+
+        derived: list[dict] = []
+
+        # MOVED: only derive when exactly one move pair present
+        moves = [m for m in (tool_result.get("requested_moves") or []) if isinstance(m, dict)]
+        if len(moves) == 1:
+            src = str(moves[0].get("src") or "").strip().replace("\\", "/")
+            dst = str(moves[0].get("dst") or "").strip().replace("\\", "/")
+            if src and dst:
+                derived.append({"type": "MOVED", "scope": "FILE", "from_path": src, "to_path": dst})
+
+        # DELETED: only derive when exactly one path present
+        deleted = [str(p).strip().replace("\\", "/") for p in (tool_result.get("deleted_files") or []) if str(p).strip()]
+        if len(deleted) == 1:
+            derived.append({"type": "DELETED", "scope": "FILE", "path": deleted[0]})
+
+        # CREATED: intentionally NOT auto-derived from tool results.
+        # write_text is frequently an intermediate step inside a multi-file stage;
+        # deriving a CREATED constraint from a single write result would cause the
+        # VerificationEngine to return VERIFIED prematurely (after only the first
+        # write), breaking stages that need to create two or more files.
+        # CREATED constraints must be provided explicitly by the planner so the
+        # full set of expected files is known upfront.
+
+        return derived

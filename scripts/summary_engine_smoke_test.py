@@ -66,6 +66,7 @@ class SummaryEngineReport:
     status_file_op_success: bool
     status_failed: bool
     status_paused: bool
+    status_ignores_exact_read_payload: bool
     status_empty_on_miss: bool
 
     # 7. build_runtime_note
@@ -78,7 +79,9 @@ class SummaryEngineReport:
     block_success_instruction: bool
     block_failed_instruction: bool
     block_escalation_instruction: bool
+    block_terminal_instruction: bool
     block_paused_input_instruction: bool
+    block_ignores_exact_read_payload: bool
     block_empty_on_miss: bool
 
     # 9. select_outcome_detail
@@ -238,7 +241,7 @@ def _test_extract_file_lookup() -> tuple[bool, bool, bool]:
 # 6. extract_stage_status
 # ---------------------------------------------------------------------------
 
-def _test_extract_stage_status() -> tuple[bool, bool, bool, bool]:
+def _test_extract_stage_status() -> tuple[bool, bool, bool, bool, bool]:
     ok_success = SummaryEngine.extract_stage_status([
         "=== STAGE 1 START ===",
         "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: done",
@@ -254,9 +257,22 @@ def _test_extract_stage_status() -> tuple[bool, bool, bool, bool]:
         "=== STAGE 1 OUTCOME ===\nRESULT: PAUSED / AWAITING USER INPUT\nLAST_LOG: need info",
     ]) == "PAUSED / AWAITING USER INPUT"
 
+    ok_exact_read_ignored = SummaryEngine.extract_stage_status([
+        "=== STAGE 1 START ===",
+        (
+            "FILE_READ_EXACT_PATH: notes/coder-log.md\n"
+            "FILE_READ_EXACT_CONTENT:\n"
+            "## 2026-03-25\n"
+            "=== STAGE 9 OUTCOME ===\n"
+            "RESULT: FAILED / INCOMPLETE\n"
+            "LAST_LOG: file content only\n"
+        ),
+        "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: done",
+    ]) == "FILE OPERATION SUCCESS"
+
     ok_miss = SummaryEngine.extract_stage_status(["no outcome here"]) == ""
 
-    return ok_success, ok_failed, ok_paused, ok_miss
+    return ok_success, ok_failed, ok_paused, ok_exact_read_ignored, ok_miss
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +316,7 @@ def _test_build_runtime_note() -> tuple[bool, bool, bool, bool]:
 # 8. build_outcome_block
 # ---------------------------------------------------------------------------
 
-def _test_build_outcome_block() -> tuple[bool, bool, bool, bool, bool]:
+def _test_build_outcome_block() -> tuple[bool, bool, bool, bool, bool, bool, bool]:
     success_outcome = "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: done"
     block_success = SummaryEngine.build_outcome_block(["=== STAGE 1 START ===", success_outcome])
     ok_success = "The task is complete" in block_success and "[INSTRUCTION]" in block_success
@@ -315,13 +331,39 @@ def _test_build_outcome_block() -> tuple[bool, bool, bool, bool, bool]:
     )
     ok_escalation = "engineering support has been briefed" in block_escalation
 
+    block_terminal = SummaryEngine.build_outcome_block(
+        ["=== STAGE 1 START ===", failed_outcome],
+        allow_persona_reroute=False,
+    )
+    ok_terminal = "Do NOT append [ROUTER]" in block_terminal and "let the user decide what to do next" in block_terminal
+
     paused_outcome = "=== STAGE 1 OUTCOME ===\nRESULT: PAUSED / AWAITING USER INPUT\nLAST_LOG: waiting"
     block_paused = SummaryEngine.build_outcome_block(["=== STAGE 1 START ===", paused_outcome])
     ok_paused = "paused pending user input" in block_paused
 
+    exact_read_with_outcome_text = (
+        "FILE_READ_EXACT_PATH: notes/coder-log.md\n"
+        "FILE_READ_EXACT_CONTENT:\n"
+        "# Coder Log\n\n"
+        "### Embedded example\n"
+        "=== STAGE 9 OUTCOME ===\n"
+        "RESULT: FAILED / INCOMPLETE\n"
+        "LAST_LOG: file content only\n"
+    )
+    block_filtered = SummaryEngine.build_outcome_block([
+        "=== STAGE 1 START ===",
+        exact_read_with_outcome_text,
+        success_outcome,
+    ])
+    ok_filtered = (
+        block_filtered.startswith(success_outcome)
+        and "FILE_READ_EXACT_PATH: notes/coder-log.md" not in block_filtered
+        and "file content only" not in block_filtered
+    )
+
     ok_empty = SummaryEngine.build_outcome_block(["no outcome"]) == ""
 
-    return ok_success, ok_failed, ok_escalation, ok_paused, ok_empty
+    return ok_success, ok_failed, ok_escalation, ok_terminal, ok_paused, ok_filtered, ok_empty
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +488,9 @@ def run_smoke() -> SummaryEngineReport:
     p1, p2 = _test_extract_proposal()
     x1, x2, x3 = _test_extract_exact_file_read()
     l1, l2, l3 = _test_extract_file_lookup()
-    s1, s2, s3, s4 = _test_extract_stage_status()
+    s1, s2, s3, s4, s5 = _test_extract_stage_status()
     n1, n2, n3, n4 = _test_build_runtime_note()
-    b1, b2, b3, b4, b5 = _test_build_outcome_block()
+    b1, b2, b3, b4, b5, b6, b7 = _test_build_outcome_block()
     d1, d2, d3 = _test_select_outcome_detail()
     o1, o2, o3 = _test_extract_observation_detail()
     g1, g2, g3 = _test_is_generic_file_work_summary()
@@ -462,9 +504,9 @@ def run_smoke() -> SummaryEngineReport:
         p1, p2,
         x1, x2, x3,
         l1, l2, l3,
-        s1, s2, s3, s4,
+        s1, s2, s3, s4, s5,
         n1, n2, n3, n4,
-        b1, b2, b3, b4, b5,
+        b1, b2, b3, b4, b5, b6, b7,
         d1, d2, d3,
         o1, o2, o3,
         g1, g2, g3,
@@ -490,7 +532,8 @@ def run_smoke() -> SummaryEngineReport:
         status_file_op_success=s1,
         status_failed=s2,
         status_paused=s3,
-        status_empty_on_miss=s4,
+        status_ignores_exact_read_payload=s4,
+        status_empty_on_miss=s5,
         note_from_verified=n1,
         note_from_exact_path=n2,
         note_from_last_log=n3,
@@ -498,8 +541,10 @@ def run_smoke() -> SummaryEngineReport:
         block_success_instruction=b1,
         block_failed_instruction=b2,
         block_escalation_instruction=b3,
-        block_paused_input_instruction=b4,
-        block_empty_on_miss=b5,
+        block_terminal_instruction=b4,
+        block_paused_input_instruction=b5,
+        block_ignores_exact_read_payload=b6,
+        block_empty_on_miss=b7,
         detail_verified_result_priority=d1,
         detail_proposal_priority=d2,
         detail_fallback=d3,

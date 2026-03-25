@@ -24,7 +24,7 @@ class _FakeKnowledgeManager:
 class _FakeOperationalStateService:
     def build_readonly_answer(self, query: str) -> str:
         if "events" in str(query).lower():
-            return "Upcoming events: dentist appointment on 2026-03-24."
+            return "Upcoming events: dentist appointment on 2027-06-15."
         return ""
 
 
@@ -40,10 +40,15 @@ class StateMutationEngineSmokeReport:
     project_remove_subject: str
     false_success_status: str
     false_success_effective_success: bool
+    proposal_only_status: str
+    proposal_only_effective_success: bool
     empty_list_mutation_status: str
     empty_list_mutation_effective_success: bool
     empty_list_mutation_auto_reroute: bool
     formatter_status: str
+    specific_memory_listing_status: str
+    specific_memory_listing_effective_success: bool
+    formatter_specific_memory_listing_effective_success: bool
     knowledge_status: str
     knowledge_state_owner: str
     knowledge_failure_effective_success: bool
@@ -128,6 +133,14 @@ def run_smoke() -> StateMutationEngineSmokeReport:
             "STEP 1\nTHOUGHT: Try completion\nACTION: [COMPLETE_EVENT: dentist appointment]\nOBSERVATION_KIND: error\nOBSERVATION_TEXT: Event not found: dentist appointment",
         ],
     )
+    proposal_only_pack = engine.build_outcome_pack(
+        success=True,
+        stage_type="TASK_EVENT_WORK",
+        fallback_observation="PROPOSAL: I cannot restore the deleted file with the current tool set.",
+        stage_entries=[
+            "STEP 1\nTHOUGHT: I cannot restore the deleted file with the current tool set.\nACTION: [NO_TOOL_PROPOSAL]\nPROPOSAL: I cannot restore the deleted file with the current tool set.",
+        ],
+    )
     empty_list_mutation_pack = engine.build_outcome_pack(
         success=True,
         stage_type="TASK_EVENT_WORK",
@@ -144,6 +157,32 @@ def run_smoke() -> StateMutationEngineSmokeReport:
         stage_entries=[
             "STEP 1\nTHOUGHT: Try completion\nACTION: [COMPLETE_EVENT: dentist appointment]\nOBSERVATION_KIND: error\nOBSERVATION_TEXT: Event not found: dentist appointment",
         ],
+    )
+    specific_memory_stage = {
+        "stage_goal": "Retrieve the exact time of the dentist appointment from durable memory.",
+        "stage_type": "MEMORY_WORK",
+        "success_condition": "The exact appointment time is retrieved from durable memory.",
+        "allowed_tools": ["LIST_KNOWLEDGE"],
+    }
+    specific_memory_listing_pack = engine.build_outcome_pack(
+        success=True,
+        stage_type="MEMORY_WORK",
+        fallback_observation="OBSERVATION_TEXT: [WORLD STATE]\n- reported one upcoming event: a dentist appointment on March 24th, 2026, at 1 PM.",
+        stage_entries=[
+            "=== STAGE 1 START ===\nSTAGE_GOAL: Retrieve the exact time of the dentist appointment from durable memory.\nSTAGE_TYPE: MEMORY_WORK\nSUCCESS_CONDITION: The exact appointment time is retrieved from durable memory.",
+            "STEP 1\nTHOUGHT: Inspect durable memory.\nACTION: [LIST_KNOWLEDGE]\nOBSERVATION_KIND: info\nOBSERVATION_TEXT: [WORLD STATE]\n- reported one upcoming event: a dentist appointment on March 24th, 2026, at 1 PM.",
+        ],
+        stage=specific_memory_stage,
+    )
+    formatter_specific_memory_listing_pack = ScratchpadFormatter.build_outcome_pack(
+        success=True,
+        stage_type="MEMORY_WORK",
+        last_observation="STEP 1\nTHOUGHT: Inspect durable memory.\nACTION: [LIST_KNOWLEDGE]\nOBSERVATION_KIND: info\nOBSERVATION_TEXT: [WORLD STATE]\n- reported one upcoming event: a dentist appointment on March 24th, 2026, at 1 PM.",
+        stage_entries=[
+            "=== STAGE 1 START ===\nSTAGE_GOAL: Retrieve the exact time of the dentist appointment from durable memory.\nSTAGE_TYPE: MEMORY_WORK\nSUCCESS_CONDITION: The exact appointment time is retrieved from durable memory.",
+            "STEP 1\nTHOUGHT: Inspect durable memory.\nACTION: [LIST_KNOWLEDGE]\nOBSERVATION_KIND: info\nOBSERVATION_TEXT: [WORLD STATE]\n- reported one upcoming event: a dentist appointment on March 24th, 2026, at 1 PM.",
+        ],
+        stage=specific_memory_stage,
     )
 
     knowledge_pack = engine.build_outcome_pack(
@@ -190,10 +229,15 @@ def run_smoke() -> StateMutationEngineSmokeReport:
         and project_remove_intent.subject.lower() == "works on: catch the stars"
         and false_success_pack.effective_success is False
         and false_success_pack.status == "FAILED / INCOMPLETE"
+        and proposal_only_pack.effective_success is False
+        and proposal_only_pack.status == "FAILED / INCOMPLETE"
         and empty_list_mutation_pack.effective_success is False
         and empty_list_mutation_pack.status == "FAILED / INCOMPLETE"
         and empty_list_mutation_pack.auto_reroute is True
         and formatter_pack.effective_success is False
+        and specific_memory_listing_pack.effective_success is False
+        and specific_memory_listing_pack.status == "FAILED / INCOMPLETE"
+        and formatter_specific_memory_listing_pack.effective_success is False
         and knowledge_pack.status == "KNOWLEDGE UPDATED"
         and knowledge_pack.state_owner == "world_model"
         and knowledge_failure_pack.effective_success is False
@@ -249,7 +293,7 @@ def run_smoke() -> StateMutationEngineSmokeReport:
                 ],
             },
         },
-        user_msg="My insurance company told me my car insurance will end on the 25th, so remind me to get a new yearly insurance for that.",
+        user_msg="My insurance company told me my car insurance will end on 2027-04-15, so remind me to get a new yearly insurance for that.",
         recent_history=[],
     )
     reminder_stage = dict((((reminder_route or {}).get("card") or {}).get("stages") or [{}])[0])
@@ -296,14 +340,14 @@ def run_smoke() -> StateMutationEngineSmokeReport:
         success
         and readonly_knowledge_pack.answer == "Your favorite drink is coffee."
         and readonly_knowledge_pack.state_owner == "world_model"
-        and readonly_event_pack.answer == "Upcoming events: dentist appointment on 2026-03-24."
+        and readonly_event_pack.answer == "Upcoming events: dentist appointment on 2027-06-15."
         and readonly_event_pack.state_owner == "task_event"
-        and readonly_state_assertion_pack.answer == "Upcoming events: dentist appointment on 2026-03-24."
+        and readonly_state_assertion_pack.answer == "Upcoming events: dentist appointment on 2027-06-15."
         and readonly_state_assertion_pack.state_owner == "task_event"
         and str(((task_delete_route or {}).get("card") or {}).get("goal") or "") == "Delete the task 'buy milk' from the active task list"
         and str((task_delete_stage.get("mutation") or {}).get("action") or "") == "delete"
         and str((((contextual_remember_route or {}).get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "") == "MEMORY_WORK"
-        and str(((reminder_route or {}).get("card") or {}).get("goal") or "").endswith("on 2026-03-25")
+        and str(((reminder_route or {}).get("card") or {}).get("goal") or "").endswith("on 2027-04-15")
         and str((reminder_stage.get("mutation") or {}).get("action") or "") == "schedule"
         and len((((plural_delete_route or {}).get("card") or {}).get("stages") or [])) == 2
         and "wash my car" in str(((natural_event_completion_route or {}).get("card") or {}).get("goal") or "").lower()
@@ -323,10 +367,15 @@ def run_smoke() -> StateMutationEngineSmokeReport:
         project_remove_subject=project_remove_intent.subject,
         false_success_status=false_success_pack.status,
         false_success_effective_success=bool(false_success_pack.effective_success),
+        proposal_only_status=proposal_only_pack.status,
+        proposal_only_effective_success=bool(proposal_only_pack.effective_success),
         empty_list_mutation_status=empty_list_mutation_pack.status,
         empty_list_mutation_effective_success=bool(empty_list_mutation_pack.effective_success),
         empty_list_mutation_auto_reroute=bool(empty_list_mutation_pack.auto_reroute),
         formatter_status=formatter_pack.status,
+        specific_memory_listing_status=specific_memory_listing_pack.status,
+        specific_memory_listing_effective_success=bool(specific_memory_listing_pack.effective_success),
+        formatter_specific_memory_listing_effective_success=bool(formatter_specific_memory_listing_pack.effective_success),
         knowledge_status=knowledge_pack.status,
         knowledge_state_owner=knowledge_pack.state_owner,
         knowledge_failure_effective_success=bool(knowledge_failure_pack.effective_success),

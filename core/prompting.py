@@ -6,6 +6,14 @@ from typing import Dict, Iterable, List, Optional
 
 from core.prompt_builder import PromptBuilder
 from core.scratchpad_formatter import ScratchpadFormatter
+from core.turn_explanation import LAST_TURN_EXPLANATION_PREFIX
+
+_SEARCH_SUMMARY_PREFIX = "[SEARCH SUMMARY FOR "
+_SEARCH_REPORT_CONSUMED_PREFIX = "[SEARCH REPORT CONSUMED FOR "
+_BACKGROUND_SEARCH_COMPLETE_PREFIX = "Background search complete for '"
+_SEARCH_REPORTER_INSTRUCTION = "The web search is complete. Summarize the findings for the user now."
+_PROACTIVE_TRIGGER_PREFIX = "[PROACTIVE_TRIGGER]"
+_PROACTIVE_TRIGGER_CONSUMED_PREFIX = "[PROACTIVE_TRIGGER CONSUMED]"
 
 
 def _clean_for_model(messages: Iterable[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -21,6 +29,18 @@ def _clean_for_model(messages: Iterable[Dict[str, str]]) -> List[Dict[str, str]]
         if content.startswith("[UI]"):
             continue
         if content.startswith("[LATEST_RUNTIME_CONTEXT]"):
+            continue
+        if content.startswith(_SEARCH_REPORT_CONSUMED_PREFIX):
+            continue
+        if content.startswith(_BACKGROUND_SEARCH_COMPLETE_PREFIX):
+            continue
+        if content == _SEARCH_REPORTER_INSTRUCTION:
+            continue
+        if content.startswith(_PROACTIVE_TRIGGER_PREFIX):
+            continue
+        if content.startswith(_PROACTIVE_TRIGGER_CONSUMED_PREFIX):
+            continue
+        if content.startswith(LAST_TURN_EXPLANATION_PREFIX):
             continue
         if "GGML_ASSERT" in content or "llama-context.cpp" in content:
             continue
@@ -66,7 +86,7 @@ def build_persona_messages(
     """Build persona-phase chat messages with model-specific compatibility rules."""
     cleaned_history = _clean_for_model(history)
 
-    terminal_system_events: List[str] = []
+    latest_terminal_search_event = ""
 
     if not _persona_requires_single_system_message(model_path):
         messages = [{"role": "system", "content": system_content}]
@@ -75,12 +95,12 @@ def build_persona_messages(
             content = (message.get("content") or "").strip()
             if not content:
                 continue
-            if role == "system" and content.startswith("[SEARCH SUMMARY FOR "):
-                terminal_system_events.append(content)
+            if role == "system" and content.startswith(_SEARCH_SUMMARY_PREFIX):
+                latest_terminal_search_event = content
                 continue
             messages.append({"role": role, "content": content})
-        for event in terminal_system_events:
-            messages.append({"role": "system", "content": event})
+        if latest_terminal_search_event:
+            messages.append({"role": "system", "content": latest_terminal_search_event})
         if tail_system_content:
             messages.append({"role": "system", "content": tail_system_content})
         if outcome_block:
@@ -98,8 +118,8 @@ def build_persona_messages(
         if not content:
             continue
         if role == "system":
-            if content.startswith("[SEARCH SUMMARY FOR "):
-                terminal_system_events.append(content)
+            if content.startswith(_SEARCH_SUMMARY_PREFIX):
+                latest_terminal_search_event = content
             else:
                 supplemental_system.append(content)
             continue
@@ -110,17 +130,22 @@ def build_persona_messages(
         merged_system_parts.append(
             "[SUPPLEMENTAL_SYSTEM_CONTEXT]\n" + "\n\n".join(supplemental_system)
         )
-    if tail_system_content or outcome_block or terminal_system_events:
+    if tail_system_content or outcome_block or latest_terminal_search_event:
         runtime_context_parts: List[str] = []
-        for event in terminal_system_events:
-            runtime_context_parts.append("[LATEST_SYSTEM_EVENT]\n" + event)
+        if latest_terminal_search_event:
+            runtime_context_parts.append("[LATEST_SYSTEM_EVENT]\n" + latest_terminal_search_event)
         if tail_system_content:
-            runtime_context_parts.append("[LATEST_SYSTEM_EVENT]\n" + tail_system_content)
+            # tail_system_content holds directive rules (NO_MUTATION_RULE, ACTIVE_SKILL, etc.)
+            # — these are instructions, not system events. No [LATEST_SYSTEM_EVENT] wrapper.
+            runtime_context_parts.append(tail_system_content)
         if outcome_block:
-            runtime_context_parts.append("[LATEST_SYSTEM_EVENT]\n[FINAL_STAGE_OUTCOME]\n" + outcome_block)
-        runtime_context_content = "[LATEST_RUNTIME_CONTEXT]\n" + "\n\n".join(
-            part for part in runtime_context_parts if part
-        )
+            runtime_context_parts.append(
+                "[LATEST_SYSTEM_EVENT]\n[FINAL_STAGE_OUTCOME]\n" + outcome_block
+            )
+        if runtime_context_parts:
+            runtime_context_content = "[LATEST_RUNTIME_CONTEXT]\n" + "\n\n".join(
+                part for part in runtime_context_parts if part
+            )
 
     latest_user_idx: Optional[int] = None
     latest_user_message = ""

@@ -91,9 +91,12 @@ class EnvironmentService:
 
     def render_block(self) -> str:
         snapshot = self.snapshot()
-        payload = {
-            "time": snapshot.time,
-            "weather": snapshot.weather,
-            "system_load": snapshot.system_load,
-        }
-        return f"[ENVIRONMENT]\n{json.dumps(payload, indent=2)}"
+        # Plain labeled text — small local models (Qwen3.5-9B) fail to reliably
+        # extract values from a JSON blob.  Labeled lines are read directly.
+        lines = [
+            "[ENVIRONMENT]",
+            f"Today: {snapshot.time}",
+            f"Weather: {snapshot.weather}",
+            f"System load: {snapshot.system_load}",
+        ]
+        return "\n".join(lines)

@@ -483,8 +483,50 @@ class Config:
         return data_state_path(self.DATA_DIR, "model_selection.json")
 
     @property
+    def CONVERSATION_SUMMARY_PATH(self) -> Path:
+        return self.DATA_DIR / "conversation_summary.json"
+
+    @property
+    def STATS_PATH(self) -> Path:
+        return self.DATA_DIR / "stats.jsonl"
+
+    @property
+    def STATS_ALERTS_PATH(self) -> Path:
+        return data_debug_path(self.DATA_DIR, "stats_alerts.log")
+
+    @property
+    def CHANGE_JOURNAL_PATH(self) -> Path:
+        return self.DATA_DIR / "change_journal.json"
+
+    @property
+    def REMINDERS_PATH(self) -> Path:
+        return self.DATA_DIR / "reminders.json"
+
+    @property
     def LLM_PROMPT_DEBUG_PATH(self) -> Path:
+        """Legacy combined log — kept for backward compat; prefer layer paths below."""
         return data_debug_path(self.DATA_DIR, "llm_prompt_debug.txt")
+
+    # ── Per-layer debug paths ──────────────────────────────────────────────
+    @property
+    def ROUTER_DEBUG_PATH(self) -> Path:
+        """SECRETARY / routing decisions."""
+        return data_debug_path(self.DATA_DIR, "router_debug.txt")
+
+    @property
+    def PERSONA_DEBUG_PATH(self) -> Path:
+        """PERSONA and PERSONA_RECALL_* turns."""
+        return data_debug_path(self.DATA_DIR, "persona_debug.txt")
+
+    @property
+    def PLANNER_DEBUG_PATH(self) -> Path:
+        """STAGE_*_STEP_* planner steps."""
+        return data_debug_path(self.DATA_DIR, "planner_debug.txt")
+
+    @property
+    def DOC_FOCUS_DEBUG_PATH(self) -> Path:
+        """DOCUMENT_FOCUS and doc-vision calls."""
+        return data_debug_path(self.DATA_DIR, "doc_focus_debug.txt")
 
     @property
     def LLM_HTTP_PAYLOAD_DEBUG_PATH(self) -> Path:
