@@ -78,6 +78,22 @@ _FRICTION_RE = re.compile(
     r"(?i)\b(not picking up|isn't picking up|isnt picking up|not working|doesn't work|doesnt work|"
     r"not going through|mishearing|misheard|not getting picked up|not being picked up)\b"
 )
+# Personality / disposition traits — durable attributes that belong in the world
+# model, not in short-lived situational state.
+# Matches: "I'm a morning person", "I'm more of a night owl", "I tend to be introverted"
+_DISPOSITION_RE = re.compile(
+    r"(?is)"
+    r"\bi(?:'m| am)\s+"
+    r"(?:generally\s+|usually\s+|pretty\s+|quite\s+|more\s+of\s+a\s+|more\s+of\s+an\s+|a\s+bit\s+)?"
+    r"(?:a\s+|an\s+)?(?P<trait>[a-z][a-z ,\-']{2,40}?)"
+    r"(?:\s+person|\s+type|\s+kind\s+of\s+(?:person|guy|gal|one))?\s*[.!?]*$"
+    r"|\bi\s+tend\s+to\s+be\s+(?P<tend>[a-z][a-z ,\-']{2,40}?)\s*[.!?]*$"
+)
+# Quick-exclusion: these fragments in the trait text mean it's a state, not a trait.
+_DISPOSITION_EXCLUDE_RE = re.compile(
+    r"(?i)\b(?:hungry|tired|sleepy|sick|ill|bored|stressed|anxious|busy|frustrated|"
+    r"annoyed|overwhelmed|currently|right now|today|at the moment|feeling)\b"
+)
 
 
 def _slugify(text: str) -> str:
@@ -154,6 +170,10 @@ class TransientStateManager:
         self.situational_store.prune_expired()
         self.intent_store.prune_expired()
 
+        # Route disposition/personality traits to the durable world model so
+        # they are not discarded when short-TTL situational state is pruned.
+        self._try_ingest_disposition(cleaned)
+
         for entry in self._extract_situational_entries(cleaned):
             self.situational_store.upsert_entry(entry.key, entry.as_payload())
 
@@ -226,6 +246,35 @@ class TransientStateManager:
             if self.intent_store.remove_entry(key):
                 removed += 1
         return removed
+
+    def _try_ingest_disposition(self, text: str) -> None:
+        """Detect personality / disposition trait statements and write them to
+        the durable world model instead of transient situational state.
+
+        Examples that should hit this path:
+          "I'm a morning person"  → trait: "morning person"
+          "I'm more of a night owl"  → trait: "night owl"
+          "I tend to be pretty introverted"  → trait: "introverted"
+        """
+        if self.knowledge_mgr is None or not hasattr(self.knowledge_mgr, "upsert_fact"):
+            return
+        match = _DISPOSITION_RE.search(text.strip())
+        if not match:
+            return
+        trait_raw = (match.group("trait") or match.group("tend") or "").strip()
+        if not trait_raw:
+            return
+        # Exclude transient states masquerading as traits.
+        if _DISPOSITION_EXCLUDE_RE.search(trait_raw):
+            return
+        # Trim trailing punctuation/noise from the trait fragment.
+        trait = re.sub(r"[,;]+$", "", trait_raw).strip()
+        if len(trait) < 3 or len(trait) > 60:
+            return
+        try:
+            self.knowledge_mgr.upsert_fact("personality_trait", trait)
+        except Exception:
+            pass
 
     def _migrate_legacy_world_model_state(self) -> None:
         if self.knowledge_mgr is None or not hasattr(self.knowledge_mgr, "drain_legacy_situational_entries"):
@@ -360,7 +409,7 @@ class TransientStateManager:
                     confidence=confidence,
                     source_turn=text,
                     updated_at=now_ts,
-                    expires_at=now_ts + (7 if confidence == "tentative" else 14) * 86400,
+                    expires_at=now_ts + (1 if confidence == "tentative" else 2) * 86400,
                 )
             )
             break

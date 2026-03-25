@@ -53,7 +53,7 @@ class PromptContextService:
         user_msg: str,
         style_overlay: str = "",
         knowledge_enabled: bool = True,
-        brain_limit: int = 5,
+        brain_limit: int = 9,
         document_limit: int = 5,
     ) -> PersonaContextPack:
         return self.engine.build_persona_pack(
@@ -84,6 +84,23 @@ class PromptContextService:
     def clear_memory_for_file_work(self, pack: PersonaContextPack) -> PersonaContextPack:
         return self.engine.clear_memory_for_file_work(pack)
 
+    def apply_context_arbitration(
+        self,
+        pack: PersonaContextPack,
+        *,
+        route_decision: dict[str, Any] | None = None,
+        ingested_document_chat: bool = False,
+        reporter_just_ran: bool = False,
+        document_focus_active: bool = False,
+    ) -> PersonaContextPack:
+        return self.engine.apply_context_arbitration(
+            pack,
+            route_decision=route_decision,
+            ingested_document_chat=ingested_document_chat,
+            reporter_just_ran=reporter_just_ran,
+            document_focus_active=document_focus_active,
+        )
+
     def to_prompt_context(self, pack: PersonaContextPack) -> PromptContext:
         return self.engine.to_prompt_context(pack)
 
@@ -93,7 +110,7 @@ class PromptContextService:
         user_msg: str,
         style_overlay: str = "",
         knowledge_enabled: bool = True,
-        brain_limit: int = 5,
+        brain_limit: int = 9,
         document_limit: int = 5,
     ) -> PromptContext:
         pack = self.build_persona_pack(
@@ -123,6 +140,7 @@ class PromptContextService:
         reporter_just_ran: bool = False,
         escalation_active: bool = False,
         verification_result: VerificationResult | None = None,
+        outcome_pack: Any | None = None,
     ) -> PersonaRuntimePack:
         return self.engine.build_persona_runtime_pack(
             scratchpad,
@@ -130,6 +148,7 @@ class PromptContextService:
             reporter_just_ran=reporter_just_ran,
             escalation_active=escalation_active,
             verification_result=verification_result,
+            outcome_pack=outcome_pack,
         )
 
     def build_persona_directive_pack(
@@ -137,6 +156,7 @@ class PromptContextService:
         *,
         route_decision: dict[str, Any] | None = None,
         ingested_document_chat: bool = False,
+        document_focus_active: bool = False,
         reporter_just_ran: bool = False,
         active_skill: dict[str, Any] | None = None,
         latest_codex_escalation: dict[str, Any] | None = None,
@@ -145,6 +165,7 @@ class PromptContextService:
         return self.engine.build_persona_directive_pack(
             route_decision=route_decision,
             ingested_document_chat=ingested_document_chat,
+            document_focus_active=document_focus_active,
             reporter_just_ran=reporter_just_ran,
             active_skill=active_skill,
             latest_codex_escalation=latest_codex_escalation,
@@ -167,11 +188,19 @@ class PromptContextService:
         return SummaryEngine.extract_proposal(scratchpad)
 
     def build_readonly_state_answer(self, query: str) -> str:
-        return self.state_mutation_engine.build_readonly_answer(
+        # Knowledge queries are intentionally excluded — the hardcoded subject
+        # extraction and "Your {subject} is {value}." template produce unnatural
+        # output ("Your which drink i like is coke.").  The persona already has
+        # [WORLD STATE] in context and will answer knowledge questions naturally.
+        # Only operational state queries (tasks / events) use the fast-path.
+        pack = self.state_mutation_engine.build_readonly_answer(
             query=query,
             knowledge_mgr=self.knowledge_mgr,
             operational_state_service=self.operational_state_service,
-        ).answer
+        )
+        if pack.query_kind == "knowledge":
+            return ""
+        return pack.answer
 
     def build_readonly_knowledge_answer(self, query: str) -> str:
         pack = self.state_mutation_engine.build_readonly_answer(

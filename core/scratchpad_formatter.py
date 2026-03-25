@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, Dict, Iterable
 
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.summary import SummaryEngine
+from core.file_stage_policy import FileStagePolicy
 
 
 _STATE_MUTATION_ENGINE = StateMutationEngine()
@@ -198,6 +201,7 @@ RESULT: {pack.status}{detail}"""
         last_observation: str = "",
         status_override: str = "",
         stage_entries: Iterable[str] | None = None,
+        stage: Dict[str, Any] | None = None,
     ):
         stage_type_upper = str(stage_type or "").upper()
         if stage_type_upper in {"TASK_EVENT_WORK", "MEMORY_WORK"}:
@@ -207,6 +211,7 @@ RESULT: {pack.status}{detail}"""
                 fallback_observation=last_observation,
                 status_override=status_override,
                 stage_entries=stage_entries,
+                stage=stage,
             )
 
         if status_override:
@@ -228,10 +233,94 @@ RESULT: {pack.status}{detail}"""
         )
         from core.contracts import StageOutcomePack
 
+        allow_persona_reroute = True
+        if stage_type_upper == "FILE_WORK":
+            allow_persona_reroute = not ScratchpadFormatter._has_terminal_missing_named_file_target_failure(
+                stage=stage,
+                stage_entries=list(stage_entries) if stage_entries is not None else None,
+            )
+
         return StageOutcomePack(
             status=status,
             detail=extracted,
             effective_success=bool(success or status_override),
+            allow_persona_reroute=allow_persona_reroute,
+        )
+
+    @staticmethod
+    def _has_terminal_missing_named_file_target_failure(
+        *,
+        stage: Dict[str, Any] | None,
+        stage_entries: list[str] | None,
+    ) -> bool:
+        if not stage or not FileStagePolicy.stage_is_file_work(stage):
+            return False
+        if FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return False
+        if ScratchpadFormatter._stage_may_create_missing_target(stage):
+            return False
+
+        named_targets = [str(path).strip().lower() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
+        if not named_targets:
+            return False
+
+        entries = [str(entry or "") for entry in (stage_entries or []) if str(entry or "").strip()]
+        if any("FILE_WORK_VERIFIED_RESULT:" in entry for entry in entries):
+            return False
+
+        target_terms = set(named_targets) | {Path(path).stem.lower() for path in named_targets}
+        for entry in entries:
+            missing_target = ScratchpadFormatter._extract_missing_named_target(entry)
+            if missing_target and ScratchpadFormatter._term_matches_target(missing_target, target_terms):
+                return True
+            missing_query = ScratchpadFormatter._extract_failed_find_query(entry)
+            if missing_query and ScratchpadFormatter._term_matches_target(missing_query, target_terms):
+                return True
+        return False
+
+    @staticmethod
+    def _stage_may_create_missing_target(stage: Dict[str, Any]) -> bool:
+        return FileStagePolicy.stage_may_create_missing_target(stage)
+
+    @staticmethod
+    def _extract_missing_named_target(entry: str) -> str:
+        text = str(entry or "")
+        marker = "FILE_OP target not found:"
+        if marker not in text:
+            return ""
+        _, _, payload = text.partition(marker)
+        return str(payload or "").strip().strip("`'\"").lower()
+
+    @staticmethod
+    def _extract_failed_find_query(entry: str) -> str:
+        text = str(entry or "")
+        if "OBSERVATION_TEXT:" not in text or '"action": "find_paths"' not in text or '"match_count": 0' not in text:
+            return ""
+        _, _, payload = text.partition("OBSERVATION_TEXT:")
+        try:
+            data = json.loads(payload.strip())
+        except Exception:
+            return ""
+        if str(data.get("action", "")).lower() != "find_paths":
+            return ""
+        try:
+            if int(data.get("match_count", 0) or 0) != 0:
+                return ""
+        except (TypeError, ValueError):
+            return ""
+        return str(data.get("requested_query") or "").strip().strip("`'\"").lower()
+
+    @staticmethod
+    def _term_matches_target(term: str, targets: set[str]) -> bool:
+        candidate = str(term or "").strip().lower()
+        if not candidate:
+            return False
+        return any(
+            candidate == target
+            or candidate.endswith(target)
+            or target.endswith(candidate)
+            for target in targets
+            if target
         )
 
     # _select_outcome_detail, _extract_observation_detail, _is_generic_file_work_summary,

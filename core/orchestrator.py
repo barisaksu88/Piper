@@ -6,16 +6,22 @@ from __future__ import annotations
 
 from config import CFG
 from core.contracts import EscalationDecision, RuntimeSignal
+from core.engines.change_journal import ChangeJournal
+from core.engines.conversation_compressor import ConversationCompressor
+from core.engines.stats_collector import StatsCollector
 from core.engineering_support import EngineeringEscalationDetector
 from core.orchestrator_phases import (
     phase_document_focus,
     phase_manager,
     phase_persona,
+    phase_reminder_set,
     phase_reporter,
     phase_route,
     phase_search,
+    phase_undo,
 )
 from core.runtime_control import CancellationToken, OperationCancelled
+from core.engines import proactive_monitor as _proactive_monitor_registration  # noqa: F401
 
 
 class Orchestrator:
@@ -27,7 +33,11 @@ class Orchestrator:
                  live_screen=None,
                  cancel_token: CancellationToken | None = None,
                  retain_cancel_token_fn=None,
-                 release_cancel_token_fn=None):
+                 release_cancel_token_fn=None,
+                 is_search_in_flight_fn=None,
+                 retain_search_in_flight_fn=None,
+                 release_search_in_flight_fn=None,
+                 current_search_query_fn=None):
         self.llm = llm_client
         self.brain = agent_brain
         self.knowledge = knowledge_mgr
@@ -43,6 +53,10 @@ class Orchestrator:
         self.cancel_token = cancel_token
         self.retain_cancel_token = retain_cancel_token_fn or (lambda token: None)
         self.release_cancel_token = release_cancel_token_fn or (lambda token: None)
+        self.is_search_in_flight = is_search_in_flight_fn or (lambda: False)
+        self.retain_search_in_flight = retain_search_in_flight_fn or (lambda query="": None)
+        self.release_search_in_flight = release_search_in_flight_fn or (lambda: None)
+        self.current_search_query = current_search_query_fn or (lambda: "")
 
         self.ss = None
         self.temperature = 0.7
@@ -63,6 +77,23 @@ class Orchestrator:
         self.latest_codex_escalation: EscalationDecision | None = None
         self.engineering_support = EngineeringEscalationDetector(CFG.CODEX_ESCALATION_LOG_PATH)
         self.failed_task_router_retries = 0
+        self.last_stage_outcome = None
+        self.last_verification = None
+        self.conversation_compressor = ConversationCompressor()
+        self.conversation_summary = self._load_conversation_summary()
+        self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
+        self.stats_collector.startup_check_once()
+        self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)
+        self.turn_stats = None
+        self._turn_stats_recorded = False
+        self.route_interceptor = ""
+        self.undo_notice_pending = False
+        self.last_change_journal_entry: dict | None = None
+        self.synthetic_user_turn = False
+        self.pending_file_target_confirmation: dict | None = None
+        # Tracks which style's bootstrap was last injected into history.
+        # Bootstrap is prepended only on session start (empty) or style change.
+        self._bootstrap_injected_for_style: str = ""
 
     def _log_dashboard(self, text: str):
         self.ui.put(("status_widget_dashboard_activity", text))
@@ -134,6 +165,22 @@ class Orchestrator:
         if self.cancel_token is not None:
             self.cancel_token.raise_if_cancelled()
 
+    def _load_conversation_summary(self) -> str:
+        return self.conversation_compressor.load_summary(CFG.CONVERSATION_SUMMARY_PATH)
+
+    def save_conversation_summary(self) -> None:
+        self.conversation_compressor.save_summary(
+            CFG.CONVERSATION_SUMMARY_PATH,
+            self.conversation_summary,
+        )
+
+    def update_conversation_summary(self, summary: str) -> None:
+        normalized = str(summary or "").strip()
+        if normalized == str(self.conversation_summary or "").strip():
+            return
+        self.conversation_summary = normalized
+        self.save_conversation_summary()
+
     def run(self):
         # Load style with config defaults as fallbacks.
         # StyleManager will use the style file's values if present, otherwise use these defaults.
@@ -153,6 +200,18 @@ class Orchestrator:
         self.turn_screen_image_kind = ""
         self.latest_codex_escalation = None
         self.failed_task_router_retries = 0
+        self.last_stage_outcome = None
+        self.last_verification = None
+        self.turn_stats = self.stats_collector.resume_or_start_turn(
+            cancel_token=self.cancel_token,
+            fallback_owner=self.chat,
+        )
+        self._turn_stats_recorded = False
+        self.route_interceptor = ""
+        self.undo_notice_pending = False
+        self.last_change_journal_entry = None
+        self.synthetic_user_turn = False
+        self.pending_file_target_confirmation = None
 
         try:
             while self.next_stage != "FINISHED":
@@ -167,13 +226,23 @@ class Orchestrator:
                     self._phase_reporter()
                 elif self.next_stage == "MANAGER":
                     self._phase_manager()
+                elif self.next_stage == "UNDO":
+                    self._phase_undo()
+                elif self.next_stage == "REMINDER_SET":
+                    self._phase_reminder_set()
+                elif self.next_stage == "EXPLAIN":
+                    self._phase_explain()
                 elif self.next_stage == "PERSONA":
                     self._phase_persona()
                 else:
                     break
+            self._record_turn_stats_if_ready()
         except OperationCancelled:
             self.ui.put(("agent_log", "   -> Action canceled by user."))
             self._log_dashboard("Canceled.")
+            raise
+        except Exception as exc:
+            self._record_turn_stats_if_ready(aborted=True, detail=str(exc), phase=self.next_stage)
             raise
 
     def _phase_route(self):
@@ -191,8 +260,35 @@ class Orchestrator:
     def _phase_manager(self):
         phase_manager(self)
 
+    def _phase_undo(self):
+        phase_undo(self)
+
+    def _phase_reminder_set(self):
+        phase_reminder_set(self)
+
+    def _phase_explain(self):
+        phase_persona(self)
+
     def _phase_persona(self):
         phase_persona(self)
+
+    def _record_turn_stats_if_ready(self, *, aborted: bool = False, detail: str = "", phase: str = "") -> None:
+        if self._turn_stats_recorded:
+            return
+        if getattr(self.turn_stats, "record_deferred", False):
+            return
+        if aborted:
+            record = self.stats_collector.record_aborted_turn(
+                self.turn_stats,
+                phase=phase,
+                detail=detail,
+            )
+        else:
+            record = self.stats_collector.record_turn(self.turn_stats)
+        if record is None:
+            return
+        self._turn_stats_recorded = True
+        self.ui.put(("stats_view_refresh", ""))
 
 
 def run_agent_loop(
@@ -211,6 +307,10 @@ def run_agent_loop(
     cancel_token: CancellationToken | None = None,
     retain_cancel_token_fn=None,
     release_cancel_token_fn=None,
+    is_search_in_flight_fn=None,
+    retain_search_in_flight_fn=None,
+    release_search_in_flight_fn=None,
+    current_search_query_fn=None,
 ):
     orc = Orchestrator(
         llm_client, agent_brain, knowledge_mgr, style_mgr,
@@ -220,5 +320,9 @@ def run_agent_loop(
         cancel_token=cancel_token,
         retain_cancel_token_fn=retain_cancel_token_fn,
         release_cancel_token_fn=release_cancel_token_fn,
+        is_search_in_flight_fn=is_search_in_flight_fn,
+        retain_search_in_flight_fn=retain_search_in_flight_fn,
+        release_search_in_flight_fn=release_search_in_flight_fn,
+        current_search_query_fn=current_search_query_fn,
     )
     orc.run()

@@ -3,26 +3,48 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from pathlib import Path
+from typing import Any
 
 from config import CFG
-from core.contracts import RouteDecision
+from core.contracts import RouteDecision, StageOutcomePack
 from core.document_focus import build_document_focus_messages, extract_document_focus
 from core.debug_tools import log_prompt_debug
+from core.file_target_confirmation import (
+    PENDING_FILE_TARGET_CONFIRMATION_PREFIX,
+    build_pending_file_target_confirmation_message,
+)
+from core.feature_hooks import fire_hooks, register_hook
 from core.engines.followup_resolution import FollowupResolutionEngine
+from core.engines.proactive_monitor import (
+    PROACTIVE_TRIGGER_PREFIX,
+    ReminderStore,
+    display_fire_at_local,
+    parse_proactive_trigger_message,
+    parse_reminder_request,
+)
 from core.engines.route_clarity import RouteClarifier
 from core.engines.state_mutation import StateMutationEngine
 from core.executor import StageExecutor
 from core.file_stage_policy import FileStagePolicy
-from core.json_utils import parse_json_response
 from core.persona_output import sanitize_persona_output
 from core.prompting import ScratchpadFormatter, PromptBuilder, build_persona_messages
-from core.routing.route_normalizer import normalize_route_decision
+from core.route_boundary import BoundaryValidationError, RouterBoundary
+from core.routing.environment_queries import looks_like_live_environment_query
+from core.routing.route_normalizer import annotate_file_stage_kinds, detect_route_interceptor, normalize_route_decision
 from core.skills import apply_route_skill_layer
 from core.stage_policy import stage_requires_user_approval, stage_requires_user_input
 from core.stream_filter import stream_thinking_filter
 from llm.llm_server_client import LLMClientError
 from core.runtime_control import OperationCancelled
+from core.turn_explanation import (
+    LAST_TURN_EXPLANATION_PREFIX,
+    activate_last_turn_explanation_snapshot,
+    build_last_turn_explanation_message,
+    build_last_turn_explanation_snapshot,
+    extract_last_turn_explanation_snapshot,
+)
 from tools.vision import VisionError, generate_stream_with_image_attachment, generate_with_image_attachment
 
 FALLBACK_SECRETARY = "You are a Router. Output JSON: {decision: 'CHAT' or 'TASK', card: {goal, context}}."
@@ -138,6 +160,10 @@ _LIVE_SCREEN_WINDOW_PERSONA_ATTACHMENT = (
 _LATEST_RUNTIME_CONTEXT_PREFIX = "[LATEST_RUNTIME_CONTEXT]"
 
 
+def _is_live_environment_chat_query(text: str) -> bool:
+    return bool(looks_like_live_environment_query(str(text or "").strip()))
+
+
 def _is_pending_search_payload(message: dict) -> bool:
     return (
         message.get("role") == "system"
@@ -145,11 +171,111 @@ def _is_pending_search_payload(message: dict) -> bool:
     )
 
 
+def _is_pending_proactive_trigger(message: dict) -> bool:
+    return (
+        message.get("role") == "system"
+        and str(message.get("content", "")).startswith(PROACTIVE_TRIGGER_PREFIX)
+    )
+
+
+def _latest_proactive_trigger_payload(messages: list[dict] | tuple[dict, ...] | None) -> dict[str, Any] | None:
+    for message in reversed(list(messages or [])):
+        if not _is_pending_proactive_trigger(message):
+            continue
+        payload = parse_proactive_trigger_message(str(message.get("content") or ""))
+        if payload:
+            payload["raw_message"] = str(message.get("content") or "")
+            return payload
+    return None
+
+
 def _is_search_reporter_instruction(message: dict) -> bool:
     return (
         message.get("role") == "system"
         and str(message.get("content", "")).strip() == SEARCH_REPORTER_INSTRUCTION
     )
+
+
+def _build_search_in_flight_reply(notice: dict) -> str:
+    active_query = str(notice.get("active_query", "") or "").strip()
+    requested_query = str(notice.get("requested_query", "") or "").strip()
+    if active_query and requested_query and active_query.casefold() != requested_query.casefold():
+        return (
+            f'I already have a web search running for "{active_query}". '
+            f'Let that finish first, then ask again about "{requested_query}" and I will take it next.'
+        )
+    if active_query:
+        return (
+            f'I already have a web search running for "{active_query}". '
+            "Let that finish first, then ask again if you want me to continue from there."
+        )
+    if requested_query:
+        return (
+            "I already have a web search running right now. "
+            f'Let that finish first, then ask again about "{requested_query}" and I will take it next.'
+        )
+    return "I already have a web search running right now. Let that finish first, then ask again and I will take the next search."
+
+
+def _build_search_first_pass_rule(query: str) -> str:
+    clean_query = str(query or "").strip()
+    lines = [
+        "[SEARCH_FIRST_PASS_RULE]",
+        "A background web search is already running for the user's latest request.",
+    ]
+    if clean_query:
+        lines.append(f"Search query: {clean_query}")
+    lines.extend(
+        [
+            "While it runs, engage with the topic using the current system context and your existing knowledge only.",
+            "Give a useful first-pass response: relevant context, a best-effort answer, or one focused follow-up question if that would materially help.",
+            "The runtime will automatically deliver the completed search results on this same turn as soon as the search finishes.",
+            "Do not ask whether to proceed, whether the user wants the results, or whether you should continue once the search completes.",
+            "Do not tell the user to wait, reply, or confirm before the search finishes.",
+            "If you ask a question, it must clarify the search topic itself, not permission to continue the search.",
+            "Stay tightly on the search topic. Do not riff on unrelated profile facts, tasks, events, memories, or document excerpts.",
+            "Ignore any personal or workspace context unless it is directly relevant to the search query itself.",
+            "Do not speculate that the web findings are empty, quiet, lacking breakthroughs, or already leaning one way unless the current system context explicitly says so.",
+            "Do not present your existing knowledge as if it came from the live web search.",
+            "Make it clear the web findings will follow shortly.",
+            "Do not emit control tags such as [ROUTER] or [RECALL].",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_search_first_pass_fallback(query: str) -> str:
+    clean_query = str(query or "").strip()
+    if clean_query:
+        return f'I\'m checking the web for "{clean_query}" now. I\'ll bring the results back automatically in a moment.'
+    return "I'm checking the web for that now. I'll bring the results back automatically in a moment."
+
+
+def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
+    current_user = str(user_msg or query or "").strip()
+    if not current_user:
+        return []
+    return [{"role": "user", "content": current_user}]
+
+
+def _build_search_report_history(
+    history: list[dict] | tuple[dict, ...] | None,
+    *,
+    user_msg: str,
+) -> list[dict[str, str]]:
+    filtered: list[dict[str, str]] = []
+    latest_summary = None
+    for message in reversed(list(history or [])):
+        if str(message.get("role") or "").strip().lower() != "system":
+            continue
+        content = str(message.get("content") or "").strip()
+        if content.startswith("[SEARCH SUMMARY FOR "):
+            latest_summary = {"role": "system", "content": content}
+            break
+    if latest_summary is not None:
+        filtered.append(latest_summary)
+    filtered.extend(_build_search_preview_history(user_msg, user_msg))
+    return filtered
 
 
 def _scratchpad_steps_executed(stage_log: list[str]) -> bool:
@@ -339,19 +465,133 @@ def _upsert_latest_runtime_context(orc, *, reporter_just_ran: bool = False) -> N
         orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
 
 
+def _consume_pipeline_stream_metrics(orc) -> list[dict[str, float | str]]:
+    try:
+        return list(getattr(orc.pipeline, "consume_completed_stream_metrics", lambda: [])() or [])
+    except Exception:
+        return []
+
+
 def _finalize_persona_turn(orc, *, reporter_just_ran: bool = False) -> None:
     orc.reporter_just_ran = False
     orc.latest_search_summary = ""
+    orc.undo_notice_pending = False
+    fire_hooks("on_turn_end", orc, reporter_just_ran=reporter_just_ran)
+
+
+@register_hook("on_turn_end")
+def _hook_consolidate_recent_memory(orc, *, reporter_just_ran: bool = False) -> None:
+    del reporter_just_ran
+    if bool(getattr(orc, "synthetic_user_turn", False)):
+        return
     recent_messages = orc.chat.recent_messages(3)
-    profile_messages = orc.chat.recent_messages(8)
     if orc.knowledge_enabled and len(recent_messages) >= 3:
         orc.knowledge.consolidate_memory_async(recent_messages)
+
+
+@register_hook("on_turn_end")
+def _hook_deferred_conversation_summary(orc, *, reporter_just_ran: bool = False) -> None:
+    """Run LLM summarization after the reply is delivered so it never blocks stream start."""
+    if reporter_just_ran:
+        return
+    if bool(getattr(orc, "synthetic_user_turn", False)):
+        return
+    if not getattr(orc, "knowledge_enabled", True):
+        return  # knowledge=false style card — skip summary to avoid cross-session leakage
+    limit = getattr(CFG, "MODEL_MAX_TURNS", 10)
+    history = list(orc.get_context())
+    existing_summary = str(getattr(orc, "conversation_summary", "") or "")
+    llm = orc.llm
+    cancel_token = getattr(orc, "cancel_token", None)
+    compressor = orc.conversation_compressor
+
+    def _run() -> None:
+        try:
+            result = compressor.compress_history(
+                history=history,
+                existing_summary=existing_summary,
+                max_turns=limit,
+                llm=llm,
+                cancel_token=cancel_token,
+            )
+            if result.summarization_used and result.summary != existing_summary:
+                orc.update_conversation_summary(result.summary)
+                orc.ui.put(("agent_log", "   -> Conversation summary updated."))
+        except OperationCancelled:
+            pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+@register_hook("on_turn_end")
+def _hook_refresh_profile_knowledge(orc, *, reporter_just_ran: bool = False) -> None:
+    del reporter_just_ran
+    if bool(getattr(orc, "synthetic_user_turn", False)):
+        return
+    profile_messages = orc.chat.recent_messages(8)
     if orc.knowledge_enabled and len(profile_messages) >= 4:
         orc.knowledge.update_knowledge_async(profile_messages)
+
+
+@register_hook("on_turn_end")
+def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> None:
+    notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
+    if str(notice.get("kind") or "").strip().lower() == "file_target_confirmation_cancelled":
+        try:
+            orc.chat.remove_hidden_system_message(_LATEST_RUNTIME_CONTEXT_PREFIX)
+        except AttributeError:
+            pass
+        return
     _upsert_latest_runtime_context(orc, reporter_just_ran=reporter_just_ran)
 
 
-def _finish_persona_fast_path(orc, text: str, *, reporter_just_ran: bool = False) -> None:
+@register_hook("on_turn_end")
+def _hook_upsert_pending_file_target_confirmation(orc, *, reporter_just_ran: bool = False) -> None:
+    del reporter_just_ran
+    payload = dict(getattr(orc, "pending_file_target_confirmation", {}) or {})
+    if payload:
+        message = build_pending_file_target_confirmation_message(payload)
+        try:
+            orc.chat.upsert_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX, message)
+        except AttributeError:
+            orc.chat.append_message({"role": "system", "content": message, "hidden": True})
+        return
+    try:
+        orc.chat.remove_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX)
+    except AttributeError:
+        pass
+
+
+@register_hook("on_turn_end")
+def _hook_upsert_last_turn_explanation_context(orc, *, reporter_just_ran: bool = False) -> None:
+    snapshot: dict[str, Any] | None
+    if str(getattr(orc, "route_interceptor", "") or "").strip().upper() == "EXPLAIN":
+        snapshot = activate_last_turn_explanation_snapshot(
+            extract_last_turn_explanation_snapshot(orc.get_context())
+        )
+    else:
+        snapshot = build_last_turn_explanation_snapshot(orc, reporter_just_ran=reporter_just_ran)
+    if not snapshot:
+        return
+    payload = build_last_turn_explanation_message(snapshot)
+    try:
+        orc.chat.upsert_hidden_system_message(LAST_TURN_EXPLANATION_PREFIX, payload)
+    except AttributeError:
+        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
+
+
+def _finish_persona_fast_path(
+    orc,
+    text: str,
+    *,
+    reporter_just_ran: bool = False,
+    emit_start: bool = False,
+) -> None:
+    del reporter_just_ran
+    if emit_start:
+        orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
     # Stream the pre-computed answer word-by-word so it appears progressively
     # in the UI rather than all at once.
     chunks = re.split(r'(\s+)', text)
@@ -360,7 +600,151 @@ def _finish_persona_fast_path(orc, text: str, *, reporter_just_ran: bool = False
             orc.ui.put(("assistant_stream_delta", {"text": chunk}))
     orc.ui.put(("assistant_stream_end", ""))
     orc.next_stage = "FINISHED"
-    _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+
+
+def _append_undo_notice_if_needed(orc, text: str) -> str:
+    del orc
+    return str(text or "").strip()
+
+
+def _build_file_state_correction_ack_reply(system_notice: dict[str, Any]) -> str:
+    reply = str(system_notice.get("reply") or "").strip()
+    if reply:
+        return reply
+    target = str(system_notice.get("target") or "").strip()
+    desired_state = str(system_notice.get("desired_state") or "").strip().lower()
+    if target and desired_state == "absent":
+        return f"Indeed. The verified final state was already that `{target}` did not exist."
+    return "Indeed. The verified final state already matched that correction."
+
+
+def _build_file_target_confirmation_cancelled_reply(system_notice: dict[str, Any]) -> str:
+    reply = str(system_notice.get("reply") or "").strip()
+    if reply:
+        return reply
+    exact_target = str(system_notice.get("exact_target") or "").strip()
+    if exact_target:
+        return f"Understood. I will leave `{exact_target}` alone."
+    return "Understood. I will leave the workspace unchanged."
+
+
+def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index: int) -> dict[str, Any]:
+    route = json.loads(json.dumps(dict(getattr(orc, "route_decision", {}) or {}), ensure_ascii=False))
+    if not isinstance(route, dict):
+        return {}
+    if str(route.get("decision") or "").strip().upper() != "TASK":
+        return {}
+    card = dict(route.get("card") or {})
+    stages = [dict(item) for item in (card.get("stages") or []) if isinstance(item, dict)]
+    if stages:
+        card["stages"] = stages[stage_index:]
+    route["card"] = card
+    return route
+
+
+def _maybe_pause_for_missing_file_target_confirmation(
+    orc,
+    executor: StageExecutor,
+    *,
+    stage: dict[str, Any],
+    stage_index: int,
+    stage_log: list[str],
+) -> bool:
+    requested_target = str(getattr(executor, "terminal_missing_file_target", "") or "").strip()
+    if not requested_target:
+        return False
+    workspace = Path(getattr(orc.brain, "workspace", "."))
+    candidates = FileStagePolicy.find_workspace_target_candidates(workspace, requested_target, limit=3)
+    if not candidates:
+        return False
+
+    if len(candidates) == 1:
+        question = f"I can't find `{requested_target}`. Did you mean `{candidates[0]}`?"
+    else:
+        rendered = ", ".join(f"`{item}`" for item in candidates[:3])
+        question = f"I can't find `{requested_target}`. Which of these did you mean: {rendered}?"
+
+    proposal_entry = ScratchpadFormatter.format_step(
+        max(1, _scratchpad_steps_executed(stage_log) + 1),
+        "Pause and ask the user to confirm the intended file target.",
+        "[NO_TOOL_PROPOSAL]",
+        f"PROPOSAL: {question}",
+    )
+    stage_log.append(proposal_entry)
+    executor.pause_requested = True
+    executor.pause_mode = "user_input"
+    orc.pending_file_target_confirmation = {
+        "kind": "missing_file_target_confirmation",
+        "exact_target": requested_target,
+        "candidates": candidates[:3],
+        "question": question,
+        "route_decision": _build_remaining_route_decision_for_target_confirmation(
+            orc,
+            stage_index=stage_index,
+        ),
+        "stage_type": str(stage.get("stage_type") or "").strip(),
+    }
+    orc.ui.put(("agent_log", "   -> Exact file target is missing, but a close workspace match exists. Pausing for confirmation."))
+    orc._log_dashboard("Awaiting file-target confirmation.")
+    return True
+
+
+def _build_compound_file_sequence_final_state_reply(orc) -> str:
+    entry = dict(getattr(orc, "last_change_journal_entry", {}) or {})
+    if not entry or not bool(entry.get("task_success")):
+        return ""
+
+    operations = [dict(item) for item in (entry.get("operations") or []) if isinstance(item, dict)]
+    if len(operations) < 4:
+        return ""
+
+    actions = [str(item.get("action") or "").strip().lower() for item in operations]
+    if actions != ["write_text", "delete_path", "write_text", "delete_path"]:
+        return ""
+
+    primary_paths = [str(item).strip() for item in (entry.get("primary_paths") or []) if str(item).strip()]
+    if len(primary_paths) != 1:
+        return ""
+
+    path = primary_paths[0]
+    return f"Completed the requested file sequence. The final state is that `{path}` does not exist."
+
+
+def _rewrite_undo_result_for_file_target_correction(
+    orc,
+    *,
+    summary: str,
+    detail: str,
+) -> tuple[str, str]:
+    notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
+    if str(notice.get("kind") or "").strip().lower() != "file_target_correction":
+        return summary, detail
+
+    wrong_target = str(notice.get("wrong_target") or "").strip()
+    correct_target = str(notice.get("correct_target") or "").strip()
+    desired_state = str(notice.get("desired_state") or "").strip().lower()
+
+    base_summary = f"Reverted the mistaken change to {wrong_target}."
+    if not correct_target:
+        return base_summary, detail or base_summary
+
+    workspace = Path(getattr(orc.brain, "workspace", "."))
+    correct_exists = (workspace / correct_target).exists()
+    if desired_state == "absent":
+        if not correct_exists:
+            return (
+                f"{base_summary} {correct_target} was already absent.",
+                f"Restored {wrong_target} after your correction. The intended final state for {correct_target} was already satisfied.",
+            )
+        return (
+            base_summary,
+            f"Restored {wrong_target} after your correction. {correct_target} still exists, so the intended deleted final state is not yet satisfied.",
+        )
+
+    return (
+        base_summary,
+        f"Restored {wrong_target} because the previous action targeted the wrong file instead of {correct_target}.",
+    )
 
 
 def _merge_secretary_system_prompt(base_prompt: str, latest_runtime_context: str) -> str:
@@ -375,33 +759,151 @@ def _merge_secretary_system_prompt(base_prompt: str, latest_runtime_context: str
     return runtime
 
 
+@register_hook("on_pre_route")
+def _hook_note_pre_route_user_msg(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
+    del recent_history
+    orc.stats_collector.note_user_msg(orc.turn_stats, orc.user_msg)
+
+
+@register_hook("on_pre_route")
+def _hook_record_user_turn_once(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
+    del recent_history
+    if bool(getattr(orc, "synthetic_user_turn", False)):
+        return
+    # Only ingest the user turn once per logical turn — not on re-routes.
+    # When [ROUTER] loops back through phase_route, orc.user_msg is unchanged;
+    # calling ingest_user_turn again would refresh a just-cleared intent entry
+    # and make it impossible to clear via commands.
+    msg_to_ingest = str(orc.user_msg or "").strip()
+    if not msg_to_ingest or getattr(orc, "_last_ingested_user_msg", None) == msg_to_ingest:
+        return
+    try:
+        orc.prompt_context.record_user_turn(msg_to_ingest)
+        orc._last_ingested_user_msg = msg_to_ingest
+    except Exception:
+        pass
+
+
 def phase_route(orc) -> None:
     orc.raise_if_cancelled()
-    orc._update_status(mode="ROUTING")
-    orc.ui.put(("agent_log", "--- PHASE 1: SECRETARY (Routing) ---"))
+    orc._update_status(mode="ANALYZING")
+    orc.ui.put(("agent_log", "--- PHASE 1: ROUTE CHECK ---"))
     orc.latest_route_error = ""
+    orc.stats_collector.start_phase(orc.turn_stats, "route")
 
     full_history = orc.get_context()
     recent_history = full_history[-6:]
     latest_runtime_context = _latest_runtime_context_message(full_history)
-    router_history = list(recent_history)
+    proactive_trigger = _latest_proactive_trigger_payload(recent_history)
     orc.user_msg = ""
+    orc.synthetic_user_turn = False
+    if proactive_trigger is not None:
+        orc.user_msg = str(proactive_trigger.get("message") or "").strip()
+        orc.synthetic_user_turn = True
     for message in reversed(recent_history):
+        if orc.synthetic_user_turn:
+            break
         if message.get("role") == "user":
             orc.user_msg = message.get("content", "")
             break
+    fire_hooks("on_pre_route", orc, recent_history=recent_history)
 
-    if str(orc.user_msg or "").strip():
-        try:
-            orc.prompt_context.record_user_turn(str(orc.user_msg))
-        except Exception:
-            pass
+    # Build router_history: exclude the current user turn (passed separately as
+    # user_msg) so it is not duplicated in the JSON history block.  Also strip
+    # "Thinking..." assistant placeholder entries — they add noise without signal.
+    _current_skipped = False
+    router_history = []
+    for _msg in reversed(recent_history):
+        if not _current_skipped and _msg.get("role") == "user":
+            _current_skipped = True
+            continue
+        if _msg.get("role") == "assistant" and str(_msg.get("content", "")).strip() == "Thinking...":
+            continue
+        router_history.append(_msg)
+    router_history.reverse()
 
     orc.is_search_result = any(_is_pending_search_payload(message) for message in recent_history)
 
     if orc.is_search_result:
-        orc.ui.put(("agent_log", "   -> Context implies Search Result. Bypassing Router."))
+        orc.ui.put(("agent_log", "   -> Context implies Search Result. Skipping Secretary/router LLM."))
+        if not str(getattr(orc.turn_stats, "decision", "") or "").strip():
+            orc.stats_collector.note_route(orc.turn_stats, decision="SEARCH")
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
         orc.next_stage = "REPORTER"
+        return
+
+    if proactive_trigger is not None:
+        local_fire_at = display_fire_at_local(str(proactive_trigger.get("fire_at") or ""))
+        orc.route_interceptor = "PROACTIVE_TRIGGER"
+        orc.route_decision = {
+            "decision": "CHAT",
+            "interceptor": "PROACTIVE_TRIGGER",
+            "system_notice": {
+                "kind": "proactive_trigger",
+                "id": str(proactive_trigger.get("id") or "").strip(),
+                "message": str(proactive_trigger.get("message") or "").strip(),
+                "fire_at": str(proactive_trigger.get("fire_at") or "").strip(),
+                "fire_at_local": local_fire_at,
+                "raw_message": str(proactive_trigger.get("raw_message") or "").strip(),
+            },
+        }
+        orc.ui.put(("agent_log", "   -> Proactive reminder trigger detected. Skipping Secretary/router LLM."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="proactive_trigger",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
+        orc.next_stage = "PERSONA"
+        return
+
+    route_interceptor = detect_route_interceptor(orc.user_msg, router_history)
+    if route_interceptor is not None:
+        interceptor_kind = str(route_interceptor.get("kind") or "").strip().upper()
+        orc.route_interceptor = interceptor_kind
+        interceptor_decision = dict(route_interceptor.get("route_decision") or {})
+        if interceptor_decision:
+            orc.route_decision = interceptor_decision
+        elif str(route_interceptor.get("stats_decision") or "").strip():
+            orc.route_decision = {"decision": str(route_interceptor.get("stats_decision") or "").strip().upper()}
+        log_message = str(route_interceptor.get("log_message") or "").strip()
+        if log_message:
+            orc.ui.put(("agent_log", log_message))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision=str(route_interceptor.get("stats_decision") or (orc.route_decision.get("decision") if orc.route_decision else "") or "CHAT").strip().upper(),
+            bypass=str(route_interceptor.get("bypass") or interceptor_kind.lower()).strip().lower(),
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
+        orc.next_stage = str(route_interceptor.get("next_stage") or interceptor_kind or "PERSONA").strip().upper()
+        return
+
+    if _is_live_environment_chat_query(orc.user_msg):
+        orc.route_decision = {"decision": "CHAT", "card": {"query": orc.user_msg}}
+        orc.ui.put(("agent_log", "   -> Live environment query. Skipping Secretary/router LLM and answering in PERSONA."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="environment_query",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
+        orc.next_stage = "PERSONA"
+        return
+
+    try:
+        _opstate_answer = orc.prompt_context.build_readonly_state_answer(orc.user_msg)
+    except Exception:
+        _opstate_answer = ""
+    if _opstate_answer:
+        orc.route_decision = {"decision": "CHAT", "card": {"query": orc.user_msg}}
+        orc.ui.put(("agent_log", "   -> Operational state query. Skipping Secretary/router LLM and answering in PERSONA."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="operational_state_query",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
+        orc.next_stage = "PERSONA"
         return
 
     orc.ingested_document_chat = False
@@ -412,16 +914,31 @@ def phase_route(orc) -> None:
     if _should_route_ingested_document_chat(orc.user_msg, recent_history, ingested_documents):
         orc.route_decision = {"decision": "CHAT"}
         orc.ingested_document_chat = True
-        orc.ui.put(("agent_log", "   -> Routed to CHAT via ingested document memory."))
+        orc.ui.put(("agent_log", "   -> Ingested document chat heuristic matched. Skipping Secretary/router LLM."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="ingested_document_chat",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
         orc.next_stage = "DOC_FOCUS"
         return
 
     live_screen_path = _resolve_live_screen_turn_image(orc)
     if _should_route_live_screen_visual_chat(orc.user_msg, live_screen_path=live_screen_path):
         orc.route_decision = {"decision": "CHAT"}
-        orc.ui.put(("agent_log", "   -> Routed to CHAT via live screen visual query rule."))
+        orc.ui.put(("agent_log", "   -> Live screen visual query matched. Skipping Secretary/router LLM."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="live_screen_visual_chat",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "route")
         orc.next_stage = "PERSONA"
         return
+
+    orc._update_status(mode="ROUTING")
+    orc.ui.put(("agent_log", "--- PHASE 1.1: SECRETARY (Router LLM) ---"))
 
     prompt_path = CFG.PROMPTS_DIR / "secretary.txt"
     sys_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else FALLBACK_SECRETARY
@@ -430,14 +947,14 @@ def phase_route(orc) -> None:
     messages.append(
         {
             "role": "user",
-            "content": f"User Input: {orc.user_msg}\nHistory:\n{json.dumps(router_history, indent=2)}",
+            "content": f"{orc.user_msg}\nHistory:\n{json.dumps(router_history, indent=2)}",
         }
     )
 
     try:
         orc.ui.put(("status", "Routing..."))
         if CFG.DEBUG_LLM_PROMPTS:
-            log_prompt_debug(CFG.LLM_PROMPT_DEBUG_PATH, messages, "SECRETARY")
+            log_prompt_debug(CFG.ROUTER_DEBUG_PATH, messages, "SECRETARY")
         if live_screen_path is not None:
             raw = generate_with_image_attachment(
                 orc.llm,
@@ -450,10 +967,11 @@ def phase_route(orc) -> None:
         else:
             raw = orc.llm.generate(messages, temperature=0.1, cancel_token=orc.cancel_token)
         orc.ui.put(("agent_log", f"   -> Secretary Raw: {raw}"))
-        parsed_raw: RouteDecision | None = parse_json_response(raw)
-        parsed: RouteDecision = parsed_raw or {"decision": "CHAT"}
-        if not parsed_raw:
-            orc.ui.put(("agent_log", "   -> Secretary JSON parse failed. Applying route normalization to CHAT fallback."))
+        try:
+            parsed: RouteDecision = RouterBoundary.validate(raw)
+        except BoundaryValidationError as exc:
+            parsed = exc.fallback or RouterBoundary.fallback()
+            orc.ui.put(("agent_log", f"   -> Router validation failed: {exc}. Applying CHAT fallback."))
         normalized = normalize_route_decision(parsed, orc.user_msg, router_history)
         followup_resolved = _resolve_followup_route_with_llm(orc, normalized, router_history)
         if followup_resolved is not None and followup_resolved != normalized:
@@ -463,6 +981,7 @@ def phase_route(orc) -> None:
         if clarified is not None and clarified != normalized:
             normalized = clarified
             orc.ui.put(("agent_log", "   -> Ambiguous task route converted into clarification pause."))
+        normalized = annotate_file_stage_kinds(normalized)
         skilled = apply_route_skill_layer(
             normalized,
             orc.user_msg,
@@ -476,6 +995,27 @@ def phase_route(orc) -> None:
             skill_name = str(selected_skill.get("name") or "").strip()
             if skill_name:
                 orc.ui.put(("agent_log", f"   -> Skill: {skill_name}"))
+        if (
+            str(orc.route_decision.get("decision") or "").strip().upper() == "SEARCH"
+            and bool(getattr(orc, "is_search_in_flight", lambda: False)())
+        ):
+            requested_query = str(
+                (orc.route_decision.get("card") or {}).get("query")
+                or orc.user_msg
+                or ""
+            ).strip()
+            active_query = str(getattr(orc, "current_search_query", lambda: "")() or "").strip()
+            orc.route_decision = {
+                "decision": "CHAT",
+                "card": {"query": requested_query},
+                "system_notice": {
+                    "kind": "search_in_flight",
+                    "active_query": active_query,
+                    "requested_query": requested_query,
+                },
+            }
+            orc.ui.put(("agent_log", "   -> Search already in flight. Redirecting duplicate SEARCH request to PERSONA."))
+            orc._log_dashboard("Search already running.")
         if normalized != parsed:
             orc.ui.put(("agent_log", "   -> Normalized route decision for current runtime behavior."))
         orc.ui.put(("agent_log", f"   -> Route: {orc.route_decision.get('decision')}"))
@@ -510,6 +1050,15 @@ def phase_route(orc) -> None:
         orc.ui.put(("agent_log", f"   -> Secretary Error: {exc}"))
         orc.route_decision = {"decision": "CHAT"}
 
+    orc.stats_collector.note_route(
+        orc.turn_stats,
+        decision=str(orc.route_decision.get("decision") or "").strip().upper(),
+        source_scope=str(orc.route_decision.get("source_scope") or "").strip().lower(),
+        confidence=str(orc.route_decision.get("confidence") or "").strip().lower(),
+        search_query=str(((orc.route_decision.get("card") or {}).get("query") or "")).strip(),
+        latest_route_error=orc.latest_route_error,
+    )
+    orc.stats_collector.end_phase(orc.turn_stats, "route")
     decision = orc.route_decision.get("decision")
     if decision == "SEARCH":
         orc.next_stage = "SEARCH"
@@ -543,7 +1092,7 @@ def phase_document_focus(orc) -> None:
 
     messages = build_document_focus_messages(orc.user_msg, hits)
     if CFG.DEBUG_LLM_PROMPTS:
-        log_prompt_debug(CFG.LLM_PROMPT_DEBUG_PATH, messages, "DOCUMENT_FOCUS")
+        log_prompt_debug(CFG.DOC_FOCUS_DEBUG_PATH, messages, "DOCUMENT_FOCUS")
 
     try:
         result = extract_document_focus(
@@ -582,34 +1131,101 @@ def phase_document_focus(orc) -> None:
 
 def phase_search(orc) -> None:
     orc.raise_if_cancelled()
+    orc.stats_collector.start_phase(orc.turn_stats, "persona")
     query = orc.route_decision.get("card", {}).get("query", orc.user_msg)
+    orc.stats_collector.note_route(
+        orc.turn_stats,
+        decision="SEARCH",
+        search_query=str(query or "").strip(),
+    )
+    if _is_live_environment_chat_query(query):
+        orc.route_decision = {"decision": "CHAT", "card": {"query": query}}
+        orc.ui.put(("agent_log", "   -> Search route downgraded to CHAT for live environment query."))
+        orc.stats_collector.note_route(
+            orc.turn_stats,
+            decision="CHAT",
+            bypass="environment_query",
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.next_stage = "PERSONA"
+        return
     orc.ui.put(("agent_log", f"--- ROUTER: Triggering Background Search for '{query}' ---"))
 
-    speak_messages = [
-        {"role": "system", "content": "You are Piper. You have just triggered a background web search. Inform the user you are checking the web for them now. Be brief."},
-        {"role": "user", "content": orc.user_msg},
-    ]
+    prompt_pack = orc.prompt_context.build_persona_pack(
+        user_msg=orc.user_msg,
+        style_overlay=orc.ss.overlay or "",
+        knowledge_enabled=orc.knowledge_enabled,
+        brain_limit=9,
+        document_limit=0,
+    )
+    prompt_pack = orc.prompt_context.apply_context_arbitration(
+        prompt_pack,
+        route_decision=orc.route_decision,
+        reporter_just_ran=False,
+    )
+    prompt_context = orc.prompt_context.to_prompt_context(prompt_pack)
+    system_content = PromptBuilder.build_persona_prompt(prompt_context)
+    history = _build_search_preview_history(orc.user_msg, query)
+    speak_messages = build_persona_messages(
+        system_content=system_content,
+        history=history,
+        tail_system_content=_build_search_first_pass_rule(query),
+        model_path=getattr(CFG, "MODEL_PATH", None),
+    )
+    if CFG.DEBUG_LLM_PROMPTS:
+        log_prompt_debug(CFG.PERSONA_DEBUG_PATH, speak_messages, "SEARCH_FIRST_PASS")
+
+    fallback_text = _build_search_first_pass_fallback(query)
     orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
+    full_answer = ""
     try:
-        for delta in orc.llm.generate_stream(
+        full_answer, _ = _stream_or_capture_persona_answer_text_only(
+            orc,
             speak_messages,
-            temperature=orc.temperature,
-            cancel_token=orc.cancel_token,
-        ):
-            orc.ui.put(("assistant_stream_delta", {"text": delta}))
+            allow_recall=False,
+        )
     except OperationCancelled:
         orc.ui.put(("assistant_stream_end", ""))
         raise
-    except Exception:
-        pass
-    orc.ui.put(("assistant_stream_end", ""))
+    except LLMClientError as exc:
+        orc.emit_runtime_signal(
+            {
+                "kind": "search_preview_error",
+                "severity": "warning",
+                "source": "search",
+                "summary": f"Search first-pass error: {exc}",
+                "details": str(exc),
+            }
+        )
+        orc.ui.put(("agent_log", f"   -> Search first-pass error: {exc}"))
+    except Exception as exc:
+        orc.ui.put(("agent_log", f"   -> Search first-pass fallback: {exc}"))
+
+    clean_answer = sanitize_persona_output(
+        _strip_persona_control_tags(full_answer),
+        route_decision=orc.route_decision,
+        outcome_block="",
+        user_msg=orc.user_msg,
+    )
+    if clean_answer:
+        orc.ui.put(("assistant_stream_end", ""))
+        if clean_answer != full_answer.strip():
+            orc.chat.replace_last_assistant_content(clean_answer)
+    else:
+        orc.ui.put(("agent_log", "   -> Search first-pass reply unavailable. Using brief fallback acknowledgment."))
+        _emit_fallback_assistant_answer(orc, fallback_text)
+
+    orc.stats_collector.end_phase(orc.turn_stats, "persona")
+    orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
 
     from tools.search import perform_search
 
+    if orc.cancel_token is not None:
+        orc.retain_cancel_token(orc.cancel_token)
+    orc.retain_search_in_flight(query)
+
     def _do_search() -> None:
         queued_result = False
-        if orc.cancel_token is not None:
-            orc.retain_cancel_token(orc.cancel_token)
         try:
             orc.raise_if_cancelled()
             data = perform_search(
@@ -636,12 +1252,25 @@ def phase_search(orc) -> None:
             orc.ui.put(("error", f"Search Error: {exc}"))
             orc._log_dashboard(f"Search Error: {exc}")
         finally:
+            orc.release_search_in_flight()
             if orc.cancel_token is not None:
                 orc.release_cancel_token(orc.cancel_token)
             if not queued_result:
                 orc.ui.put(("status", "Canceled" if orc.cancel_token and orc.cancel_token.is_cancelled else "IDLE"))
 
-    threading.Thread(target=_do_search, daemon=True).start()
+    worker = threading.Thread(target=_do_search, daemon=True)
+    try:
+        worker.start()
+    except Exception:
+        orc.release_search_in_flight()
+        if orc.cancel_token is not None:
+            orc.release_cancel_token(orc.cancel_token)
+        raise
+    orc.stats_collector.defer_search_turn(
+        orc.turn_stats,
+        cancel_token=orc.cancel_token,
+        fallback_owner=orc.chat,
+    )
     orc.next_stage = "FINISHED"
 
 
@@ -660,6 +1289,9 @@ def _resolve_followup_route_with_llm(
             knowledge_mgr=getattr(orc.prompt_context, "knowledge_mgr", None),
             cancel_token=getattr(orc, "cancel_token", None),
         )
+    except BoundaryValidationError as exc:
+        orc.ui.put(("agent_log", f"   -> Follow-up resolver validation failed: {exc}."))
+        return exc.fallback
     except OperationCancelled:
         raise
     except Exception as exc:
@@ -680,6 +1312,9 @@ def _refine_ambiguous_task_route_with_llm(
             recent_history=router_history,
             cancel_token=getattr(orc, "cancel_token", None),
         )
+    except BoundaryValidationError as exc:
+        orc.ui.put(("agent_log", f"   -> Route clarifier validation failed: {exc}."))
+        return exc.fallback
     except OperationCancelled:
         raise
     except Exception as exc:
@@ -690,6 +1325,7 @@ def _refine_ambiguous_task_route_with_llm(
 def phase_reporter(orc) -> None:
     orc.raise_if_cancelled()
     orc.ui.put(("agent_log", "   -> Search Result Detected. Activating Reporter Layer."))
+    orc.stats_collector.start_phase(orc.turn_stats, "reporter")
 
     recent_history = orc.get_context()[-6:]
     raw_content = ""
@@ -719,6 +1355,7 @@ def phase_reporter(orc) -> None:
     reporter_path = CFG.PROMPTS_DIR / "reporter.txt"
     sys_template = reporter_path.read_text(encoding="utf-8") if reporter_path.exists() else "Summarize this."
     sys_prompt = sys_template.replace("{query}", query).replace("{data}", data)
+    orc.stats_collector.note_reporter_query(orc.turn_stats, query)
 
     orc.ui.put(("status", "Analyzing Search Results..."))
     try:
@@ -751,14 +1388,38 @@ def phase_reporter(orc) -> None:
         orc.chat.replace_last_system_message(instruction_content, consumed_msg)
     orc.latest_search_summary = summary
     orc.reporter_just_ran = True
+    orc.stats_collector.end_phase(orc.turn_stats, "reporter")
     orc.next_stage = "PERSONA"
+
+
+@register_hook("on_task_verified")
+def _hook_record_change_journal(
+    orc,
+    *,
+    completed_change_operations: list[dict[str, Any]] | None = None,
+    completed_all_stages: bool = False,
+    task_failed: bool = False,
+    task_paused: bool = False,
+) -> None:
+    operations = [dict(item) for item in (completed_change_operations or []) if isinstance(item, dict)]
+    task_success = bool(completed_all_stages and not task_failed and not task_paused)
+    orc.last_change_journal_entry = orc.change_journal.record_turn(
+        turn_id=str(getattr(getattr(orc, "turn_stats", None), "turn_id", "") or ""),
+        user_msg=str(getattr(orc, "user_msg", "") or ""),
+        task_goal=str((orc.context_card or {}).get("goal") or ""),
+        task_success=task_success,
+        operations=operations,
+    )
+    orc.undo_notice_pending = bool(orc.last_change_journal_entry) and task_success
 
 
 def phase_manager(orc) -> None:
     orc.raise_if_cancelled()
     orc.context_card = orc.route_decision.get("card", {})
+    orc.pending_file_target_confirmation = None
     orc._update_status(mode="PLANNING", goal=orc.context_card.get("goal", "Unknown"))
     orc.ui.put(("agent_log", "--- PHASE 2: EXECUTIVE LOOP (Task) ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "manager")
 
     stages = orc.context_card.get("stages", [])
     if not stages:
@@ -772,6 +1433,8 @@ def phase_manager(orc) -> None:
             }
         )
         orc.ui.put(("error", "TASK card received with no stages. Falling back to CHAT."))
+        orc.stats_collector.note_route(orc.turn_stats, decision="TASK")
+        orc.stats_collector.end_phase(orc.turn_stats, "manager")
         orc.next_stage = "PERSONA"
         return
 
@@ -783,11 +1446,17 @@ def phase_manager(orc) -> None:
         orc.ui,
         cancel_token=orc.cancel_token,
         signal_emitter=lambda signal: orc.emit_runtime_signal(signal, scratchpad=executor.scratchpad),
+        stats_collector=orc.stats_collector,
+        operational_state_service=getattr(orc.prompt_context, "operational_state_service", None),
     )
     # Capture the parent objective once so every stage can reference it.
     objective = str(orc.context_card.get("goal", "") or "").strip()
 
     total_stages = len(stages)
+    completed_change_operations: list[dict[str, Any]] = []
+    task_failed = False
+    task_paused = False
+    completed_all_stages = False
     for index, stage in enumerate(stages):
         orc.raise_if_cancelled()
         stage = dict(stage)
@@ -803,6 +1472,9 @@ def phase_manager(orc) -> None:
         needs_user_approval = stage_requires_user_approval(stage)
 
         success, stage_log = executor.run(stage, stage_num, total_stages)
+        completed_change_operations.extend(
+            [dict(item) for item in getattr(executor, "completed_change_operations", []) if isinstance(item, dict)]
+        )
         # Surface the typed VerificationResult so phase_persona uses the
         # authoritative verdict rather than re-inferring from scratchpad text.
         orc.last_verification = getattr(executor, "_last_verification", None)
@@ -811,6 +1483,17 @@ def phase_manager(orc) -> None:
             and FileStagePolicy.stage_requires_analysis_report(stage)
             and bool(orc.prompt_context.extract_latest_stage_proposal_answer(stage_log))
             and bool(orc.prompt_context.extract_exact_file_read_answer(stage_log))
+        ):
+            success = True
+        if (
+            not success
+            and _maybe_pause_for_missing_file_target_confirmation(
+                orc,
+                executor,
+                stage=stage,
+                stage_index=index,
+                stage_log=stage_log,
+            )
         ):
             success = True
         if executor.pause_requested:
@@ -823,7 +1506,7 @@ def phase_manager(orc) -> None:
             elif not needs_user_input:
                 needs_user_approval = True
 
-        orc.scratchpad = stage_log
+        orc.scratchpad.extend(stage_log)
         steps_executed = _scratchpad_steps_executed(stage_log)
         last_entry = stage_log[-1] if stage_log else ""
         is_error_state = _scratchpad_entry_indicates_error(last_entry)
@@ -842,8 +1525,30 @@ def phase_manager(orc) -> None:
             last_observation=last_entry,
             status_override=pause_status,
             stage_entries=stage_log,
+            stage=stage,
         )
+        orc.last_stage_outcome = outcome_pack
         true_success = outcome_pack.effective_success
+        verification_verdict = str(getattr(getattr(orc, "last_verification", None), "verdict", "") or "").strip().upper()
+        if verification_verdict not in {"VERIFIED", "PARTIAL", "FAILED"}:
+            if true_success and pause_status:
+                verification_verdict = "PARTIAL"
+            elif true_success:
+                verification_verdict = "VERIFIED"
+            else:
+                verification_verdict = "FAILED"
+        stage_metrics = dict(getattr(executor, "_last_stage_metrics", {}) or {})
+        orc.stats_collector.add_stage(
+            orc.turn_stats,
+            index=stage_num,
+            stage=stage,
+            planner_ms=float(stage_metrics.get("planner_ms") or 0.0),
+            executor_ms=float(stage_metrics.get("executor_ms") or 0.0),
+            total_ms=float(stage_metrics.get("stage_total_ms") or 0.0),
+            verification=verification_verdict,
+            status=str(getattr(outcome_pack, "status", "") or pause_status or ""),
+            effective_success=bool(true_success),
+        )
         outcome_text = ScratchpadFormatter.format_outcome(
             stage_num,
             true_success,
@@ -858,14 +1563,19 @@ def phase_manager(orc) -> None:
             if needs_user_input:
                 orc.ui.put(("agent_log", f"   -> Stage {stage_num} Ready. Awaiting user input."))
                 orc._log_dashboard(f"Stage {stage_num} awaiting user input.")
+                task_paused = True
                 break
             if needs_user_approval:
                 orc.ui.put(("agent_log", f"   -> Stage {stage_num} Ready. Awaiting user approval before execution."))
                 orc._log_dashboard(f"Stage {stage_num} awaiting approval.")
+                task_paused = True
                 break
             orc.ui.put(("agent_log", f"   -> Stage {stage_num} Complete."))
             orc._log_dashboard(f"Stage {stage_num} Success.")
+            if stage_num == total_stages:
+                completed_all_stages = True
         else:
+            task_failed = True
             if bool(getattr(outcome_pack, "auto_reroute", False)) and int(getattr(orc, "failed_task_router_retries", 0) or 0) < 1:
                 orc.failed_task_router_retries = int(getattr(orc, "failed_task_router_retries", 0) or 0) + 1
                 _upsert_latest_runtime_context(orc, reporter_just_ran=False)
@@ -875,12 +1585,167 @@ def phase_manager(orc) -> None:
                 else:
                     orc.ui.put(("agent_log", "   -> Auto-rerouting after failed stage to re-evaluate intent."))
                 orc._log_dashboard(f"Stage {stage_num} rerouting.")
+                orc.stats_collector.end_phase(orc.turn_stats, "manager")
                 orc.next_stage = "ROUTE"
                 return
             orc.ui.put(("agent_log", f"   -> Stage {stage_num} Failed/Errors."))
             orc._log_dashboard(f"Stage {stage_num} Failed.")
             break
 
+    orc.last_change_journal_entry = None
+    orc.undo_notice_pending = False
+    fire_hooks(
+        "on_task_verified",
+        orc,
+        completed_change_operations=completed_change_operations,
+        completed_all_stages=completed_all_stages,
+        task_failed=task_failed,
+        task_paused=task_paused,
+    )
+
+    orc.stats_collector.note_route(orc.turn_stats, decision="TASK")
+    orc.stats_collector.end_phase(orc.turn_stats, "manager")
+    orc.next_stage = "PERSONA"
+
+
+def phase_undo(orc) -> None:
+    orc.raise_if_cancelled()
+    orc.context_card = dict((orc.route_decision or {}).get("card") or {})
+    stage = {}
+    stages = orc.context_card.get("stages") or []
+    if stages and isinstance(stages[0], dict):
+        stage = dict(stages[0])
+    if not stage:
+        stage = {
+            "stage_goal": "Undo the most recent mutating file task.",
+            "stage_type": "FILE_WORK",
+            "success_condition": "The latest recorded reversible file changes are restored.",
+            "file_stage_kind": "CONTENT_EDIT",
+        }
+    orc._update_status(mode="PLANNING", goal=orc.context_card.get("goal", "Undo the last file task"))
+    orc.ui.put(("agent_log", "--- PHASE 2: UNDO ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "manager")
+    started_at = time.perf_counter()
+    orc.last_verification = None
+    orc.undo_notice_pending = False
+    orc.scratchpad = [ScratchpadFormatter.format_stage_header(1, stage)]
+
+    result = orc.change_journal.undo_latest(Path(getattr(orc.brain, "workspace", ".")))
+    summary = str(result.get("summary") or "").strip()
+    detail = str(result.get("detail") or summary).strip()
+    status = str(result.get("status") or "FAILED").strip().upper()
+    paths = [str(item).strip() for item in (result.get("paths") or []) if str(item).strip()]
+    if status == "VERIFIED":
+        summary, detail = _rewrite_undo_result_for_file_target_correction(
+            orc,
+            summary=summary,
+            detail=detail,
+        )
+    observation = {
+        "tool": "UNDO",
+        "status": status,
+        "summary": summary,
+        "action": "undo_last_task",
+        "evidence_files": paths[:6],
+        "workspace_changed": bool(result.get("workspace_changed")),
+    }
+    orc.scratchpad.append(
+        ScratchpadFormatter.format_step(
+            1,
+            "Revert the latest recorded mutating file task.",
+            "[UNDO]",
+            observation,
+        )
+    )
+
+    effective_success = status == "VERIFIED"
+    if effective_success:
+        payload = {
+            "kind": "mutation_verified",
+            "tool": "UNDO",
+            "action": "undo",
+            "paths": paths[:6],
+            "summary": summary,
+            "reason": detail,
+        }
+        orc.scratchpad.append("FILE_WORK_VERIFIED_RESULT: " + json.dumps(payload, ensure_ascii=False))
+        outcome_pack = StageOutcomePack(
+            status="FILE OPERATION SUCCESS",
+            detail=detail,
+            effective_success=True,
+            allow_persona_reroute=True,
+        )
+    else:
+        outcome_pack = StageOutcomePack(
+            status="FAILED / INCOMPLETE",
+            detail=detail,
+            effective_success=False,
+            allow_persona_reroute=False,
+        )
+    orc.last_stage_outcome = outcome_pack
+
+    outcome_text = f"=== STAGE 1 OUTCOME ===\nRESULT: {outcome_pack.status}"
+    if detail:
+        outcome_text += f"\nLAST_LOG: {detail}"
+    orc.scratchpad.append(outcome_text)
+
+    elapsed_ms = round(max(0.0, (time.perf_counter() - started_at) * 1000.0), 3)
+    orc.stats_collector.add_stage(
+        orc.turn_stats,
+        index=1,
+        stage=stage,
+        planner_ms=0.0,
+        executor_ms=elapsed_ms,
+        total_ms=elapsed_ms,
+        verification="VERIFIED" if effective_success else ("PARTIAL" if status == "PARTIAL" else "FAILED"),
+        status=str(outcome_pack.status or ""),
+        effective_success=bool(effective_success),
+    )
+    orc.stats_collector.note_route(orc.turn_stats, decision="TASK")
+    orc.stats_collector.end_phase(orc.turn_stats, "manager")
+    orc.next_stage = "PERSONA"
+
+
+def phase_reminder_set(orc) -> None:
+    orc.raise_if_cancelled()
+    orc.context_card = {}
+    orc._update_status(mode="PLANNING", goal="Set reminder")
+    orc.ui.put(("agent_log", "--- PHASE 2: REMINDER SET ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "manager")
+
+    parsed = parse_reminder_request(orc.user_msg)
+    if parsed.ok:
+        entry = ReminderStore(CFG.REMINDERS_PATH).add(
+            message=parsed.message,
+            fire_at_utc=parsed.fire_at_utc,
+        )
+        orc.route_decision = {
+            "decision": "CHAT",
+            "interceptor": "REMINDER_SET",
+            "system_notice": {
+                "kind": "reminder_set_result",
+                "status": "scheduled",
+                "id": str(entry.get("id") or "").strip(),
+                "message": str(entry.get("message") or "").strip(),
+                "fire_at": str(entry.get("fire_at") or "").strip(),
+                "fire_at_local": parsed.fire_at_local,
+            },
+        }
+        orc.ui.put(("agent_log", f"   -> Reminder stored for {parsed.fire_at_local}."))
+    else:
+        orc.route_decision = {
+            "decision": "CHAT",
+            "interceptor": "REMINDER_SET",
+            "system_notice": {
+                "kind": "reminder_set_result",
+                "status": "error",
+                "error": str(parsed.error or "I couldn't resolve the reminder timing.").strip(),
+            },
+        }
+        orc.ui.put(("agent_log", f"   -> Reminder not set: {parsed.error}"))
+
+    orc.stats_collector.note_route(orc.turn_stats, decision="CHAT")
+    orc.stats_collector.end_phase(orc.turn_stats, "manager")
     orc.next_stage = "PERSONA"
 
 
@@ -911,7 +1776,7 @@ def _strip_persona_control_tags(text: str) -> str:
     cleaned = _RECALL_TAG_RE.sub("", str(text or ""))
     cleaned = cleaned.replace("[ROUTER]", "")
     cleaned = re.sub(
-        r"\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|ENGINEERING_SUPPORT_RULE)\]",
+        r"\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|SEARCH_FIRST_PASS_RULE|ENGINEERING_SUPPORT_RULE|PROACTIVE_TRIGGER|REMINDER_SET_RESULT|EXPLAIN_LAST_TURN|CONTEXT_ARBITRATION_RULE)\]",
         "",
         cleaned,
     )
@@ -1075,23 +1940,65 @@ def phase_persona(orc) -> None:
     orc.raise_if_cancelled()
     orc._update_status(mode="SPEAKING")
     orc.ui.put(("agent_log", "--- PHASE 3: PERSONA (Speaking) ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "persona")
 
     reporter_just_ran = bool(getattr(orc, "reporter_just_ran", False))
+    system_notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
+    explain_last_turn = str(system_notice.get("kind") or "").strip().lower() == "explain_last_turn"
+    if str(system_notice.get("kind") or "").strip().lower() == "search_in_flight":
+        _finish_persona_fast_path(
+            orc,
+            _build_search_in_flight_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
+    if str(system_notice.get("kind") or "").strip().lower() == "file_state_correction_ack":
+        _finish_persona_fast_path(
+            orc,
+            _build_file_state_correction_ack_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
+    if str(system_notice.get("kind") or "").strip().lower() == "file_target_confirmation_cancelled":
+        _finish_persona_fast_path(
+            orc,
+            _build_file_target_confirmation_cancelled_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
 
     live_screen_path = _current_live_screen_path(orc)
     live_screen_visual_chat = _should_route_live_screen_visual_chat(
         orc.user_msg,
         live_screen_path=live_screen_path,
     )
+    route_card = dict((getattr(orc, "route_decision", {}) or {}).get("card") or {})
+    effective_persona_user_msg = str(orc.user_msg or "").strip()
+    if str((getattr(orc, "route_decision", {}) or {}).get("decision") or "").strip().upper() == "CHAT":
+        effective_query = str(route_card.get("query") or "").strip()
+        if effective_query:
+            effective_persona_user_msg = effective_query
 
     prompt_pack = orc.prompt_context.build_persona_pack(
-        user_msg=orc.user_msg,
+        user_msg=effective_persona_user_msg,
         style_overlay=orc.ss.overlay or "",
-        knowledge_enabled=orc.knowledge_enabled,
-        brain_limit=2 if live_screen_visual_chat else 5,
-        document_limit=0 if live_screen_visual_chat else 5,
+        knowledge_enabled=False if explain_last_turn else orc.knowledge_enabled,
+        brain_limit=0 if explain_last_turn else (2 if live_screen_visual_chat else 9),
+        document_limit=0 if (explain_last_turn or live_screen_visual_chat) else 5,
     )
-    current_card = dict(getattr(orc, "context_card", {}) or getattr(orc, "route_decision", {}).get("card") or {})
+    current_card = dict(getattr(orc, "context_card", {}) or route_card)
     current_stages = current_card.get("stages") or []
     latest_stage: dict[str, object] = {}
     if current_stages and isinstance(current_stages[-1], dict):
@@ -1122,7 +2029,34 @@ def phase_persona(orc) -> None:
     elif latest_stage and FileStagePolicy.stage_is_file_work(latest_stage):
         prompt_pack = orc.prompt_context.clear_memory_for_file_work(prompt_pack)
 
+    prompt_pack = orc.prompt_context.apply_context_arbitration(
+        prompt_pack,
+        route_decision=orc.route_decision,
+        ingested_document_chat=bool(getattr(orc, "ingested_document_chat", False)),
+        reporter_just_ran=reporter_just_ran,
+        document_focus_active=bool(getattr(orc, "document_focus_text", "") or ""),
+    )
+
     prompt_context = orc.prompt_context.to_prompt_context(prompt_pack)
+
+    _outcome_pack_for_persona = getattr(orc, "last_stage_outcome", None)
+    # If the failed-task retry cap would silently drop [ROUTER], tell the persona
+    # upfront so it does not say "initiating another pass" and then do nothing.
+    if (
+        _outcome_pack_for_persona is not None
+        and bool(getattr(_outcome_pack_for_persona, "allow_persona_reroute", False))
+        and int(getattr(orc, "failed_task_router_retries", 0) or 0) >= 1
+    ):
+        from dataclasses import replace as _dc_replace
+        try:
+            _outcome_pack_for_persona = _dc_replace(_outcome_pack_for_persona, allow_persona_reroute=False)
+        except TypeError:
+            # outcome_pack is not a dataclass — fall back to a simple wrapper
+            class _Wrapped:
+                def __init__(self, inner):
+                    self.__dict__.update(inner.__dict__)
+                    self.allow_persona_reroute = False
+            _outcome_pack_for_persona = _Wrapped(_outcome_pack_for_persona)
 
     persona_runtime = orc.prompt_context.build_persona_runtime_pack(
         orc.scratchpad,
@@ -1130,11 +2064,13 @@ def phase_persona(orc) -> None:
         reporter_just_ran=reporter_just_ran,
         escalation_active=bool(getattr(orc, "latest_codex_escalation", None)),
         verification_result=getattr(orc, "last_verification", None),
+        outcome_pack=_outcome_pack_for_persona,
     )
     outcome_block = persona_runtime.outcome_block
     persona_directives = orc.prompt_context.build_persona_directive_pack(
         route_decision=orc.route_decision,
         ingested_document_chat=bool(getattr(orc, "ingested_document_chat", False)),
+        document_focus_active=bool(getattr(orc, "document_focus_text", "") or ""),
         reporter_just_ran=reporter_just_ran,
         active_skill=active_skill,
         latest_codex_escalation=getattr(orc, "latest_codex_escalation", None) or {},
@@ -1145,23 +2081,65 @@ def phase_persona(orc) -> None:
     tail_system_parts = list(persona_directives.tail_system_blocks)
 
     history = orc.get_context()
-    limit = getattr(CFG, "MODEL_MAX_TURNS", 10)
-    if len(history) > limit:
-        history = history[-limit:]
+    if reporter_just_ran:
+        history = _build_search_report_history(history, user_msg=orc.user_msg)
+    else:
+        limit = getattr(CFG, "MODEL_MAX_TURNS", 10)
+        # Fast trim only (llm=None) — no blocking LLM call before stream start.
+        # Full LLM summarization runs in _hook_deferred_conversation_summary after reply.
+        compression_result = orc.conversation_compressor.compress_history(
+            history=history,
+            existing_summary=str(getattr(orc, "conversation_summary", "") or "") if getattr(orc, "knowledge_enabled", True) else "",
+            max_turns=limit,
+            llm=None,
+            cancel_token=None,
+        )
+        history = list(compression_result.history)
+    if explain_last_turn:
+        history = history[-6:]
+
+    # Prepend style bootstrap tone examples — in-memory only, never persisted.
+    # Injected only on session start (first turn) or when the active style changes.
+    # After the first real exchange the conversation history itself primes the tone;
+    # re-injecting every turn wastes tokens and pollutes the history view.
+    # Skipped for EXPLAIN turns (explain needs clean recent history, not style priming).
+    _bootstrap = list(getattr(orc.ss, "bootstrap", ()) or ())
+    _active_style_name = str(getattr(orc.ss, "name", "") or "")
+    _last_bootstrap_style = str(getattr(orc, "_bootstrap_injected_for_style", "") or "")
+    if _bootstrap and not explain_last_turn and _active_style_name != _last_bootstrap_style:
+        history = [dict(m) for m in _bootstrap] + list(history)
+        orc._bootstrap_injected_for_style = _active_style_name
 
     orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
     full_answer = ""
     search_summary_fallback = str(getattr(orc, "latest_search_summary", "") or "").strip()
     outcome_failed = persona_runtime.outcome_failed
     outcome_paused = persona_runtime.outcome_paused
+    compound_sequence_direct_answer = _build_compound_file_sequence_final_state_reply(orc)
+    if compound_sequence_direct_answer:
+        _finish_persona_fast_path(
+            orc,
+            _append_undo_notice_if_needed(orc, compound_sequence_direct_answer),
+            reporter_just_ran=reporter_just_ran,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
     if persona_directives.direct_answer:
         _finish_persona_fast_path(
             orc,
-            persona_directives.direct_answer,
+            _append_undo_notice_if_needed(orc, persona_directives.direct_answer),
             reporter_just_ran=reporter_just_ran,
         )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
         return
-    if str(getattr(orc, "route_decision", {}).get("decision") or "").strip().upper() == "CHAT":
+    if (
+        not explain_last_turn
+        and str(getattr(orc, "route_decision", {}).get("decision") or "").strip().upper() == "CHAT"
+    ):
         readonly_query = str(
             (
                 (getattr(orc, "route_decision", {}).get("card") or {}).get("query")
@@ -1173,9 +2151,12 @@ def phase_persona(orc) -> None:
         if readonly_state_answer:
             _finish_persona_fast_path(
                 orc,
-                readonly_state_answer,
+                _append_undo_notice_if_needed(orc, readonly_state_answer),
                 reporter_just_ran=reporter_just_ran,
             )
+            orc.stats_collector.end_phase(orc.turn_stats, "persona")
+            orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+            _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
             return
     recall_blocks: list[str] = []
     persona_error = False
@@ -1191,7 +2172,7 @@ def phase_persona(orc) -> None:
         )
         if CFG.DEBUG_LLM_PROMPTS:
             log_prompt_debug(
-                CFG.LLM_PROMPT_DEBUG_PATH,
+                CFG.PERSONA_DEBUG_PATH,
                 messages,
                 "PERSONA" if recall_pass == 0 else f"PERSONA_RECALL_{recall_pass}",
             )
@@ -1225,6 +2206,7 @@ def phase_persona(orc) -> None:
                     }
                 )
                 orc.ui.put(("error", f"Persona Error: {retry_exc}"))
+                orc.stats_collector.note_persona_error(orc.turn_stats, str(retry_exc))
                 persona_error = True
                 break
         except LLMClientError as exc:
@@ -1238,6 +2220,7 @@ def phase_persona(orc) -> None:
                 }
             )
             orc.ui.put(("error", f"Persona Error: {exc}"))
+            orc.stats_collector.note_persona_error(orc.turn_stats, str(exc))
             persona_error = True
             break
 
@@ -1288,6 +2271,7 @@ def phase_persona(orc) -> None:
             full_answer = ""
         except LLMClientError as exc:
             orc.ui.put(("agent_log", f"   -> /no_think retry failed: {exc}"))
+            orc.stats_collector.note_persona_error(orc.turn_stats, str(exc))
             persona_error = True
 
     router_requested = "[ROUTER]" in full_answer
@@ -1298,6 +2282,7 @@ def phase_persona(orc) -> None:
         outcome_block=outcome_block,
         user_msg=orc.user_msg,
     )
+    clean_answer = _append_undo_notice_if_needed(orc, clean_answer)
     latest_route_error = str(getattr(orc, "latest_route_error", "") or "").strip()
     if reporter_just_ran and not clean_answer and search_summary_fallback:
         clean_answer = search_summary_fallback
@@ -1322,6 +2307,9 @@ def phase_persona(orc) -> None:
             if bool(getattr(orc, "latest_codex_escalation", None)):
                 orc.ui.put(("agent_log", "   -> ROUTER marker ignored because engineering support escalation is active — user must decide next step."))
                 orc.next_stage = "FINISHED"
+            elif not bool(getattr(persona_runtime, "allow_persona_reroute", True)):
+                orc.ui.put(("agent_log", "   -> ROUTER marker ignored because this failure is terminal for the current turn."))
+                orc.next_stage = "FINISHED"
             elif _wants_user_confirmation(clean_answer):
                 orc.ui.put(("agent_log", "   -> ROUTER marker ignored because the reply is asking for user confirmation."))
                 orc.next_stage = "FINISHED"
@@ -1331,14 +2319,18 @@ def phase_persona(orc) -> None:
             else:
                 orc.failed_task_router_retries = int(getattr(orc, "failed_task_router_retries", 0) or 0) + 1
                 orc.ui.put(("agent_log", "   -> ROUTER marker accepted after failed task outcome."))
+                orc.stats_collector.note_router_reroute(orc.turn_stats)
                 orc.next_stage = "ROUTE"
         elif outcome_block and not outcome_paused:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored after successful task outcome."))
             orc.next_stage = "FINISHED"
         else:
             orc.ui.put(("agent_log", "   -> LOOPBACK DETECTED."))
+            orc.stats_collector.note_router_reroute(orc.turn_stats)
             orc.next_stage = "ROUTE"
     else:
         orc.next_stage = "FINISHED"
 
+    orc.stats_collector.end_phase(orc.turn_stats, "persona")
+    orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
     _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)

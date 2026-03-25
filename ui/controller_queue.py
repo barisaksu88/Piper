@@ -56,6 +56,7 @@ def pump_ui_queue(controller) -> None:
                 dpg.configure_item("status_group", show=True)
             controller.set_boot_ready(True)
             controller._refresh_chat_ui()
+            controller.refresh_stats_view()
             controller.maybe_speak_ui_event(kind, payload)
             continue
 
@@ -195,6 +196,9 @@ def pump_ui_queue(controller) -> None:
                 dpg.set_value(controller.tags.documents_view_text, str(payload))
                 controller.refresh_text_view_height(controller.tags.documents_view_text)
                 controller.request_autoscroll(controller.tags.documents_view_child)
+            continue
+        if kind == "stats_view_refresh":
+            controller.refresh_stats_view()
             continue
         if kind == "search_result":
             controller.maybe_speak_ui_event(kind, payload)

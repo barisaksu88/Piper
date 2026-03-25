@@ -20,6 +20,7 @@ class PolicySmokeReport:
     diagnosis_stage: dict[str, object]
     modify_stage: dict[str, object]
     interactive_stage: dict[str, object]
+    typed_stage_consistency: dict[str, object]
 
 
 def run_smoke() -> PolicySmokeReport:
@@ -69,6 +70,18 @@ def run_smoke() -> PolicySmokeReport:
         "interactive_runtime_verification": FileStagePolicy.stage_is_interactive_runtime_verification(interactive_stage),
         "requires_verification": FileStagePolicy.stage_requires_file_verification(interactive_stage),
     }
+    diagnosis_stage_typed = {**diagnosis_stage, "file_stage_kind": "INSPECTION"}
+    modify_stage_typed = {**modify_stage, "file_stage_kind": "CONTENT_EDIT"}
+    interactive_stage_typed = {**interactive_stage, "file_stage_kind": "SCRIPT_LAUNCH"}
+    typed_stage_consistency = {
+        "diagnosis_inspection": FileStagePolicy.is_file_inspection_stage(diagnosis_stage_typed),
+        "diagnosis_non_mutating": FileStagePolicy.stage_is_non_mutating_file_stage(diagnosis_stage_typed),
+        "diagnosis_requires_analysis_report": FileStagePolicy.stage_requires_analysis_report(diagnosis_stage_typed),
+        "modify_content_edit": FileStagePolicy.stage_is_content_edit_stage(modify_stage_typed),
+        "modify_requires_verification": FileStagePolicy.stage_requires_file_verification(modify_stage_typed),
+        "interactive_script_launch": FileStagePolicy.stage_is_script_launch_stage(interactive_stage_typed),
+        "interactive_requires_verification": FileStagePolicy.stage_requires_file_verification(interactive_stage_typed),
+    }
 
     success = (
         diagnosis["inspection"]
@@ -83,12 +96,20 @@ def run_smoke() -> PolicySmokeReport:
         and interactive["script_launch"]
         and interactive["interactive_runtime_verification"]
         and not interactive["requires_verification"]
+        and typed_stage_consistency["diagnosis_inspection"]
+        and typed_stage_consistency["diagnosis_non_mutating"]
+        and typed_stage_consistency["diagnosis_requires_analysis_report"]
+        and typed_stage_consistency["modify_content_edit"]
+        and typed_stage_consistency["modify_requires_verification"]
+        and typed_stage_consistency["interactive_script_launch"]
+        and not typed_stage_consistency["interactive_requires_verification"]
     )
     return PolicySmokeReport(
         success=bool(success),
         diagnosis_stage=diagnosis,
         modify_stage=modify,
         interactive_stage=interactive,
+        typed_stage_consistency=typed_stage_consistency,
     )
 
 

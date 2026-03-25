@@ -124,15 +124,24 @@ def handle_move_path(runtime: Any, payload: dict[str, Any], action: str, file_op
         return file_op_error(f"FILE_OP source not found: {src_rel}", missing_files=[src_rel])
     if src_path.resolve() == dst_path.resolve():
         return file_op_error(f"FILE_OP move_path source and destination are identical: {src_rel}")
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    created_dirs: list[str] = []
+    if not dst_path.parent.exists():
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        _, created_rel = resolve_workspace_path(runtime.workspace, str(dst_path.parent))
+        created_dirs.append(created_rel)
+    else:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src_path), str(dst_path))
-    return {
+    result: dict[str, Any] = {
         "tool": "FILE_OP",
         "status": "EXECUTED",
         "summary": f"Moved {src_rel} to {dst_rel}.",
         "action": action,
         "requested_moves": [{"src": src_rel, "dst": dst_rel}],
     }
+    if created_dirs:
+        result["created_dirs"] = created_dirs
+    return result
 
 
 def handle_move_many(runtime: Any, payload: dict[str, Any], action: str, file_op_error, *, cancel_token=None) -> dict[str, Any]:
@@ -151,19 +160,29 @@ def handle_move_many(runtime: Any, payload: dict[str, Any], action: str, file_op
         if src_path.resolve() == dst_path.resolve():
             return file_op_error(f"FILE_OP move_many source and destination are identical: {src_rel}")
         resolved_moves.append({"src": src_rel, "dst": dst_rel})
+    created_dirs: list[str] = []
     for item in resolved_moves:
         runtime._raise_if_cancelled(cancel_token)
         src_path, _ = resolve_workspace_path(runtime.workspace, item["src"])
         dst_path, _ = resolve_workspace_path(runtime.workspace, item["dst"])
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        if not dst_path.parent.exists():
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            _, created_rel = resolve_workspace_path(runtime.workspace, str(dst_path.parent))
+            if created_rel not in created_dirs:
+                created_dirs.append(created_rel)
+        else:
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src_path), str(dst_path))
-    return {
+    result: dict[str, Any] = {
         "tool": "FILE_OP",
         "status": "EXECUTED",
         "summary": f"Moved {len(resolved_moves)} paths.",
         "action": action,
         "requested_moves": resolved_moves,
     }
+    if created_dirs:
+        result["created_dirs"] = created_dirs
+    return result
 
 
 def handle_copy_path(runtime: Any, payload: dict[str, Any], action: str, file_op_error) -> dict[str, Any]:
@@ -173,18 +192,27 @@ def handle_copy_path(runtime: Any, payload: dict[str, Any], action: str, file_op
         return file_op_error(f"FILE_OP source not found: {src_rel}", missing_files=[src_rel])
     if src_path.resolve() == dst_path.resolve():
         return file_op_error(f"FILE_OP copy_path source and destination are identical: {src_rel}")
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    created_dirs: list[str] = []
+    if not dst_path.parent.exists():
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        _, created_rel = resolve_workspace_path(runtime.workspace, str(dst_path.parent))
+        created_dirs.append(created_rel)
+    else:
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
     if src_path.is_dir():
         shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
     else:
         shutil.copy2(src_path, dst_path)
-    return {
+    result: dict[str, Any] = {
         "tool": "FILE_OP",
         "status": "EXECUTED",
         "summary": f"Copied {src_rel} to {dst_rel}.",
         "action": action,
         "requested_copies": [{"src": src_rel, "dst": dst_rel}],
     }
+    if created_dirs:
+        result["created_dirs"] = created_dirs
+    return result
 
 
 def handle_copy_many(runtime: Any, payload: dict[str, Any], action: str, file_op_error, *, cancel_token=None) -> dict[str, Any]:
@@ -203,28 +231,45 @@ def handle_copy_many(runtime: Any, payload: dict[str, Any], action: str, file_op
         if src_path.resolve() == dst_path.resolve():
             return file_op_error(f"FILE_OP copy_many source and destination are identical: {src_rel}")
         resolved_copies.append({"src": src_rel, "dst": dst_rel})
+    created_dirs: list[str] = []
     for item in resolved_copies:
         runtime._raise_if_cancelled(cancel_token)
         src_path, _ = resolve_workspace_path(runtime.workspace, item["src"])
         dst_path, _ = resolve_workspace_path(runtime.workspace, item["dst"])
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        if not dst_path.parent.exists():
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            _, created_rel = resolve_workspace_path(runtime.workspace, str(dst_path.parent))
+            if created_rel not in created_dirs:
+                created_dirs.append(created_rel)
+        else:
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
         if src_path.is_dir():
             shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
         else:
             shutil.copy2(src_path, dst_path)
-    return {
+    result: dict[str, Any] = {
         "tool": "FILE_OP",
         "status": "EXECUTED",
         "summary": f"Copied {len(resolved_copies)} paths.",
         "action": action,
         "requested_copies": resolved_copies,
     }
+    if created_dirs:
+        result["created_dirs"] = created_dirs
+    return result
 
 
 def handle_delete_path(runtime: Any, payload: dict[str, Any], action: str, file_op_error) -> dict[str, Any]:
     full_path, rel_path = resolve_workspace_path(runtime.workspace, payload.get("path"))
     if not full_path.exists():
-        return file_op_error(f"FILE_OP target not found: {rel_path}")
+        return {
+            "tool": "FILE_OP",
+            "status": "EXECUTED",
+            "summary": f"Already absent: {rel_path}.",
+            "action": action,
+            "requested_paths": [rel_path],
+            "current_state_only": True,
+        }
     if full_path.is_dir():
         shutil.rmtree(full_path)
     else:
@@ -241,11 +286,13 @@ def handle_delete_path(runtime: Any, payload: dict[str, Any], action: str, file_
 def handle_delete_many(runtime: Any, payload: dict[str, Any], action: str, file_op_error, *, cancel_token=None) -> dict[str, Any]:
     rel_paths = runtime._normalize_path_list(payload.get("paths"))
     resolved_paths: list[str] = []
+    already_absent: list[str] = []
     for raw_path in rel_paths:
         runtime._raise_if_cancelled(cancel_token)
         full_path, rel_path = resolve_workspace_path(runtime.workspace, raw_path)
         if not full_path.exists():
-            return file_op_error(f"FILE_OP target not found: {rel_path}")
+            already_absent.append(rel_path)
+            continue
         resolved_paths.append(rel_path)
     for rel_path in resolved_paths:
         runtime._raise_if_cancelled(cancel_token)
@@ -254,10 +301,22 @@ def handle_delete_many(runtime: Any, payload: dict[str, Any], action: str, file_
             shutil.rmtree(full_path)
         else:
             full_path.unlink()
+    if not resolved_paths:
+        return {
+            "tool": "FILE_OP",
+            "status": "EXECUTED",
+            "summary": "Requested paths are already absent.",
+            "action": action,
+            "requested_paths": already_absent,
+            "current_state_only": True,
+        }
+    summary = f"Deleted {len(resolved_paths)} paths."
+    if already_absent:
+        summary += f" {len(already_absent)} were already absent."
     return {
         "tool": "FILE_OP",
         "status": "EXECUTED",
-        "summary": f"Deleted {len(resolved_paths)} paths.",
+        "summary": summary,
         "action": action,
-        "requested_paths": resolved_paths,
+        "requested_paths": resolved_paths + already_absent,
     }

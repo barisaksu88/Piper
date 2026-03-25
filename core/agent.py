@@ -372,16 +372,40 @@ class AgentBrain:
         if not pending:
             return "No pending tasks."
         return "Pending Tasks:\n- " + "\n- ".join(pending)
+    @staticmethod
+    def _extract_event_time(text: str) -> Optional[str]:
+        """Parse an 'at HH:MM' / 'at 3pm' style time from a date phrase.
+
+        Returns a normalised 'HH:MM' string, or None if no time is found.
+        """
+        m = re.search(
+            r"(?i)\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?",
+            text,
+        )
+        if not m:
+            return None
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        meridiem = (m.group(3) or "").lower().replace(".", "")
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
     def exec_add_event(self, args: str) -> str:
         try:
             parts = args.rsplit(" on ", 1)
             if len(parts) != 2:
                 return "Invalid format. Use: [ADD_EVENT: Name on <date phrase>]"
             name, date_text = parts[0].strip(), parts[1].strip()
+            time_str = self._extract_event_time(date_text)
             resolved_date = self._resolve_event_date(date_text)
             if not resolved_date:
                 return f"Invalid event date: {date_text}. Use YYYY-MM-DD or a simple phrase like tomorrow."
-            self.event_store.add(name, resolved_date)
+            self.event_store.add(name, resolved_date, time_str)
             self._reconcile_transient_operational_change(
                 kind="event",
                 action="add",
@@ -389,9 +413,36 @@ class AgentBrain:
                 source_text=args,
                 scheduled_date=resolved_date,
             )
-            return f"Event scheduled: {name} on {resolved_date}"
+            time_label = f" at {time_str}" if time_str else ""
+            return f"Event scheduled: {name} on {resolved_date}{time_label}"
         except Exception as e:
             return f"Error adding event: {e}"
+
+    def exec_reschedule_event(self, args: str) -> str:
+        try:
+            parts = re.split(r"\s+to\s+", str(args or "").strip(), maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) != 2:
+                return "Invalid format. Use: [RESCHEDULE_EVENT: Event name to <new date phrase>]"
+            name_raw, date_text = parts[0].strip(), parts[1].strip()
+            target = self._resolve_existing_name(name_raw, self.event_store.load().keys()) or name_raw
+            time_str = self._extract_event_time(date_text)
+            resolved_date = self._resolve_event_date(date_text)
+            if not resolved_date:
+                return f"Invalid date: {date_text}. Use YYYY-MM-DD or a phrase like 'next Friday'."
+            self.event_store.remove(target)
+            self.event_store.add(target, resolved_date, time_str)
+            self._reconcile_transient_operational_change(
+                kind="event",
+                action="add",
+                name=target,
+                source_text=args,
+                scheduled_date=resolved_date,
+            )
+            time_label = f" at {time_str}" if time_str else ""
+            return f"Event rescheduled: {target} to {resolved_date}{time_label}"
+        except Exception as e:
+            return f"Error rescheduling event: {e}"
+
     def exec_remove_event(self, name: str) -> str:
         target = self._resolve_existing_name(name, self.event_store.load().keys()) or name
         if self.event_store.remove(target):
@@ -439,7 +490,7 @@ class AgentBrain:
 
         raw = re.sub(r"\b(on|by)\b", "", raw).strip()
         today = datetime.date.today()
-        raw = re.sub(r"(?i)\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\.?", "", raw).strip(" ,.-")
+        raw = re.sub(r"(?i)\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\.?", "", raw).strip(" ,.-")
 
         try:
             return datetime.datetime.strptime(raw, "%Y-%m-%d").strftime("%Y-%m-%d")

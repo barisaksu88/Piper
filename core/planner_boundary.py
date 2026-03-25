@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from core.contracts import PlannerDecision, StageCard
+from core.engines.file_work import FileWorkEngine
 from core.stage_policy import stage_is_chat
 from tools.registry import resolve_domain_tools
 
@@ -166,8 +167,29 @@ class PlannerBoundary:
         if not evidence_required:
             evidence_required = success_condition
 
+        objective_text = str(objective or stage.get("objective", "") or "").strip()
+
+        # Write the normalized contract back into the stage card so every
+        # downstream consumer sees the same resolved planner boundary.
+        stage["objective"] = objective_text
+        stage["stage_type"] = stage_type
+        stage["active_targets"] = list(active_targets)
+        stage["evidence_required"] = evidence_required
+        if stage_type == "FILE_WORK":
+            file_stage_kind = str(stage.get("file_stage_kind", "") or "").strip().upper()
+            if file_stage_kind not in {
+                "INSPECTION",
+                "CONTENT_EDIT",
+                "STRUCTURE_PREP",
+                "BROAD_REORG",
+                "SCRIPT_LAUNCH",
+                "DEPENDENCY_RECOVERY",
+                "UNKNOWN",
+            }:
+                stage["file_stage_kind"] = FileWorkEngine.classify(stage)
+
         return PlannerInput(
-            objective=str(objective or "").strip(),
+            objective=objective_text,
             stage_goal=stage_goal,
             stage_type=stage_type,
             success_condition=success_condition,

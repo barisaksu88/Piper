@@ -12,6 +12,8 @@ import dearpygui.dearpygui as dpg
 from config import CFG
 from core.codex_bridge import CodexRepairCoordinator
 from core.code_session import EmbeddedCodeSession
+from core.engines.proactive_monitor import ProactiveMonitor
+from core.engines.stats_collector import StatsCollector
 from core.engineering_support import build_manual_codex_snapshot
 from core.pipeline import ChatPipeline
 from core.runtime_control import CancellationToken
@@ -47,6 +49,7 @@ from ui.controller_actions import (
     on_stop as on_stop_action,
     refresh_live_screen_ui as refresh_live_screen_ui_action,
     reset_mic_ui as reset_mic_ui_action,
+    trigger_proactive_reminder as trigger_proactive_reminder_action,
 )
 from ui.controller_queue import pump_ui_queue as pump_ui_queue_action
 from ui.controller_render import format_chat_message_block, renderable_chat_messages
@@ -92,6 +95,7 @@ class UiTags:
     ingest_button: str = "ingest_button"
     main_tab_bar: str = "main_tab_bar"
     code_tab: str = "code_tab"
+    stats_tab: str = "stats_tab"
     code_view_child: str = "code_view_child"
     code_view_text: str = "code_view_text"
     code_status_text: str = "code_status_text"
@@ -102,6 +106,8 @@ class UiTags:
     code_stop_button: str = "code_stop_button"
     documents_view_child: str = "documents_view_child"
     documents_view_text: str = "documents_view_text"
+    stats_view_child: str = "stats_view_child"
+    stats_view_text: str = "stats_view_text"
 
     def for_layout(self) -> Dict[str, str]:
         return {
@@ -129,6 +135,7 @@ class UiTags:
             "TAG_INGEST_BUTTON": self.ingest_button,
             "TAG_MAIN_TAB_BAR": self.main_tab_bar,
             "TAG_CODE_TAB": self.code_tab,
+            "TAG_STATS_TAB": self.stats_tab,
             "TAG_CODE_VIEW_CHILD": self.code_view_child,
             "TAG_CODE_VIEW_TEXT": self.code_view_text,
             "TAG_CODE_STATUS_TEXT": self.code_status_text,
@@ -139,6 +146,8 @@ class UiTags:
             "TAG_CODE_STOP_BUTTON": self.code_stop_button,
             "TAG_DOCUMENTS_VIEW_CHILD": self.documents_view_child,
             "TAG_DOCUMENTS_VIEW_TEXT": self.documents_view_text,
+            "TAG_STATS_VIEW_CHILD": self.stats_view_child,
+            "TAG_STATS_VIEW_TEXT": self.stats_view_text,
         }
 
 
@@ -192,10 +201,14 @@ class PiperController:
             auto_enabled=CFG.CODEX_AUTO_REPAIR_ENABLED,
             poll_interval_s=CFG.CODEX_REPAIR_POLL_INTERVAL_S,
         )
+        self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
 
         self.gen_lock = threading.Lock()
         self.cancel_lock = threading.Lock()
         self.cancel_tokens: dict[CancellationToken, int] = {}
+        self._search_in_flight_count = 0
+        self._active_search_query = ""
+        self._proactive_reminder_inflight_ids: set[str] = set()
         self.pending_autoscrolls: dict[str, int] = {}
         self.mic_state = "idle"
         self.restart_requested = False
@@ -231,6 +244,14 @@ class PiperController:
             chat_upsert_fn=self.chat_upsert_streaming_assistant,
             persist_turn_fn=self.persist_turn,
             set_status_fn=self.set_status,
+            finalize_stream_fn=self.chat_state.finalize_streaming_assistant,
+        )
+        self.proactive_monitor = ProactiveMonitor(
+            CFG.REMINDERS_PATH,
+            can_dispatch=self.can_dispatch_proactive_reminder,
+            is_inflight=self.is_proactive_reminder_inflight,
+            dispatch_callback=lambda reminder: trigger_proactive_reminder_action(self, reminder),
+            log_callback=self.safe_log,
         )
 
     def _text_view_min_height(self, text_tag: str) -> int:
@@ -240,6 +261,8 @@ class PiperController:
             return 72
         if text_tag == self.tags.documents_view_text:
             return 72
+        if text_tag == self.tags.stats_view_text:
+            return 96
         if text_tag == self.tags.agent_log_text:
             return 64
         if text_tag == self.tags.code_view_text:
@@ -258,6 +281,14 @@ class PiperController:
             dpg.configure_item(text_tag, height=height)
         except Exception:
             pass
+
+    def refresh_stats_view(self) -> None:
+        if not dpg.does_item_exist(self.tags.stats_view_text):
+            return
+        report = self.stats_collector.build_readonly_report()
+        dpg.set_value(self.tags.stats_view_text, report)
+        self.refresh_text_view_height(self.tags.stats_view_text)
+        self.request_autoscroll(self.tags.stats_view_child)
 
     @staticmethod
     def _chat_message_height(text: str) -> int:
@@ -596,9 +627,70 @@ class PiperController:
                 self.cancel_tokens[token] = current - 1
         self.ui_queue.put(("ui_controls_refresh", ""))
 
+    def retain_search_in_flight(self, query: str = "") -> None:
+        with self.cancel_lock:
+            self._search_in_flight_count += 1
+            clean_query = str(query or "").strip()
+            if clean_query:
+                self._active_search_query = clean_query
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def release_search_in_flight(self) -> None:
+        with self.cancel_lock:
+            if self._search_in_flight_count > 0:
+                self._search_in_flight_count -= 1
+            if self._search_in_flight_count <= 0:
+                self._search_in_flight_count = 0
+                self._active_search_query = ""
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def is_search_in_flight(self) -> bool:
+        with self.cancel_lock:
+            return self._search_in_flight_count > 0
+
+    def current_search_query(self) -> str:
+        with self.cancel_lock:
+            if self._search_in_flight_count <= 0:
+                return ""
+            return self._active_search_query
+
+    def retain_proactive_reminder_inflight(self, reminder_id: str) -> None:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return
+        with self.cancel_lock:
+            self._proactive_reminder_inflight_ids.add(clean_id)
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def release_proactive_reminder_inflight(self, reminder_id: str) -> None:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return
+        with self.cancel_lock:
+            self._proactive_reminder_inflight_ids.discard(clean_id)
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def is_proactive_reminder_inflight(self, reminder_id: str) -> bool:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return False
+        with self.cancel_lock:
+            return clean_id in self._proactive_reminder_inflight_ids
+
+    def can_dispatch_proactive_reminder(self) -> bool:
+        if not self.boot_ready:
+            return False
+        if self.has_active_operations() or self.has_active_code_session():
+            return False
+        if self.document_ingest_active or self.live_screen_pending:
+            return False
+        if self.is_tts_active():
+            return False
+        return True
+
     def has_active_operations(self) -> bool:
         with self.cancel_lock:
-            return bool(self.cancel_tokens)
+            return bool(self.cancel_tokens) or self._search_in_flight_count > 0
 
     def has_active_code_session(self) -> bool:
         return self.code_session_active or self.code_session.is_active()
@@ -941,19 +1033,22 @@ class PiperController:
         self._refresh_top_bar()
         self.refresh_documents_view()
         self.refresh_interaction_state()
+        self.proactive_monitor.start()
 
         boot_thread = threading.Thread(target=self.boot_mgr.run_sequence, daemon=True)
         boot_thread.start()
 
-        while dpg.is_dearpygui_running():
-            self.pump_ui_queue()
-            self.poll_codex_repair()
-            tts_busy = self.is_tts_active()
-            if tts_busy != self._last_tts_busy:
-                self.refresh_interaction_state()
-            dpg.render_dearpygui_frame()
-            self._flush_autoscrolls()
-
-        dpg.destroy_context()
-        self.code_session.shutdown()
+        try:
+            while dpg.is_dearpygui_running():
+                self.pump_ui_queue()
+                self.poll_codex_repair()
+                tts_busy = self.is_tts_active()
+                if tts_busy != self._last_tts_busy:
+                    self.refresh_interaction_state()
+                dpg.render_dearpygui_frame()
+                self._flush_autoscrolls()
+        finally:
+            self.proactive_monitor.stop()
+            dpg.destroy_context()
+            self.code_session.shutdown()
         return RESTART_EXIT_CODE if self.restart_requested else 0

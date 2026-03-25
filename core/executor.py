@@ -6,6 +6,7 @@ Responsible for running the step-by-step loop for a SINGLE stage.
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, List, Tuple
 
@@ -18,6 +19,7 @@ from core.planner_boundary import PlannerBoundary
 from core.json_utils import parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
+from core.engines.change_journal import ChangeJournal
 from core.engines.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.verification import VerificationEngine, VerificationResult
@@ -46,6 +48,8 @@ class StageExecutor:
         ui_queue,
         cancel_token: CancellationToken | None = None,
         signal_emitter=None,
+        stats_collector=None,
+        operational_state_service=None,
     ):
         self.llm = llm_client
         self.brain = agent_brain
@@ -54,6 +58,8 @@ class StageExecutor:
         self.ui = ui_queue
         self.cancel_token = cancel_token
         self.signal_emitter = signal_emitter
+        self.stats_collector = stats_collector
+        self.operational_state_service = operational_state_service
         
         # Internal state for this execution
         self.scratchpad = []
@@ -68,14 +74,31 @@ class StageExecutor:
         self._last_successful_tool_result: Any = None
         self._last_dashboard_thought = ""
         self.pause_mode = ""
+        self._last_blocked_action = ""   # tracks repeated security-violation loops by tool tag
+        self._blocked_action_count = 0
         self.file_checker = FileWorkChecker(self.llm, self.ui, self.brain, cancel_token=self.cancel_token)
         self.state_mutation_engine = StateMutationEngine()
         self.verification_engine = VerificationEngine(file_checker=self.file_checker)
         self._last_verification: VerificationResult | None = None
+        self._last_stage_metrics: dict[str, float | int] = {}
+        self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)
+        self.completed_change_operations: list[dict[str, Any]] = []
+        self.terminal_missing_file_target = ""
 
     def _log_dashboard(self, text: str):
         """Logs a clean message to the UI Dashboard."""
         self.ui.put(("status_widget_dashboard_activity", text))
+
+    def _record_stage_metrics(self, *, stage_started_at: float, planner_time_s: float, step_count: int) -> None:
+        stage_total_ms = max(0.0, (time.perf_counter() - stage_started_at) * 1000.0)
+        planner_ms = max(0.0, planner_time_s * 1000.0)
+        executor_ms = max(0.0, stage_total_ms - planner_ms)
+        self._last_stage_metrics = {
+            "stage_total_ms": round(stage_total_ms, 3),
+            "planner_ms": round(planner_ms, 3),
+            "executor_ms": round(executor_ms, 3),
+            "step_count": int(step_count),
+        }
 
     @staticmethod
     def _memory_remove_recovery_hint(stage: StageCard, tool_name: str, tool_result: Any) -> str:
@@ -118,6 +141,25 @@ class StageExecutor:
             return
         self._last_dashboard_thought = clean
         self._log_dashboard(f"Thinking: {clean}")
+
+    def _update_typed_mutation_verification(
+        self,
+        stage: StageCard,
+        tool_spec,
+        tool_result: Any,
+        last_entry: str,
+    ) -> None:
+        stage_type_upper = str(stage.get("stage_type", "") or "").upper()
+        if stage_type_upper not in {"TASK_EVENT_WORK", "MEMORY_WORK"}:
+            return
+        outcome_pack = ScratchpadFormatter.build_outcome_pack(
+            success=tool_result_is_success(tool_spec, tool_result),
+            stage_type=stage_type_upper,
+            last_observation=last_entry,
+            stage_entries=self.scratchpad,
+            stage=stage,
+        )
+        self._last_verification = self.verification_engine.evaluate_mutation(stage, outcome_pack)
 
     def _raise_if_cancelled(self) -> None:
         if self.cancel_token is not None:
@@ -212,6 +254,8 @@ class StageExecutor:
         
         max_steps = max(1, int(getattr(CFG, "EXECUTOR_MAX_STEPS", 12) or 12))
         step_count = 0
+        stage_started_at = time.perf_counter()
+        planner_time_s = 0.0
         success = False
         self._last_file_verdict = ""
         self._last_verification = None
@@ -222,6 +266,17 @@ class StageExecutor:
         self._last_successful_tool_name = ""
         self._last_successful_tool_result = None
         self._last_dashboard_thought = ""
+        self._last_blocked_action = ""
+        self._blocked_action_count = 0
+        self.completed_change_operations = []
+        self.terminal_missing_file_target = ""
+        # Accumulates all paths mutated during this stage (created + updated).
+        # Used by _append_verified_file_work_result_note so the LAST_LOG covers
+        # every file touched across all tool calls, not just the final one.
+        self._stage_all_mutated_paths: list[str] = []
+        # R-5: tracks whether the constraints schema reminder has been sent
+        # for this stage so we only fire it once before falling through.
+        _constraints_reminder_sent = False
         
         # --- PLANNER BOUNDARY: validate inputs, resolve tools ---
         # PlannerBoundary.validate_input() enforces the §3.1 input contract:
@@ -235,6 +290,7 @@ class StageExecutor:
                 self.ui.put(("agent_log", f"   -> Auto-unlocked tools for {planner_input.stage_type}: {planner_input.allowed_tools}"))
         except ValueError as exc:
             self.ui.put(("agent_log", f"   -> PLANNER BOUNDARY VALIDATION ERROR: {exc}"))
+            self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
             return False, self.scratchpad
 
         stage_type = planner_input.stage_type
@@ -253,13 +309,25 @@ class StageExecutor:
 
             # Build Prompt via Architect
             scratch_text = "\n".join(self.scratchpad)
-            sys_prompt = PromptBuilder.build_planner_prompt(sys_base, stage, scratch_text, step_count)
+            sys_prompt = PromptBuilder.build_planner_prompt(
+                sys_base,
+                stage,
+                scratch_text,
+                step_count,
+                planner_input=planner_input,
+            )
 
-            messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": "What is the next step?"}]
+            # NOTE: Qwen3.5's Jinja chat template requires at least one `user`
+            # role message — a system-only payload causes HTTP 400.  The step
+            # directive is kept as `user` role to satisfy the template contract.
+            messages = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": "[SYSTEM STEP DIRECTIVE] Output the next step JSON now."},
+            ]
             
             # Debug Dump (LLM Prompt)
             if CFG.DEBUG_LLM_PROMPTS:
-                log_prompt_debug(CFG.LLM_PROMPT_DEBUG_PATH, messages, f"STAGE_{stage_num}_STEP_{step_count}")
+                log_prompt_debug(CFG.PLANNER_DEBUG_PATH, messages, f"STAGE_{stage_num}_STEP_{step_count}")
             
             # Debug Dump (Manager Debug File)
             if CFG.DEBUG_MANAGER_PROMPTS:
@@ -272,8 +340,10 @@ class StageExecutor:
             # Generate
             try:
                 raw = ""
+                planner_started_at = time.perf_counter()
                 for delta in self.llm.generate_stream(messages, temperature=0.0, cancel_token=self.cancel_token):
                     raw += delta
+                planner_time_s += max(0.0, time.perf_counter() - planner_started_at)
             except LLMClientError as e:
                 self._emit_runtime_signal(
                     kind="planner_error",
@@ -285,6 +355,7 @@ class StageExecutor:
                     step=step_count,
                 )
                 self.ui.put(("error", f"Planner Error: {e}"))
+                self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
                 return False, self.scratchpad
             self._raise_if_cancelled()
 
@@ -310,6 +381,7 @@ class StageExecutor:
             planner_output = PlannerBoundary.normalize_output(decision)
             if planner_output.stop_recommended:
                 self.ui.put(("agent_log", "   -> Planner signalled stop_recommended — stage cannot proceed."))
+                self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
                 return False, self.scratchpad
 
             thought = decision.get("thought", "") or ""
@@ -414,7 +486,7 @@ class StageExecutor:
             # CHECK COMPLETION (Priority: Explicit Flag)
             if decision.get("is_complete", False):
                 completion_handoff = normalize_completion_handoff(decision)
-                if FileStagePolicy.stage_requires_analysis_report(stage) and not completion_handoff:
+                if FileStagePolicy.stage_requires_analysis_report(stage) and len((completion_handoff or "").strip()) < 40:
                     hint = (
                         "SYSTEM ERROR: This inspection stage is not complete until you state the diagnosis explicitly. "
                         "Return tool null with is_complete true and put the diagnosis summary in the proposal field."
@@ -431,6 +503,35 @@ class StageExecutor:
                         f"PROPOSAL: {completion_handoff}",
                     )
                     self.scratchpad.append(entry)
+                # R-5: Schema compliance — FILE_WORK mutating completions must
+                # include a `constraints` block so the verifier can check outcomes
+                # deterministically.  Grant one retry with an explicit reminder;
+                # on a second miss log the violation and fall through.
+                if FileStagePolicy.stage_requires_file_verification(stage):
+                    _has_constraints = (
+                        "constraints" in decision
+                        and decision.get("constraints") is not None
+                    )
+                    if not _has_constraints:
+                        if not _constraints_reminder_sent:
+                            _constraints_reminder_sent = True
+                            _schema_hint = (
+                                "SYSTEM ERROR: FILE_WORK completion is missing the required "
+                                "`constraints` block. Re-emit your completion with `constraints` "
+                                "populated. Example: "
+                                "\"constraints\": [{\"type\": \"CREATED\", \"path\": \"output/result.txt\"}]"
+                            )
+                            if not self.scratchpad or self.scratchpad[-1] != _schema_hint:
+                                self.scratchpad.append(_schema_hint)
+                            self.ui.put(("agent_log", f"   -> {_schema_hint}"))
+                            continue
+                        # Second miss: fall through to derive_constraints and log.
+                        self.ui.put(("agent_log", "   -> Constraint schema violation (2nd miss): falling through to derive_constraints."))
+                        if self.stats_collector is not None:
+                            self.stats_collector.note_constraint_violation(
+                                stage_goal=str(stage.get("stage_goal") or ""),
+                                attempt=2,
+                            )
                 if self._completion_is_supported_by_non_mutating_file_evidence(stage):
                     self.ui.put(("agent_log", "   -> Completion accepted from existing non-mutating FILE_WORK evidence."))
                     self._log_dashboard("FILE_WORK non-mutating stage complete.")
@@ -452,6 +553,16 @@ class StageExecutor:
                         self.ui.put(("agent_log", "   -> Completion blocked: FILE_WORK requires VERIFIED checker evidence."))
                         self.scratchpad.append("SYSTEM ERROR: FILE_WORK cannot complete until FILE_CHECKER_VERDICT is VERIFIED.")
                         continue
+                if self._should_block_non_mutating_file_completion(stage):
+                    hint = (
+                        "SYSTEM ERROR: This non-mutating FILE_WORK stage is not complete yet because the latest inspection "
+                        "evidence does not satisfy the stage goal. If the target was not found and absence is not an allowed "
+                        "success state, do not mark the stage complete."
+                    )
+                    if not self.scratchpad or self.scratchpad[-1] != hint:
+                        self.scratchpad.append(hint)
+                    self.ui.put(("agent_log", f"   -> {hint}"))
+                    continue
                 self.ui.put(("agent_log", "   -> Planner signaled completion."))
                 self._log_dashboard("Stage Complete.")
                 success = True
@@ -460,7 +571,7 @@ class StageExecutor:
             # SAFETY: Require EXPLICIT null string for implicit completion
             if tool_tag == "null":
                 completion_handoff = normalize_completion_handoff(decision)
-                if FileStagePolicy.stage_requires_analysis_report(stage) and not completion_handoff:
+                if FileStagePolicy.stage_requires_analysis_report(stage) and len((completion_handoff or "").strip()) < 40:
                     hint = (
                         "SYSTEM ERROR: This inspection stage is not complete until you state the diagnosis explicitly. "
                         "Return tool null with is_complete true and put the diagnosis summary in the proposal field."
@@ -477,6 +588,32 @@ class StageExecutor:
                         f"PROPOSAL: {completion_handoff}",
                     )
                     self.scratchpad.append(entry)
+                # R-5: same constraint schema check as the is_complete path.
+                if FileStagePolicy.stage_requires_file_verification(stage):
+                    _has_constraints = (
+                        "constraints" in decision
+                        and decision.get("constraints") is not None
+                    )
+                    if not _has_constraints:
+                        if not _constraints_reminder_sent:
+                            _constraints_reminder_sent = True
+                            _schema_hint = (
+                                "SYSTEM ERROR: FILE_WORK completion is missing the required "
+                                "`constraints` block. Re-emit your completion with `constraints` "
+                                "populated. Example: "
+                                "\"constraints\": [{\"type\": \"CREATED\", \"path\": \"output/result.txt\"}]"
+                            )
+                            if not self.scratchpad or self.scratchpad[-1] != _schema_hint:
+                                self.scratchpad.append(_schema_hint)
+                            self.ui.put(("agent_log", f"   -> {_schema_hint}"))
+                            continue
+                        # Second miss: fall through to derive_constraints and log.
+                        self.ui.put(("agent_log", "   -> Constraint schema violation (2nd miss): falling through to derive_constraints."))
+                        if self.stats_collector is not None:
+                            self.stats_collector.note_constraint_violation(
+                                stage_goal=str(stage.get("stage_goal") or ""),
+                                attempt=2,
+                            )
                 if self._completion_is_supported_by_non_mutating_file_evidence(stage):
                     self.ui.put(("agent_log", "   -> Completion accepted from existing non-mutating FILE_WORK evidence."))
                     self._log_dashboard("FILE_WORK non-mutating stage complete.")
@@ -484,6 +621,16 @@ class StageExecutor:
                     self._append_exact_file_read_note_if_available(stage)
                     success = True
                     break
+                if self._should_block_non_mutating_file_completion(stage):
+                    hint = (
+                        "SYSTEM ERROR: This non-mutating FILE_WORK stage is not complete yet because the latest inspection "
+                        "evidence does not satisfy the stage goal. If the target was not found and absence is not an allowed "
+                        "success state, do not mark the stage complete."
+                    )
+                    if not self.scratchpad or self.scratchpad[-1] != hint:
+                        self.scratchpad.append(hint)
+                    self.ui.put(("agent_log", f"   -> {hint}"))
+                    continue
                 if FileStagePolicy.stage_requires_file_verification(stage) and self._last_file_verdict != "VERIFIED":
                     if not self._accept_current_workspace_verification(stage, "   -> Completion accepted from current workspace verification."):
                         self._emit_runtime_signal(
@@ -534,6 +681,21 @@ class StageExecutor:
                 entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, err_msg)
                 self.scratchpad.append(entry)
                 self.ui.put(("agent_log", f"   -> {err_msg}"))
+                hint = (
+                    "SYSTEM HINT: This stage is inspection-only — no code execution or file writes are permitted. "
+                    "Return tool null with is_complete true and summarise your findings in the proposal field."
+                )
+                if not self.scratchpad or self.scratchpad[-1] != hint:
+                    self.scratchpad.append(hint)
+                self.ui.put(("agent_log", f"   -> {hint}"))
+                if tool_tag == self._last_blocked_action:
+                    self._blocked_action_count += 1
+                else:
+                    self._last_blocked_action = tool_tag
+                    self._blocked_action_count = 1
+                if self._blocked_action_count >= 3:
+                    self.ui.put(("agent_log", "   -> ABORT: same action blocked 3+ times, forcing stage exit."))
+                    break
                 continue
 
             if FileStagePolicy.stage_is_non_mutating_file_stage(stage) and base_tag == "FILE_OP":
@@ -548,30 +710,120 @@ class StageExecutor:
                             "SYSTEM HINT: Proposal/approval stages must not write files. "
                             "Return tool null with is_complete true and put the proposal text in the optional proposal field."
                         )
-                        if not self.scratchpad or self.scratchpad[-1] != hint:
-                            self.scratchpad.append(hint)
-                        self.ui.put(("agent_log", f"   -> {hint}"))
+                    else:
+                        hint = (
+                            "SYSTEM HINT: This stage is inspection-only — no file writes are permitted. "
+                            "Return tool null with is_complete true and summarise your findings in the proposal field."
+                        )
+                    if not self.scratchpad or self.scratchpad[-1] != hint:
+                        self.scratchpad.append(hint)
+                    self.ui.put(("agent_log", f"   -> {hint}"))
+                    _blocked_key = planned_action or tool_tag
+                    if _blocked_key == self._last_blocked_action:
+                        self._blocked_action_count += 1
+                    else:
+                        self._last_blocked_action = _blocked_key
+                        self._blocked_action_count = 1
+                    if self._blocked_action_count >= 3:
+                        self.ui.put(("agent_log", "   -> ABORT: same action blocked 3+ times, forcing stage exit."))
+                        break
                     continue
 
             if FileStagePolicy.stage_is_structure_prep_stage(stage) and base_tag == "FILE_OP":
                 planned_action = FileStagePolicy.planned_file_op_action(tool_tag)
-                if planned_action and planned_action not in {"ensure_dir", "ensure_dirs", "read_text", "read_many", "list_tree", "find_paths", "extension_inventory"}:
+                if planned_action and planned_action not in {
+                    "ensure_dir", "ensure_dirs",
+                    "read_text", "read_many", "list_tree", "find_paths",
+                    "extension_inventory", "consolidate_by_extension", "delete_empty_dirs",
+                }:
                     err_msg = f"SECURITY VIOLATION: Folder-structure stage cannot perform relocation or deletion action '{planned_action}'."
                     entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, err_msg)
                     self.scratchpad.append(entry)
                     self.ui.put(("agent_log", f"   -> {err_msg}"))
+                    hint = (
+                        "SYSTEM HINT: This stage may only create folders or run the extension-cleanup "
+                        "workflow (extension_inventory, consolidate_by_extension, delete_empty_dirs). "
+                        "Return tool null with is_complete true and summarise what was accomplished."
+                    )
+                    if not self.scratchpad or self.scratchpad[-1] != hint:
+                        self.scratchpad.append(hint)
+                    self.ui.put(("agent_log", f"   -> {hint}"))
+                    _blocked_key = planned_action or tool_tag
+                    if _blocked_key == self._last_blocked_action:
+                        self._blocked_action_count += 1
+                    else:
+                        self._last_blocked_action = _blocked_key
+                        self._blocked_action_count = 1
+                    if self._blocked_action_count >= 3:
+                        self.ui.put(("agent_log", "   -> ABORT: same action blocked 3+ times, forcing stage exit."))
+                        break
+                    continue
+
+            # R-6: Cross-domain mutex check for RUN_CODE (DELETE/MOVE via Python).
+            # FILE_OP deletion is guarded inside FileWorkEngine.should_block() below;
+            # this branch covers os.remove / shutil.rmtree / os.rename patterns.
+            if base_tag == "RUN_CODE" and self.operational_state_service is not None:
+                _run_code_domain_block = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
+                if _run_code_domain_block.blocked:
+                    entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, _run_code_domain_block.reason)
+                    self.scratchpad.append(entry)
+                    self.ui.put(("agent_log", f"   -> {_run_code_domain_block.reason}"))
+                    _blocked_key = "RUN_CODE_TASK_EVENT_ESCAPE"
+                    if _blocked_key == self._last_blocked_action:
+                        self._blocked_action_count += 1
+                    else:
+                        self._last_blocked_action = _blocked_key
+                        self._blocked_action_count = 1
+                    if self._blocked_action_count >= 3:
+                        self.ui.put(("agent_log", "   -> ABORT: same action blocked 3+ times, forcing stage exit."))
+                        break
+                    continue
+                _run_code_block = FileWorkEngine._check_run_code_dependency(
+                    tool_tag, self.operational_state_service
+                )
+                if _run_code_block.blocked:
+                    entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, _run_code_block.reason)
+                    self.scratchpad.append(entry)
+                    self.ui.put(("agent_log", f"   -> {_run_code_block.reason}"))
+                    if _run_code_block.fatal:
+                        self._record_stage_metrics(
+                            stage_started_at=stage_started_at,
+                            planner_time_s=planner_time_s,
+                            step_count=step_count,
+                        )
+                        return False, self.scratchpad
                     continue
 
             if base_tag == "FILE_OP":
                 _exact_paths = FileWorkEngine.exact_read_paths_from_scratchpad(self.scratchpad)
-                _block = FileWorkEngine.should_block(stage, tool_tag, _exact_paths)
+                _block = FileWorkEngine.should_block(
+                    stage,
+                    tool_tag,
+                    _exact_paths,
+                    operational_state_service=self.operational_state_service,
+                )
                 if _block.blocked:
                     entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, _block.reason)
                     self.scratchpad.append(entry)
                     self.ui.put(("agent_log", f"   -> {_block.reason}"))
+                    if _block.fatal:
+                        # Cross-domain dependency: cannot be resolved by retry.
+                        # Stop the stage so the persona can report the conflict.
+                        self._record_stage_metrics(
+                            stage_started_at=stage_started_at,
+                            planner_time_s=planner_time_s,
+                            step_count=step_count,
+                        )
+                        return False, self.scratchpad
                     continue
 
             # EXECUTION
+            pending_change_capture: dict[str, Any] | None = None
+            if base_tag == "FILE_OP":
+                pending_change_capture = self.change_journal.prepare_file_op_capture_from_tool_tag(
+                    tool_tag,
+                    Path(getattr(self.brain, "workspace", ".")),
+                )
             if base_tag == "INSTALL_PACKAGE":
                 pkg_match = re.match(r"\[INSTALL_PACKAGE:\s*(.*?)\]$", tool_tag.strip(), re.DOTALL | re.IGNORECASE)
                 pkg_name = pkg_match.group(1).strip() if pkg_match else ""
@@ -619,6 +871,7 @@ class StageExecutor:
             self._raise_if_cancelled()
             entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, tool_result)
             self.scratchpad.append(entry)
+            self._update_typed_mutation_verification(stage, tool_spec, tool_result, entry)
             self.ui.put(("agent_log", format_tool_result_for_log(base_tag, tool_result)))
             _view = FileWorkEngine.render_artifact_view(tool_result)
             if _view:
@@ -626,6 +879,20 @@ class StageExecutor:
             if tool_result_is_success(tool_spec, tool_result):
                 self._last_successful_tool_name = base_tag
                 self._last_successful_tool_result = tool_result
+                # Accumulate all paths mutated this stage for LAST_LOG completeness.
+                if isinstance(tool_result, dict):
+                    for _key in ("created_files", "updated_files"):
+                        for _p in (tool_result.get(_key) or []):
+                            _clean = str(_p or "").strip().replace("\\", "/")
+                            if _clean and _clean not in self._stage_all_mutated_paths:
+                                self._stage_all_mutated_paths.append(_clean)
+                if base_tag == "FILE_OP":
+                    journal_operation = self.change_journal.finalize_file_op_capture(
+                        pending_change_capture,
+                        tool_result,
+                    )
+                    if journal_operation is not None:
+                        self.completed_change_operations.append(journal_operation)
                 self._maybe_launch_code_session(tool_result)
                 if (
                     FileStagePolicy.stage_is_interactive_runtime_verification(stage)
@@ -730,6 +997,13 @@ class StageExecutor:
                 self.ui.put(("agent_log", "   -> Auto-finish MEMORY_WORK: requested fact is already absent from current world state."))
                 self._log_dashboard("Memory fact already absent.")
                 success = True
+                break
+
+            if self._is_terminal_missing_existing_file_target(stage, tool_result):
+                self.terminal_missing_file_target = self._extract_missing_file_target(stage, tool_result)
+                self.ui.put(("agent_log", "   -> Explicit file target is missing. Ending the stage as a normal failure."))
+                self._log_dashboard("Explicit file target missing.")
+                success = False
                 break
 
             if base_tag == "INSTALL_PACKAGE" and tool_result_is_success(tool_spec, tool_result):
@@ -884,11 +1158,15 @@ class StageExecutor:
             current_check = self.file_checker.verify_current_file_stage_state(stage, self._last_successful_tool_result)
             current_verdict = str((current_check or {}).get("verdict", "")).upper()
             if current_verdict == "VERIFIED":
+                if self._should_pause_for_missing_exact_delete_target(stage):
+                    self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
+                    return False, self.scratchpad
                 self._last_file_verdict = "VERIFIED"
                 self._append_file_checker_note(current_check or {})
                 self._append_verified_file_work_result_note(stage, current_check or {}, current_state_only=True)
                 self.ui.put(("agent_log", "   -> Final current-state verification recovered the stage."))
                 self._log_dashboard("FILE_WORK recovered from verified current state.")
+                self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
                 return True, self.scratchpad
         if (
             not success
@@ -898,8 +1176,25 @@ class StageExecutor:
         ):
             self.ui.put(("agent_log", "   -> Final diagnosis proposal recovered the stage from existing inspection evidence."))
             self._log_dashboard("Diagnosis complete from existing evidence.")
+            self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
             return True, self.scratchpad
 
+        # Recovery: if this was a non-mutating inspection stage and extension_inventory
+        # succeeded, the inspection goal is satisfied regardless of what the planner tried
+        # to do afterwards.  The planner overstepping into mutating actions in an inspection
+        # stage is a boundary violation, not a task failure.
+        if (
+            not success
+            and FileStagePolicy.stage_is_non_mutating_file_stage(stage)
+            and isinstance(self._last_successful_tool_result, dict)
+            and str(self._last_successful_tool_result.get("action", "")).lower() == "extension_inventory"
+        ):
+            self.ui.put(("agent_log", "   -> Final recovery: extension_inventory satisfied the inspection stage goal."))
+            self._log_dashboard("Inspection complete from extension_inventory evidence.")
+            self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
+            return True, self.scratchpad
+
+        self._record_stage_metrics(stage_started_at=stage_started_at, planner_time_s=planner_time_s, step_count=step_count)
         return success, self.scratchpad
 
     def _append_exact_file_read_note_if_available(self, stage: StageCard) -> None:
@@ -936,10 +1231,42 @@ class StageExecutor:
         current_verdict = str((current_check or {}).get("verdict", "")).upper()
         if current_verdict != "VERIFIED":
             return False
+        if self._should_pause_for_missing_exact_delete_target(stage):
+            return False
         self._last_file_verdict = "VERIFIED"
         self._append_file_checker_note(current_check or {})
         self._append_verified_file_work_result_note(stage, current_check or {}, current_state_only=True)
         self.ui.put(("agent_log", success_log))
+        return True
+
+    def _should_pause_for_missing_exact_delete_target(self, stage: StageCard) -> bool:
+        if not FileStagePolicy.stage_is_file_work(stage):
+            return False
+        if FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return False
+        if self._stage_may_create_missing_file_target(stage):
+            return False
+
+        stage_text = FileStagePolicy.stage_goal_success_text(stage)
+        if not re.search(r"\b(delete|remove)\b", stage_text):
+            return False
+
+        targets = [str(path).strip() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
+        if len(targets) != 1:
+            return False
+
+        requested_target = targets[0]
+        workspace = Path(getattr(self.brain, "workspace", "."))
+        target_path = workspace / requested_target
+        if target_path.exists():
+            return False
+
+        candidates = FileStagePolicy.find_workspace_target_candidates(workspace, requested_target, limit=3)
+        if not candidates:
+            return False
+
+        self.terminal_missing_file_target = requested_target
+        self.ui.put(("agent_log", "   -> Exact delete target is absent, but a close workspace match exists. Holding for confirmation."))
         return True
 
     def _append_file_lookup_note_if_available(self, stage: StageCard) -> None:
@@ -974,14 +1301,49 @@ class StageExecutor:
         paths = [str(path).strip() for path in (file_check.get("evidence_files") or []) if str(path).strip()]
         if not paths:
             paths = FileWorkEngine.candidate_paths(tool_result)
+        # Merge in any paths accumulated from earlier tool calls this stage so
+        # the LAST_LOG covers every file touched, not just the most recent one.
+        for _p in (self._stage_all_mutated_paths or []):
+            if _p and _p not in paths:
+                paths.append(_p)
         if not paths and not reason:
             return
 
+        # Derive a human-readable operation label so the persona can use the
+        # correct verb ("created" vs "updated") without guessing from "Wrote…".
+        _all_created = list({
+            str(p).strip().replace("\\", "/")
+            for p in (tool_result.get("created_files") or []) + ([] if not self._stage_all_mutated_paths else [])
+            if str(p).strip()
+        } | {
+            str(p).strip().replace("\\", "/")
+            for p in self._stage_all_mutated_paths
+            # Include accumulated paths but exclude those that appear in updated_files
+            # of the last result (they were modifications, not new files).
+        })
+        _last_updated = {
+            str(p).strip().replace("\\", "/")
+            for p in (tool_result.get("updated_files") or [])
+            if str(p).strip()
+        }
+        # A path is "created" if it's not in the last tool's updated_files set.
+        # (The workspace_diff already distinguishes new vs existing files.)
+        if paths:
+            _first_path_created = paths[0] not in _last_updated
+            operation_label = "created" if _first_path_created else "updated"
+        else:
+            operation_label = "modified"
+
         payload: dict[str, Any] = {
-            "kind": "state_already_satisfied" if current_state_only else "mutation_verified",
+            "kind": (
+                "state_already_satisfied"
+                if current_state_only or bool(tool_result.get("current_state_only"))
+                else "mutation_verified"
+            ),
             "tool": tool_name or str(tool_result.get("tool", "")).upper(),
             "action": action,
             "paths": paths[:6],
+            "operation_label": operation_label,
             "summary": str(tool_result.get("summary", "")).strip(),
             "reason": reason,
         }
@@ -1038,6 +1400,84 @@ class StageExecutor:
         if FileStagePolicy.stage_requires_analysis_report(stage):
             return FileStagePolicy.is_file_read_result(tool_name, tool_result)
         return FileStagePolicy.non_mutating_file_stage_is_satisfied(stage, tool_name, tool_result)
+
+    def _should_block_non_mutating_file_completion(self, stage: StageCard) -> bool:
+        return FileStagePolicy.stage_is_non_mutating_file_stage(stage) and not self._completion_is_supported_by_non_mutating_file_evidence(stage)
+
+    def _is_terminal_missing_existing_file_target(self, stage: StageCard, tool_result: Any) -> bool:
+        if not FileStagePolicy.stage_is_file_work(stage):
+            return False
+        if FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return False
+        if self._stage_may_create_missing_file_target(stage):
+            return False
+        targets = [str(path).strip().lower() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
+        if not targets:
+            return False
+        target_terms = set(targets) | {Path(path).stem.lower() for path in targets}
+        if not isinstance(tool_result, dict):
+            return False
+        if str(tool_result.get("tool", "")).upper() != "FILE_OP":
+            return False
+
+        action = str(tool_result.get("action", "")).lower()
+        if action == "read_text":
+            summary = str(tool_result.get("summary", "")).strip().lower()
+            requested = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip().lower()
+            return "target not found" in summary and self._matches_missing_target(requested, target_terms)
+
+        if action == "find_paths":
+            query = str(tool_result.get("requested_query") or "").strip().lower()
+            try:
+                match_count = int(tool_result.get("match_count", len(tool_result.get("matches") or [])) or 0)
+            except (TypeError, ValueError):
+                match_count = 0
+            return match_count == 0 and self._matches_missing_target(query, target_terms)
+
+        if action in {"delete_path", "delete_many"} and bool(tool_result.get("current_state_only")):
+            requested_paths = [str(item).strip() for item in (tool_result.get("requested_paths") or []) if str(item).strip()]
+            if len(requested_paths) != 1:
+                return False
+            requested = requested_paths[0].lower()
+            if not self._matches_missing_target(requested, target_terms):
+                return False
+            workspace = Path(getattr(self.brain, "workspace", "."))
+            candidates = FileStagePolicy.find_workspace_target_candidates(workspace, requested_paths[0], limit=3)
+            return bool(candidates)
+
+        return False
+
+    @staticmethod
+    def _extract_missing_file_target(stage: StageCard, tool_result: Any) -> str:
+        if isinstance(tool_result, dict):
+            action = str(tool_result.get("action", "")).lower()
+            if action == "read_text":
+                path = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip()
+                if path:
+                    return path
+            if action == "find_paths":
+                query = str(tool_result.get("requested_query") or "").strip()
+                if query:
+                    return query
+        targets = [str(path).strip() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
+        return targets[0] if targets else ""
+
+    @staticmethod
+    def _stage_may_create_missing_file_target(stage: StageCard) -> bool:
+        return FileStagePolicy.stage_may_create_missing_target(stage)
+
+    @staticmethod
+    def _matches_missing_target(candidate: str, targets: set[str]) -> bool:
+        value = str(candidate or "").strip().lower()
+        if not value:
+            return False
+        return any(
+            value == target
+            or value.endswith(target)
+            or target.endswith(value)
+            for target in targets
+            if target
+        )
 
     def _should_auto_finish_inspection(self, stage: StageCard, tool_spec, tool_result: Any) -> bool:
         if tool_spec is None or tool_spec.name not in {"LIST_TASKS", "LIST_EVENTS", "LIST_KNOWLEDGE"}:

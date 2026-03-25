@@ -11,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.executor import StageExecutor  # noqa: E402
+from core.engines.file_work import FileWorkEngine  # noqa: E402
 from core.prompt_builder import PromptBuilder  # noqa: E402
 
 
@@ -49,7 +50,10 @@ def run_smoke() -> RedundantReadGuardReport:
         "print('full source available')\n",
     ]
     tool_tag = '[FILE_OP] {"action":"read_text","path":"catch_the_stars.py"} [/FILE_OP]'
-    blocked, hint = executor._should_block_redundant_exact_read(stage, tool_tag)
+    exact_paths = FileWorkEngine.exact_read_paths_from_scratchpad(executor.scratchpad)
+    block = FileWorkEngine.should_block(stage, tool_tag, exact_paths)
+    blocked = bool(block.blocked)
+    hint = str(block.reason or "")
     prompt = PromptBuilder.build_planner_prompt(
         base_template="[STEP]\n[STAGE_CARD]\n[SCRATCHPAD]\n[TOOL_GUIDE]",
         stage=stage,

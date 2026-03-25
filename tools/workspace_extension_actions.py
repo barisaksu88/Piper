@@ -27,6 +27,7 @@ def handle_consolidate_by_extension(runtime: Any, payload: dict[str, Any], actio
     )
     excluded_paths: set[Path] = set()
     excluded_names: set[str] = set()
+    excluded_prefixes: list[str] = []   # for "keep_*" / "keep*" style entries
     exclude_raw = next(
         (payload[k] for k in _EXCLUDE_ALIASES if payload.get(k)),
         [],
@@ -35,6 +36,10 @@ def handle_consolidate_by_extension(runtime: Any, payload: dict[str, Any], actio
         for raw_item in exclude_raw:
             item_str = str(raw_item or "").strip()
             if not item_str:
+                continue
+            # Glob-prefix pattern: ends with * or is a bare prefix token (no extension, no slash)
+            if item_str.endswith("*"):
+                excluded_prefixes.append(item_str.rstrip("*").lower())
                 continue
             full_path, _ = resolve_workspace_path(runtime.workspace, item_str)
             excluded_paths.add(full_path.resolve())
@@ -80,7 +85,12 @@ def handle_consolidate_by_extension(runtime: Any, payload: dict[str, Any], actio
         for src_path in files:
             if runtime._is_within_dir(src_path, dest_dir):
                 continue
-            if src_path.resolve() in excluded_paths or src_path.name.lower() in excluded_names:
+            src_name_lower = src_path.name.lower()
+            if (
+                src_path.resolve() in excluded_paths
+                or src_name_lower in excluded_names
+                or any(src_name_lower.startswith(p) for p in excluded_prefixes)
+            ):
                 continue
             target_path = dest_dir / src_path.name
             target_rel = runtime._workspace_rel(target_path, workspace_root=workspace_root)
@@ -166,6 +176,8 @@ def handle_consolidate_by_extension(runtime: Any, payload: dict[str, Any], actio
         "requested_extensions": sorted(requested_extensions),
         "destinations": destinations,
         "requested_moves": planned_moves,
+        "excluded_names": sorted(excluded_names),
+        "excluded_prefixes": sorted(excluded_prefixes),
         "deduplicated_files": sorted(set(duplicate_deletes)),
         "moved_count": len(planned_moves),
         "deduplicated_count": len(set(duplicate_deletes)),

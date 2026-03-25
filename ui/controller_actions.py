@@ -8,6 +8,10 @@ import dearpygui.dearpygui as dpg
 
 from config import CFG
 from core.commands import handle_command
+from core.engines.proactive_monitor import (
+    build_proactive_consumed_message,
+    build_proactive_trigger_message,
+)
 from core.orchestrator import run_agent_loop
 from core.runtime_control import CancellationToken, OperationCancelled
 from tools.screen_capture import ScreenCaptureError
@@ -22,6 +26,13 @@ LIVE_SCREEN_MODE_LABELS = {
     "pointer": "Pointer",
 }
 LIVE_SCREEN_INTERVAL_OPTIONS = (2.0, 5.0, 10.0, 15.0)
+
+
+def _clear_conversation_summary_file() -> None:
+    try:
+        CFG.CONVERSATION_SUMMARY_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def reset_mic_ui(controller) -> None:
@@ -99,6 +110,10 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
             cancel_token=token,
             retain_cancel_token_fn=controller.retain_cancel_token,
             release_cancel_token_fn=controller.release_cancel_token,
+            is_search_in_flight_fn=controller.is_search_in_flight,
+            retain_search_in_flight_fn=controller.retain_search_in_flight,
+            release_search_in_flight_fn=controller.release_search_in_flight,
+            current_search_query_fn=controller.current_search_query,
         )
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "Stop completed."))
@@ -396,6 +411,7 @@ def on_new_session(controller) -> None:
         controller.tts.stop()
     except Exception:
         pass
+    _clear_conversation_summary_file()
     controller.chat_state.new_session()
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
@@ -407,6 +423,7 @@ def on_new_session(controller) -> None:
 
 
 def on_clear(controller) -> None:
+    _clear_conversation_summary_file()
     controller.chat_state.clear()
     controller.session_meta = "Session: active"
     controller.stage_meta = ""
@@ -755,10 +772,10 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
         }
     )
     controller._refresh_chat_ui()
+    if isinstance(cancel_token, CancellationToken):
+        controller.retain_cancel_token(cancel_token)
 
     def report_findings() -> None:
-        if isinstance(cancel_token, CancellationToken):
-            controller.retain_cancel_token(cancel_token)
         acquired_lock = False
         try:
             while not controller.gen_lock.acquire(timeout=0.1):
@@ -783,6 +800,10 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
                 cancel_token=cancel_token,
                 retain_cancel_token_fn=controller.retain_cancel_token,
                 release_cancel_token_fn=controller.release_cancel_token,
+                is_search_in_flight_fn=controller.is_search_in_flight,
+                retain_search_in_flight_fn=controller.retain_search_in_flight,
+                release_search_in_flight_fn=controller.release_search_in_flight,
+                current_search_query_fn=controller.current_search_query,
             )
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
@@ -794,4 +815,90 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
             if acquired_lock:
                 controller.gen_lock.release()
 
-    threading.Thread(target=report_findings, daemon=True).start()
+    worker = threading.Thread(target=report_findings, daemon=True)
+    try:
+        worker.start()
+    except Exception:
+        if isinstance(cancel_token, CancellationToken):
+            controller.release_cancel_token(cancel_token)
+        raise
+
+
+def trigger_proactive_reminder(controller, reminder: Dict[str, object]) -> bool:
+    reminder_id = str(reminder.get("id") or "").strip()
+    if not reminder_id or not controller.can_dispatch_proactive_reminder():
+        return False
+    raw_message = build_proactive_trigger_message(reminder)
+    token = controller.create_cancel_token()
+    controller.retain_cancel_token(token)
+    controller.retain_proactive_reminder_inflight(reminder_id)
+    controller.ui_queue.put(("status_widget_dashboard_activity", "Scheduled reminder firing..."))
+    controller.chat_state.append_message(
+        {
+            "role": "system",
+            "content": raw_message,
+            "hidden": True,
+        }
+    )
+
+    def _run_trigger() -> None:
+        acquired_lock = False
+        completed_normally = False
+        try:
+            while not controller.gen_lock.acquire(timeout=0.1):
+                token.raise_if_cancelled()
+            acquired_lock = True
+            token.raise_if_cancelled()
+            run_agent_loop(
+                llm_client=controller.llm,
+                agent_brain=controller.agent_brain,
+                knowledge_mgr=controller.knowledge_mgr,
+                style_mgr=controller.style_mgr,
+                chat_state=controller.chat_state,
+                pipeline=controller.pipeline,
+                ui_queue=controller.ui_queue,
+                get_current_context_fn=controller._messages_for_model,
+                boot_mgr=controller.boot_mgr,
+                img_gen=controller.img_gen,
+                prompt_context_service=controller.prompt_context_service,
+                live_screen=controller.live_screen,
+                cancel_token=token,
+                retain_cancel_token_fn=controller.retain_cancel_token,
+                release_cancel_token_fn=controller.release_cancel_token,
+                is_search_in_flight_fn=controller.is_search_in_flight,
+                retain_search_in_flight_fn=controller.retain_search_in_flight,
+                release_search_in_flight_fn=controller.release_search_in_flight,
+                current_search_query_fn=controller.current_search_query,
+            )
+            completed_normally = True
+        except OperationCancelled:
+            controller.ui_queue.put(("status_widget_dashboard_activity", "Reminder canceled."))
+        except Exception as exc:
+            controller.ui_queue.put(("error", f"Proactive Reminder Error: {exc}"))
+        finally:
+            if not completed_normally:
+                consumed = {
+                    "role": "system",
+                    "content": build_proactive_consumed_message(reminder),
+                    "hidden": True,
+                }
+                controller.chat_state.replace_last_system_message(raw_message, consumed)
+            controller.release_proactive_reminder_inflight(reminder_id)
+            _finalize_operation(controller, token)
+            if acquired_lock:
+                controller.gen_lock.release()
+
+    worker = threading.Thread(target=_run_trigger, daemon=True)
+    try:
+        worker.start()
+    except Exception:
+        controller.release_proactive_reminder_inflight(reminder_id)
+        controller.release_cancel_token(token)
+        consumed = {
+            "role": "system",
+            "content": build_proactive_consumed_message(reminder),
+            "hidden": True,
+        }
+        controller.chat_state.replace_last_system_message(raw_message, consumed)
+        raise
+    return True

@@ -108,7 +108,7 @@ def run_smoke() -> FollowupResolutionEngineReport:
         data_dir = Path(tmp)
         owner = SharedStateOwner.for_data_dir(data_dir)
         owner.task_store.add("buy milk", "pending")
-        owner.event_store.add("dentist appointment", "2026-03-24")
+        owner.event_store.add("dentist appointment", "2027-06-15")
         ops = OperationalStateService(owner)
         knowledge = _DummyKnowledge()
         llm = _DummyLLM()

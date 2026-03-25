@@ -37,13 +37,13 @@ The redesign must reduce drift, not merely move code around.
 For v1, these six are the target.
 Do not add a seventh engine unless [BLUEPRINT.md](BLUEPRINT.md) is revised first.
 
-Current status:
-- `ContextPackEngine`: active
-- `StateResolutionEngine`: in progress
-- `StateMutationEngine`: active but still being hardened
-- `VerificationEngine`: active — extraction complete 2026-03-15
-- `FileWorkEngine`: not yet extracted cleanly
-- `SummaryEngine`: partially implicit, not explicit enough
+Current status (all complete as of 2026-03-15):
+- `ContextPackEngine`: ✓ done
+- `StateResolutionEngine`: ✓ done
+- `StateMutationEngine`: ✓ done
+- `VerificationEngine`: ✓ done
+- `FileWorkEngine`: ✓ done
+- `SummaryEngine`: ✓ done
 
 For v1, these remain subordinate responsibilities rather than standalone engine targets:
 - retrieval lives under `ContextPackEngine` and `StateResolutionEngine`
@@ -315,15 +315,17 @@ Signs the redesign is going wrong:
 All 6 phases of the v1 engine redesign are complete. The frozen six-engine set is fully extracted and documented.
 
 Possible next directions:
-- harden planner boundary contracts (§3.1) — input/output contract is still informal
-- wire `VerificationEngine` more deeply into the persona handoff path
-- address the pre-existing `context_pack_engine_smoke_test` workspace-state dependency (`grocery_list.txt` must exist on disk for path normalization tests to pass)
+- harden planner boundary contracts (§3.1) — input/output contract is still informal ✓ done (PlannerBoundary implemented; typed schema validation at all LLM boundaries done — see TRIGGER_FLOW.md §13.5)
+- wire `VerificationEngine` more deeply into the persona handoff path ✓ done (orc.last_verification flows through build_persona_runtime_pack())
+- address the pre-existing `context_pack_engine_smoke_test` workspace-state dependency (`grocery_list.txt` must exist on disk for path normalization tests to pass) — still open
 
 Do not start with:
-- inventing new engines outside the frozen six
+- inventing new engines outside the frozen six (see post-v1 note below)
 - a universal engine framework
 - large directory shuffles
 - replacing executor/orchestrator before contracts are clear
+
+**Post-v1 engine additions:** The six-engine freeze applies to the v1 redesign scope. Planned architectural improvements beyond v1 are tracked in `docs/architecture/TRIGGER_FLOW.md` §13. One additional engine has been approved there: `ConversationCompressor` (`core/engines/conversation_compressor.py` — see §13.3). This does not violate the v1 freeze; it is a post-v1 addition. Any further new engines must be documented in TRIGGER_FLOW.md §13 before being coded.
 
 ## 9. Definition of Done For This Roadmap
 

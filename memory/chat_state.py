@@ -40,6 +40,7 @@ class ChatState:
     
     # Thread safety lock
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _streaming_assistant_index: int | None = None
 
     # When True, prompt builder should include the bootstrap transcript once.
     bootstrap_pending: bool = False
@@ -65,6 +66,8 @@ class ChatState:
 
     def append(self, role: str, content: str) -> None:
         with self._lock:
+            if str(role or "").lower() == "user":
+                self._drop_orphaned_streaming_assistant_locked()
             self.messages.append({"role": role, "content": content})
 
     def append_message(self, message: Dict[str, Any]) -> None:
@@ -87,20 +90,47 @@ class ChatState:
                     return
             self.messages.append(payload)
 
+    def remove_hidden_system_message(self, prefix: str) -> None:
+        marker = str(prefix or "").strip()
+        if not marker:
+            return
+        with self._lock:
+            self.messages = [
+                dict(message)
+                for message in self.messages
+                if not (
+                    str(message.get("role") or "").lower() == "system"
+                    and bool(message.get("hidden"))
+                    and str(message.get("content") or "").startswith(marker)
+                )
+            ]
+
     def upsert_streaming_assistant(self, text: str) -> None:
         with self._lock:
             if not text:
                 return
-
-            if not self.messages or self.messages[-1].get("role") != "assistant":
+            active_index = self._streaming_assistant_index
+            if (
+                active_index is None
+                or active_index < 0
+                or active_index >= len(self.messages)
+                or self.messages[active_index].get("role") != "assistant"
+            ):
                 self.messages.append({"role": "assistant", "content": ""})
-            self.messages[-1]["content"] = text
+                self._streaming_assistant_index = len(self.messages) - 1
+                active_index = self._streaming_assistant_index
+            self.messages[active_index]["content"] = text
+
+    def finalize_streaming_assistant(self) -> None:
+        with self._lock:
+            self._streaming_assistant_index = None
         
     def clear(self) -> None:
         with self._lock:
             self.messages.clear()
             self.bootstrap_pending = False
             self.style_bootstrap_pending = False
+            self._streaming_assistant_index = None
 
     def new_session(self) -> None:
         """Start a fresh session.
@@ -113,6 +143,7 @@ class ChatState:
             self.messages.append({"role": "system", "content": self.session_marker_prefix})
             self.bootstrap_pending = True
             self.style_bootstrap_pending = False
+            self._streaming_assistant_index = None
 
         # --- FIX: WIPE DISK MEMORY ---
         # Open in 'w' mode to truncate/clear the file immediately.
@@ -195,6 +226,27 @@ class ChatState:
                     continue
                 if str(self.messages[i].get("content") or "") == target:
                     self.messages.pop(i)
+                    if self._streaming_assistant_index == i:
+                        self._streaming_assistant_index = None
+                    elif (
+                        self._streaming_assistant_index is not None
+                        and i < self._streaming_assistant_index
+                    ):
+                        self._streaming_assistant_index -= 1
                     return True
                 return False
         return False
+
+    def _drop_orphaned_streaming_assistant_locked(self) -> None:
+        active_index = self._streaming_assistant_index
+        if active_index is None:
+            return
+        if (
+            active_index < 0
+            or active_index >= len(self.messages)
+            or self.messages[active_index].get("role") != "assistant"
+        ):
+            self._streaming_assistant_index = None
+            return
+        self.messages.pop(active_index)
+        self._streaming_assistant_index = None

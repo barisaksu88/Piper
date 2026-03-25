@@ -53,8 +53,14 @@ def execute_file_op(runtime: Any, payload: dict[str, Any], action: str, file_op_
     if action == "update_json":
         return handle_update_json(runtime, payload, action, file_op_error)
     if action == "read_text":
+        if isinstance(payload.get("paths"), list) and payload.get("paths"):
+            return handle_read_many(runtime, payload, "read_many", cancel_token=cancel_token)
         return handle_read_text(runtime, payload, action, file_op_error)
     if action == "read_many":
+        if payload.get("path"):
+            single_payload = dict(payload)
+            single_payload["paths"] = [payload.get("path")]
+            return handle_read_many(runtime, single_payload, action, cancel_token=cancel_token)
         return handle_read_many(runtime, payload, action, cancel_token=cancel_token)
     if action == "move_path":
         return handle_move_path(runtime, payload, action, file_op_error)

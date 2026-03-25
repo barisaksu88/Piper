@@ -712,6 +712,24 @@ class LocalFileOpRuleChecker:
                             "evidence_files": [created_path],
                         }
 
+        # Read exclusion info emitted by the tool so intentionally-skipped files
+        # are not counted as off-target during verification.
+        excluded_names: set[str] = {
+            str(n).strip().lower()
+            for n in (tool_result.get("excluded_names") or [])
+            if str(n).strip()
+        }
+        excluded_prefixes: list[str] = [
+            str(p).strip().lower()
+            for p in (tool_result.get("excluded_prefixes") or [])
+            if str(p).strip()
+        ]
+        # Fallback: also derive exclusion tokens from the stage text itself.
+        # This covers the case where the tool_result's excluded_names/excluded_prefixes
+        # fields are absent (e.g. synthetic STATE_CHECK results) but the stage context
+        # explicitly names files or prefixes that should be left in place.
+        stage_excl_patterns = self._exclusion_patterns_from_stage()
+
         off_target: list[str] = []
         evidence: list[str] = []
         for raw_ext, raw_dest in destinations.items():
@@ -730,8 +748,18 @@ class LocalFileOpRuleChecker:
                 path_ext = path.suffix.lower() or "[no_ext]"
                 if path_ext != ext:
                     continue
-                if not self._is_within(path, dest_path):
-                    off_target.append(self._rel_to_workspace(path))
+                if self._is_within(path, dest_path):
+                    continue
+                name_lower = path.name.lower()
+                if name_lower in excluded_names:
+                    continue
+                if any(name_lower.startswith(p) for p in excluded_prefixes):
+                    continue
+                # Stage-text fallback: skip if any exclusion keyword from the stage
+                # is a prefix of or matches this filename (e.g. "keep" from "except keep*").
+                if any(name_lower.startswith(p) or name_lower == p for p in stage_excl_patterns):
+                    continue
+                off_target.append(self._rel_to_workspace(path))
         if off_target:
             return {
                 "verdict": "FAILED",
@@ -819,12 +847,19 @@ class LocalFileOpRuleChecker:
             dst = str(item.get("dst") or "").strip()
             if not dst:
                 continue
+            src_path = self._resolved(src) if src else None
             dst_path = self._resolved(dst)
+            if src and (src_path is None or not src_path.exists()):
+                missing.append(src)
+                continue
             if not dst_path.exists():
                 missing.append(dst)
                 continue
             if src:
-                src_path = self._resolved(src)
+                assert src_path is not None
+                if src_path.is_file() != dst_path.is_file():
+                    mismatched.append(f"{src}->{dst}")
+                    continue
                 if src_path.is_file() and dst_path.is_file():
                     src_sha1 = hashlib.sha1(src_path.read_bytes()).hexdigest()
                     dst_sha1 = hashlib.sha1(dst_path.read_bytes()).hexdigest()
@@ -851,7 +886,7 @@ class LocalFileOpRuleChecker:
         if missing:
             return {
                 "verdict": "FAILED",
-                "reason": f"Some requested copy destinations are missing: {', '.join(missing)}.",
+                "reason": f"Some requested copy paths are missing or the source no longer exists: {', '.join(missing)}.",
                 "evidence_files": evidence[:6],
             }
         return {

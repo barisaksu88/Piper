@@ -18,6 +18,18 @@ class PromptBuilder:
     _PLANNER_SCRATCHPAD_MAX_CHARS = 6000
     _PLANNER_FILE_READ_SCRATCHPAD_MAX_CHARS = 14000
     _INSPECTOR_SCRATCHPAD_MAX_CHARS = 8000
+    _PLANNER_EXACT_READ_CODE_MAX_CHARS = 5000
+    _PLANNER_EXACT_READ_TEXT_MAX_CHARS = 2500
+    _PLANNER_EXACT_READ_TOTAL_MAX_CHARS = 8000
+    _PLANNER_EXACT_READ_PATTERN = re.compile(
+        r"FILE_READ_EXACT_PATH:\s*(?P<path>[^\n]+)\nFILE_READ_EXACT_CONTENT:\n"
+        r"(?P<content>.*?)(?=\nFILE_READ_EXACT_PATH:|\n=== STAGE |\Z)",
+        re.DOTALL,
+    )
+    _PLANNER_EXACT_READ_TRUNCATION_NOTE = (
+        "\n[TRUNCATED FOR PLANNER BUDGET. FULL EXACT CONTENT REMAINS IN RUNTIME STATE. "
+        "USE RUN_CODE IF YOU NEED THE WHOLE FILE.]\n"
+    )
 
     # _truncate_scratchpad → moved to SummaryEngine.truncate_scratchpad
     # _scratchpad_exact_read_paths → removed; use FileWorkEngine.exact_read_paths_from_scratchpad
@@ -71,7 +83,119 @@ class PromptBuilder:
         return "\n".join(lines)
 
     @staticmethod
-    def build_planner_prompt(base_template: str, stage: Dict, scratchpad_text: str, step_count: int) -> str:
+    def _render_planner_boundary_block(stage: Dict[str, Any], planner_input: Any | None = None) -> str:
+        objective = str(
+            getattr(planner_input, "objective", None)
+            if planner_input is not None
+            else stage.get("objective", "")
+            or stage.get("objective", "")
+            or ""
+        ).strip()
+        stage_goal = str(
+            getattr(planner_input, "stage_goal", None)
+            if planner_input is not None
+            else stage.get("stage_goal", "")
+            or stage.get("stage_goal", "")
+            or ""
+        ).strip()
+        stage_type = str(
+            getattr(planner_input, "stage_type", None)
+            if planner_input is not None
+            else stage.get("stage_type", "")
+            or stage.get("stage_type", "")
+            or ""
+        ).strip()
+        success_condition = str(
+            getattr(planner_input, "success_condition", None)
+            if planner_input is not None
+            else stage.get("success_condition", "")
+            or stage.get("success_condition", "")
+            or ""
+        ).strip()
+        allowed_tools = list(
+            getattr(planner_input, "allowed_tools", None)
+            if planner_input is not None
+            else stage.get("allowed_tools", [])
+            or stage.get("allowed_tools", [])
+            or []
+        )
+        active_targets = list(
+            getattr(planner_input, "active_targets", None)
+            if planner_input is not None
+            else stage.get("active_targets", [])
+            or stage.get("active_targets", [])
+            or []
+        )
+        evidence_required = str(
+            getattr(planner_input, "evidence_required", None)
+            if planner_input is not None
+            else stage.get("evidence_required", "")
+            or stage.get("evidence_required", "")
+            or ""
+        ).strip()
+        lines = ["[PLANNER_BOUNDARY]"]
+        lines.append(f"objective: {objective or '(none)'}")
+        lines.append(f"stage_goal: {stage_goal or '(missing)'}")
+        lines.append(f"success_condition: {success_condition or '(missing)'}")
+        lines.append(f"stage_type: {stage_type or '(missing)'}")
+        lines.append("allowed_tools: " + (" | ".join(str(tool).strip() for tool in allowed_tools if str(tool).strip()) or "(none)"))
+        lines.append("active_targets: " + (" | ".join(str(target).strip() for target in active_targets if str(target).strip()) or "(none identified)"))
+        lines.append(f"evidence_required: {evidence_required or '(none)'}")
+        lines.append("Treat this block as the authoritative normalized planner contract for the current stage.")
+        return "\n".join(lines)
+
+    @classmethod
+    def _truncate_exact_read_for_planner(cls, content: str, *, limit: int) -> str:
+        text = str(content or "")
+        if len(text) <= limit:
+            return text
+        note = cls._PLANNER_EXACT_READ_TRUNCATION_NOTE
+        if limit <= len(note) + 80:
+            return text[: max(limit, 0)]
+        remaining = limit - len(note)
+        head = max(40, remaining // 2)
+        tail = max(40, remaining - head)
+        if head + tail >= len(text):
+            return text
+        return text[:head] + note + text[-tail:]
+
+    @classmethod
+    def _compact_exact_read_blocks_for_planner(cls, scratchpad_text: str) -> str:
+        text = str(scratchpad_text or "")
+        if "FILE_READ_EXACT_CONTENT:" not in text:
+            return text
+
+        remaining_total = cls._PLANNER_EXACT_READ_TOTAL_MAX_CHARS
+
+        def _replace(match: re.Match[str]) -> str:
+            nonlocal remaining_total
+
+            path = str(match.group("path") or "").strip()
+            content = str(match.group("content") or "").strip("\n")
+            per_file_limit = (
+                cls._PLANNER_EXACT_READ_CODE_MAX_CHARS
+                if FileStagePolicy.paths_are_code_files([path])
+                else cls._PLANNER_EXACT_READ_TEXT_MAX_CHARS
+            )
+            allowed = max(0, min(per_file_limit, remaining_total))
+            if allowed <= 0:
+                rendered = "[OMITTED FROM PLANNER BUDGET. FULL EXACT CONTENT REMAINS IN RUNTIME STATE.]"
+            else:
+                rendered = cls._truncate_exact_read_for_planner(content, limit=allowed)
+                remaining_total = max(0, remaining_total - len(rendered))
+            return f"FILE_READ_EXACT_PATH: {path}\nFILE_READ_EXACT_CONTENT:\n{rendered}"
+
+        return cls._PLANNER_EXACT_READ_PATTERN.sub(_replace, text)
+
+    @staticmethod
+    def build_planner_prompt(
+        base_template: str,
+        stage: Dict,
+        scratchpad_text: str,
+        step_count: int,
+        *,
+        planner_input: Any | None = None,
+    ) -> str:
         stage_card_text = json.dumps(stage, indent=2)
         scratchpad_limit = PromptBuilder._PLANNER_SCRATCHPAD_MAX_CHARS
         if (
@@ -83,6 +207,7 @@ class PromptBuilder:
             )
         ):
             scratchpad_limit = PromptBuilder._PLANNER_FILE_READ_SCRATCHPAD_MAX_CHARS
+        scratchpad_text = PromptBuilder._compact_exact_read_blocks_for_planner(scratchpad_text)
         scratchpad_text = SummaryEngine.truncate_scratchpad(
             scratchpad_text,
             limit=scratchpad_limit,
@@ -91,6 +216,10 @@ class PromptBuilder:
         prompt = base_template
         prompt = prompt.replace("[STEP]", str(step_count))
         prompt = prompt.replace("[STAGE_CARD]", stage_card_text)
+        prompt = prompt.replace(
+            "[PLANNER_BOUNDARY]",
+            PromptBuilder._render_planner_boundary_block(stage, planner_input=planner_input),
+        )
         prompt = prompt.replace("[SCRATCHPAD]", scratchpad_text)
         tool_guide = render_stage_guide(
             stage.get("stage_type", "UNKNOWN"),
@@ -152,6 +281,13 @@ class PromptBuilder:
         if context.style_overlay:
             parts.append(context.style_overlay)
 
+        # [ENVIRONMENT] (Today / Weather / System load) appears BEFORE world_state
+        # so the model reads the current date before it encounters the Birthday
+        # field in [WORLD STATE].  This prevents the birthday from biasing the
+        # model when it is asked "what's today's date?".
+        if context.env_block:
+            parts.append(context.env_block)
+
         if context.world_state:
             parts.append(context.world_state)
 
@@ -163,9 +299,6 @@ class PromptBuilder:
 
         if context.operational_state:
             parts.append(context.operational_state)
-
-        if context.env_block:
-            parts.append(context.env_block)
 
         has_relevance_block = bool(
             re.search(r"(?im)^\s*(?:##\s*)?\[?RELEVANCE DISCIPLINE\]?\s*$", instruction_text)
@@ -210,16 +343,17 @@ class PromptBuilder:
                 brain_lines.append(f"- {text} [{age_label}]")
             parts.append("\n".join(brain_lines))
 
-        if context.document_focus:
+        _focus_text = str(context.document_focus or "").strip()
+        if _focus_text:
             focus_lines = ["[DOCUMENT FOCUS]"]
             if context.document_sources:
                 focus_lines.append("Sources: " + ", ".join(str(item) for item in context.document_sources))
             if context.document_references:
                 focus_lines.append("References: " + " | ".join(str(item) for item in context.document_references))
-            focus_lines.append(str(context.document_focus).strip())
+            focus_lines.append(_focus_text)
             parts.append("\n".join(line for line in focus_lines if line))
 
-        if context.document_hits and not context.document_focus:
+        if context.document_hits and not _focus_text:
             document_lines = ["[DOCUMENT MATCHES]"]
             grouped_matches: Dict[str, list[str]] = {}
             grouped_seen: Dict[str, set[str]] = {}
@@ -237,13 +371,15 @@ class PromptBuilder:
                 if not refs:
                     for ref in extract_document_reference_labels(str(hit.get("content") or ""), limit=3):
                         PromptBuilder._append_unique(refs, seen_refs, ref)
-            for name, refs in grouped_matches.items():
-                document_lines.append(f"- {name}")
-                if refs:
-                    document_lines.append("  refs: " + " | ".join(refs[:6]))
-            document_lines.append(
-                "Use these matches only as a hint that relevant ingested material exists; do not quote or paraphrase raw document text unless [DOCUMENT FOCUS] is present."
-            )
-            parts.append("\n".join(document_lines))
+            # Only emit block if at least one named document was found.
+            if grouped_matches:
+                for name, refs in grouped_matches.items():
+                    document_lines.append(f"- {name}")
+                    if refs:
+                        document_lines.append("  refs: " + " | ".join(refs[:6]))
+                document_lines.append(
+                    "Use these matches only as a hint that relevant ingested material exists; do not quote or paraphrase raw document text unless [DOCUMENT FOCUS] is present."
+                )
+                parts.append("\n".join(document_lines))
 
         return "\n\n".join(parts)

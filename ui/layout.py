@@ -67,6 +67,7 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
     TAG_RESTART_BUTTON = tags["TAG_RESTART_BUTTON"]
     TAG_INGEST_BUTTON = tags["TAG_INGEST_BUTTON"]
     TAG_CODE_TAB = tags["TAG_CODE_TAB"]
+    TAG_STATS_TAB = tags["TAG_STATS_TAB"]
     TAG_CODE_VIEW_CHILD = tags["TAG_CODE_VIEW_CHILD"]
     TAG_CODE_VIEW_TEXT = tags["TAG_CODE_VIEW_TEXT"]
     TAG_CODE_STATUS_TEXT = tags["TAG_CODE_STATUS_TEXT"]
@@ -77,6 +78,8 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
     TAG_CODE_STOP_BUTTON = tags["TAG_CODE_STOP_BUTTON"]
     TAG_DOCUMENTS_VIEW_CHILD = tags["TAG_DOCUMENTS_VIEW_CHILD"]
     TAG_DOCUMENTS_VIEW_TEXT = tags["TAG_DOCUMENTS_VIEW_TEXT"]
+    TAG_STATS_VIEW_CHILD = tags["TAG_STATS_VIEW_CHILD"]
+    TAG_STATS_VIEW_TEXT = tags["TAG_STATS_VIEW_TEXT"]
     chat_wrap = max(620, w - RIGHT_PANE_WIDTH - 180)
 
     on_send = callbacks["on_send"]
@@ -355,6 +358,29 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
                     dpg.add_button(tag=TAG_CODE_STOP_BUTTON, label="Stop Process", width=100, callback=lambda sender=None, app_data=None, user_data=None: on_stop())
                 with dpg.group(horizontal=True):
                     dpg.add_button(tag=TAG_CODE_CLEAR_BUTTON, label="Clear Console", width=120, callback=on_code_clear)
+
+            # === TAB 4: STATS ===
+            with dpg.tab(label="Stats", tag=TAG_STATS_TAB):
+                dpg.add_text("Turn Statistics", color=(175, 215, 255, 255))
+                dpg.add_separator()
+                with dpg.child_window(
+                    tag=TAG_STATS_VIEW_CHILD,
+                    width=-1,
+                    height=-1,
+                    border=True,
+                    horizontal_scrollbar=True,
+                ):
+                    dpg.bind_item_theme(dpg.last_item(), text_pane_theme)
+                    dpg.add_input_text(
+                        tag=TAG_STATS_VIEW_TEXT,
+                        multiline=True,
+                        readonly=True,
+                        tab_input=False,
+                        width=-1,
+                        height=_estimate_text_view_height("No stats recorded yet.", min_height=160),
+                        default_value="No stats recorded yet.",
+                    )
+                    dpg.bind_item_theme(TAG_STATS_VIEW_TEXT, selectable_text_theme)
 
         # Key Handlers
         enter_armed = {"armed": True}

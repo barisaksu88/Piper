@@ -14,6 +14,29 @@ FileStageKind = Literal[
 ]
 
 
+PlanConstraintType = Literal[
+    "EXCLUSION",   # no file matching pattern should exist in scope
+    "MOVED",       # file should exist at to_path, not at from_path
+    "DELETED",     # file/dir should not exist
+    "CREATED",     # file/dir should exist
+    "MODIFIED",    # file content must satisfy expected_present / expected_absent
+    "COUNT",       # directory should contain exactly N files
+]
+
+
+class PlanConstraint(TypedDict, total=False):
+    type: PlanConstraintType
+    scope: Literal["FILE", "FILENAME", "DIRECTORY", "EXTENSION"]
+    path: str               # used by DELETED, CREATED, MODIFIED, COUNT
+    from_path: str          # MOVED: source path
+    to_path: str            # MOVED: destination path
+    pattern: str            # EXCLUSION / FILENAME scope: substring to match
+    directory: str          # EXCLUSION: restrict search to this subdirectory
+    expected: int           # COUNT: expected number of files
+    expected_present: List[str]   # MODIFIED: text that must appear in file
+    expected_absent: List[str]    # MODIFIED: text that must not appear in file
+
+
 class ChatMessage(TypedDict, total=False):
     role: str
     content: str
@@ -34,12 +57,14 @@ class StageCard(TypedDict, total=False):
     stage_type: str
     success_condition: str
     allowed_tools: List[str]
+    file_stage_kind: FileStageKind
     mutation: StateMutationRequest
     skill: "SkillDecision"
     # Planner-boundary fields (may be set by router or filled by PlannerBoundary.validate_input)
     objective: str          # Parent route-card goal; why this workflow exists
     active_targets: List[str]   # Files or entities being acted on this stage
     evidence_required: str      # What constitutes verified completion (defaults to success_condition)
+    constraints: List[PlanConstraint]   # Optional typed success constraints (router or planner emitted)
 
 
 class RouteCard(TypedDict, total=False):
@@ -64,6 +89,9 @@ class RouteDecision(TypedDict, total=False):
     decision: Literal["CHAT", "SEARCH", "TASK"]
     card: RouteCard
     skill: SkillDecision
+    source_scope: Literal["web", "workspace", "unknown"]
+    confidence: Literal["low", "medium", "high"]
+    question_if_uncertain: str
 
 
 class PlannerDecision(TypedDict, total=False):
@@ -137,6 +165,7 @@ class StageOutcomePack:
     mutation_kind: str = ""
     auto_reroute: bool = False
     reroute_reason: str = ""
+    allow_persona_reroute: bool = True
 
 
 @dataclass(frozen=True)
@@ -169,6 +198,70 @@ class FollowupResolution:
     question: str = ""
     confidence: Literal["low", "medium", "high"] = "low"
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class RouteClarifierResolution:
+    decision: Literal["keep_task", "clarify_chat"] = "keep_task"
+    question: str = ""
+    reason: str = ""
+
+
+PersonaTurnType = Literal[
+    "CHAT",
+    "TASK",
+    "DOC_FOCUS",
+    "SEARCH_FIRST_PASS",
+    "REPORTER",
+    "EXPLAIN",
+    "PROACTIVE_TRIGGER",
+]
+
+
+@dataclass(frozen=True)
+class PersonaArbitrationProfile:
+    primary: tuple[str, ...] = ()
+    secondary: tuple[str, ...] = ()
+    suppressed: tuple[str, ...] = ()
+
+
+PERSONA_CONTEXT_ARBITRATION_TABLE: Dict[PersonaTurnType, PersonaArbitrationProfile] = {
+    "CHAT": PersonaArbitrationProfile(
+        primary=("[ENVIRONMENT]", "[RETRIEVED MEMORY]"),
+        secondary=("[WORLD STATE]", "[SITUATIONAL STATE]", "[OPERATIONAL STATE]"),
+        suppressed=("[DOCUMENT MATCHES]", "[EXPLAIN_LAST_TURN]"),
+    ),
+    "TASK": PersonaArbitrationProfile(
+        primary=("[FINAL_STAGE_OUTCOME]", "[OPERATIONAL STATE]"),
+        secondary=("[WORLD STATE]", "[RETRIEVED MEMORY]"),
+        suppressed=("[DOCUMENT MATCHES]", "[PATTERN HINTS]"),
+    ),
+    "DOC_FOCUS": PersonaArbitrationProfile(
+        primary=("[DOCUMENT FOCUS]",),
+        secondary=("[INTENT STATE]", "[RETRIEVED MEMORY]"),
+        suppressed=("[WORLD STATE]", "[SITUATIONAL STATE]", "[PATTERN HINTS]"),
+    ),
+    "SEARCH_FIRST_PASS": PersonaArbitrationProfile(
+        primary=("[ENVIRONMENT]", "[RETRIEVED MEMORY]"),
+        secondary=("[WORLD STATE]",),
+        suppressed=("[DOCUMENT MATCHES]", "[OPERATIONAL STATE]"),
+    ),
+    "REPORTER": PersonaArbitrationProfile(
+        primary=("[SEARCH_REPORT_RULE]", "[SEARCH SUMMARY]"),
+        secondary=("[RETRIEVED MEMORY]",),
+        suppressed=("[WORLD STATE]", "[SITUATIONAL STATE]", "[PATTERN HINTS]"),
+    ),
+    "EXPLAIN": PersonaArbitrationProfile(
+        primary=("[EXPLAIN_LAST_TURN]",),
+        secondary=(),
+        suppressed=("[ALL OTHER BLOCKS]",),
+    ),
+    "PROACTIVE_TRIGGER": PersonaArbitrationProfile(
+        primary=("[PROACTIVE_TRIGGER]",),
+        secondary=("[OPERATIONAL STATE]",),
+        suppressed=("[ALL OTHER BLOCKS]",),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -232,6 +325,7 @@ class PersonaRuntimePack:
     outcome_block: str = ""
     outcome_failed: bool = False
     outcome_paused: bool = False
+    allow_persona_reroute: bool = True
     proposal_answer: str = ""
     analysis_report_answer: str = ""
     exact_file_read_answer: str = ""
@@ -245,6 +339,8 @@ class PersonaRuntimePack:
     # not inferred from scratchpad text.  Empty string when not evaluated.
     verification_verdict: str = ""      # "VERIFIED", "PARTIAL", "FAILED", or ""
     verification_evidence: str = ""     # evidence_summary from VerificationResult
+    verification_recommendation: str = ""  # STOP_SUCCESS | RETRY | STOP_FAILED
+    verification_checker_path: str = ""    # RULES | LLM | STATE_CHECK | MUTATION | NONE
 
 
 @dataclass(frozen=True)
@@ -271,7 +367,12 @@ class FileWorkBlock:
 
     blocked=True means the proposed tool call must be suppressed and
     reason inserted into the scratchpad as a SYSTEM ERROR.
+
+    fatal=True means the block cannot be resolved by the planner retrying
+    (e.g. cross-domain dependency on DELETE/MOVE) — the executor must stop
+    the entire stage immediately rather than continuing the step loop.
     """
 
     blocked: bool = False
     reason: str = ""
+    fatal: bool = False

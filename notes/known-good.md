@@ -7,6 +7,7 @@
 - Current active model is `Qwen_Qwen3.5-9B-Q6_K.gguf`.
 - The local `llama.cpp` runtime under `runtime/llama.cpp` is the intended server path.
 - Qwen/llama.cpp persona payloads must keep the only `system` message at the beginning; `[LATEST_RUNTIME_CONTEXT]` belongs inside that first system prompt, not as a trailing chat message.
+- `[FINAL_STAGE_OUTCOME]` must be built only from real scratchpad outcome entries that start with `=== STAGE N OUTCOME ===`; exact file reads must not leak in just because the file text contains the word `OUTCOME`.
 
 ## Tooling
 

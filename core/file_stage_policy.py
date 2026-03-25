@@ -5,11 +5,22 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.contracts import StageCard
+from core.contracts import FileStageKind, StageCard
 from core.file_extensions import CODE_FILE_EXTENSIONS
 
 
 class FileStagePolicy:
+    _FILE_STAGE_KINDS: frozenset[FileStageKind] = frozenset(
+        {
+            "INSPECTION",
+            "CONTENT_EDIT",
+            "STRUCTURE_PREP",
+            "BROAD_REORG",
+            "SCRIPT_LAUNCH",
+            "DEPENDENCY_RECOVERY",
+            "UNKNOWN",
+        }
+    )
     _QUOTED_VALUE_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
     _PATHISH_TOKEN_RE = re.compile(r"(?:[a-z0-9_.-]+[/\\])+[a-z0-9_.-]+|[a-z0-9_.-]+\.[a-z0-9]{1,8}", re.IGNORECASE)
     _NEGATED_MUTATION_RE = re.compile(
@@ -38,9 +49,31 @@ class FileStagePolicy:
         cleaned = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
         return " ".join(cleaned.split())
 
+    @classmethod
+    def _token_prefix_match(cls, query_norm: str, candidate_norm: str) -> bool:
+        q_tokens = query_norm.split()
+        c_tokens = candidate_norm.split()
+        if not q_tokens or not c_tokens:
+            return False
+        checked = 0
+        for qt in q_tokens:
+            if len(qt) < 2:
+                continue
+            if not any(ct.startswith(qt) or qt.startswith(ct) for ct in c_tokens):
+                return False
+            checked += 1
+        return checked > 0
+
     @staticmethod
     def stage_is_file_work(stage: StageCard) -> bool:
         return str(stage.get("stage_type", "")).upper() == "FILE_WORK"
+
+    @classmethod
+    def stage_kind(cls, stage: StageCard) -> FileStageKind | str:
+        if not cls.stage_is_file_work(stage):
+            return ""
+        kind = str(stage.get("file_stage_kind", "") or "").strip().upper()
+        return kind if kind in cls._FILE_STAGE_KINDS else ""
 
     @staticmethod
     def stage_file_text(stage: StageCard) -> str:
@@ -62,6 +95,48 @@ class FileStagePolicy:
         ).lower()
 
     @classmethod
+    def stage_may_create_missing_target(cls, stage: StageCard) -> bool:
+        raw = cls.stage_goal_success_text(stage)
+        if not raw:
+            return False
+
+        # Strip explicit "do not create" guidance before looking for positive
+        # create/build cues. Existing-file edit cards often mention creation
+        # only to forbid it when the target is missing.
+        sanitized = re.sub(
+            r"\b(?:do\s+not|don't|not\s+to|without|instead\s+of|rather\s+than)\s+"
+            r"(?:creat\w*|mak\w*|generat\w*|build\w*|ensur\w*)\b[^.;]*",
+            " ",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        sanitized = re.sub(
+            r"\bif\s+[^.;]*\bmissing\b[^.;]*\b(?:stop|report|do\s+not|don't)\b[^.;]*"
+            r"\b(?:creat\w*|mak\w*|generat\w*|build\w*)\b[^.;]*",
+            " ",
+            sanitized,
+            flags=re.IGNORECASE,
+        )
+
+        if (
+            "existing file" in raw
+            and re.search(
+                r"\b(?:do\s+not|don't|not\s+to)\s+creat\w*\b|\binstead of creat\w*\b",
+                raw,
+                flags=re.IGNORECASE,
+            )
+        ):
+            return False
+
+        return bool(
+            re.search(
+                r"\b(?:create|make|generate|build|new file|create or overwrite|create the text file|write the text file|ensure .* exists?)\b",
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    @classmethod
     def stage_intent_text(cls, stage: StageCard) -> str:
         raw = cls.stage_goal_success_text(stage)
         if not raw:
@@ -74,6 +149,9 @@ class FileStagePolicy:
 
     @classmethod
     def is_file_inspection_stage(cls, stage: StageCard) -> bool:
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "INSPECTION"
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -86,6 +164,9 @@ class FileStagePolicy:
 
     @classmethod
     def is_file_planning_stage(cls, stage: StageCard) -> bool:
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"INSPECTION", "UNKNOWN"}:
+            return False
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -121,6 +202,9 @@ class FileStagePolicy:
 
     @classmethod
     def stage_requires_file_computation(cls, stage: StageCard) -> bool:
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"INSPECTION", "UNKNOWN"}:
+            return False
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -134,6 +218,9 @@ class FileStagePolicy:
     @classmethod
     def stage_requires_analysis_report(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
+            return False
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"INSPECTION", "UNKNOWN"}:
             return False
         raw = cls.stage_goal_success_text(stage)
         text = cls.stage_intent_text(stage)
@@ -167,6 +254,9 @@ class FileStagePolicy:
     def stage_is_script_launch_stage(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "SCRIPT_LAUNCH"
         raw = cls.stage_goal_success_text(stage)
         text = cls.stage_intent_text(stage)
         if not raw or not text:
@@ -179,6 +269,9 @@ class FileStagePolicy:
     @classmethod
     def stage_is_interactive_runtime_verification(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
+            return False
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"SCRIPT_LAUNCH", "UNKNOWN"}:
             return False
         raw = cls.stage_goal_success_text(stage)
         text = cls.stage_intent_text(stage)
@@ -206,14 +299,23 @@ class FileStagePolicy:
 
     @classmethod
     def stage_is_non_mutating_file_stage(cls, stage: StageCard) -> bool:
-        return cls.stage_is_file_work(stage) and not cls.stage_is_script_launch_stage(stage) and (
+        if not cls.stage_is_file_work(stage):
+            return False
+        if cls.stage_requires_user_approval(stage):
+            return True
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "INSPECTION"
+        return not cls.stage_is_script_launch_stage(stage) and (
             cls.is_file_inspection_stage(stage)
             or cls.is_file_planning_stage(stage)
-            or cls.stage_requires_user_approval(stage)
         )
 
     @classmethod
     def stage_is_structure_prep_stage(cls, stage: StageCard) -> bool:
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"STRUCTURE_PREP", "UNKNOWN"}:
+            return False
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -227,6 +329,9 @@ class FileStagePolicy:
     def stage_is_content_edit_stage(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "CONTENT_EDIT"
         intent = cls.stage_intent_text(stage)
         raw = cls.stage_goal_success_text(stage)
         if not intent or not raw:
@@ -246,6 +351,9 @@ class FileStagePolicy:
     def stage_is_broad_file_reorg(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "BROAD_REORG"
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -264,6 +372,9 @@ class FileStagePolicy:
     def stage_is_extension_file_reorg(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"STRUCTURE_PREP", "UNKNOWN"}:
+            return False
         text = cls.stage_intent_text(stage)
         if not text:
             return False
@@ -281,6 +392,9 @@ class FileStagePolicy:
     def stage_is_dependency_recovery(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind:
+            return kind == "DEPENDENCY_RECOVERY"
         text = cls.stage_intent_text(stage)
         return bool(
             re.search(
@@ -430,6 +544,11 @@ class FileStagePolicy:
     def stage_requires_targeted_read(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
             return False
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"INSPECTION", "UNKNOWN"}:
+            return False
+        if cls.stage_requires_file_verification(stage):
+            return False
         raw = cls.stage_goal_success_text(stage)
         text = cls.stage_intent_text(stage)
         if cls.stage_requires_analysis_report(stage):
@@ -472,6 +591,9 @@ class FileStagePolicy:
     @classmethod
     def stage_requires_targeted_lookup(cls, stage: StageCard) -> bool:
         if not cls.stage_is_file_work(stage):
+            return False
+        kind = cls.stage_kind(stage)
+        if kind and kind not in {"INSPECTION", "UNKNOWN"}:
             return False
         if cls.stage_is_script_launch_stage(stage):
             return False
@@ -523,6 +645,98 @@ class FileStagePolicy:
             ):
                 return True
         return False
+
+    @classmethod
+    def find_workspace_target_candidates(
+        cls,
+        workspace: Path,
+        target: str,
+        *,
+        limit: int = 3,
+    ) -> list[str]:
+        root = Path(workspace)
+        clean_target = str(target or "").replace("\\", "/").strip()
+        if not clean_target or not root.exists():
+            return []
+
+        target_name = Path(clean_target).name.lower()
+        target_stem = Path(clean_target).stem.lower()
+        target_suffix = Path(clean_target).suffix.lower()
+        target_norms = {
+            cls._normalize_lookup_term(clean_target),
+            cls._normalize_lookup_term(target_name),
+            cls._normalize_lookup_term(target_stem),
+        }
+        target_norms.discard("")
+
+        ranked: list[tuple[float, str]] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            rel_l = rel.lower()
+            if rel_l == clean_target.lower():
+                continue
+
+            candidate_name = path.name.lower()
+            candidate_stem = path.stem.lower()
+            candidate_norms = {
+                cls._normalize_lookup_term(rel_l),
+                cls._normalize_lookup_term(candidate_name),
+                cls._normalize_lookup_term(candidate_stem),
+            }
+            candidate_norms.discard("")
+
+            score = 0.0
+            score = max(
+                score,
+                difflib.SequenceMatcher(None, target_name, candidate_name).ratio(),
+                difflib.SequenceMatcher(None, target_stem, candidate_stem).ratio(),
+            )
+            if target_suffix and path.suffix.lower() == target_suffix:
+                score += 0.08
+            if target_name and candidate_name.startswith(target_name):
+                score += 0.08
+            if candidate_name and target_name.startswith(candidate_name):
+                score += 0.12
+            if target_stem and candidate_stem.startswith(target_stem):
+                score += 0.08
+            if candidate_stem and target_stem.startswith(candidate_stem):
+                score += 0.12
+            if any(
+                query_norm
+                and candidate_norm
+                and cls._token_prefix_match(query_norm, candidate_norm)
+                for query_norm in target_norms
+                for candidate_norm in candidate_norms
+            ):
+                score += 0.14
+            if any(
+                query_norm
+                and candidate_norm
+                and (query_norm in candidate_norm or candidate_norm in query_norm)
+                for query_norm in target_norms
+                for candidate_norm in candidate_norms
+            ):
+                score += 0.08
+
+            if score >= 0.55:
+                ranked.append((round(score, 6), rel))
+
+        ranked.sort(key=lambda item: (-item[0], len(item[1]), item[1]))
+        if not ranked:
+            return []
+
+        top_score = ranked[0][0]
+        results: list[str] = []
+        for score, rel in ranked:
+            if score + 0.08 < top_score:
+                break
+            if rel not in results:
+                results.append(rel)
+            if len(results) >= max(1, int(limit or 1)):
+                break
+        return results
 
     @classmethod
     def _path_matches_stage_targets(cls, path: str, stage: StageCard) -> bool:

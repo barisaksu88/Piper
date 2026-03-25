@@ -35,6 +35,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.planner_boundary import PlannerBoundary, PlannerInput, PlannerOutput  # noqa: E402
+from core.prompt_builder import PromptBuilder  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +95,7 @@ def test_happy_path_fully_populated() -> None:
         active_targets=["grocery_list.txt"],
         evidence_required="File verified without bread.",
     )
+    stage["file_stage_kind"] = "CONTENT_EDIT"
     inp = PlannerBoundary.validate_input(stage, objective="Manage the grocery list.")
     assert isinstance(inp, PlannerInput)
     assert inp.stage_goal == "Edit grocery_list.txt to remove bread."
@@ -102,6 +104,7 @@ def test_happy_path_fully_populated() -> None:
     assert inp.allowed_tools == ["FILE_OP", "RUN_CODE"]
     assert inp.active_targets == ["grocery_list.txt"]
     assert inp.evidence_required == "File verified without bread."
+    assert stage["file_stage_kind"] == "CONTENT_EDIT"
 
 
 def test_tool_resolution_from_stage_type() -> None:
@@ -134,12 +137,37 @@ def test_evidence_required_defaults_to_success_condition() -> None:
     stage = _stage()  # no evidence_required
     inp = PlannerBoundary.validate_input(stage)
     assert inp.evidence_required == stage["success_condition"]
+    assert stage["evidence_required"] == stage["success_condition"]
 
 
 def test_objective_from_stage_card() -> None:
     stage = _stage(objective="Parent route goal text.")
     inp = PlannerBoundary.validate_input(stage, objective="Parent route goal text.")
     assert inp.objective == "Parent route goal text."
+    assert stage["objective"] == "Parent route goal text."
+
+
+def test_validate_input_writes_resolved_fields_back_into_stage() -> None:
+    stage = _stage(
+        stage_goal="Edit app.py to update the welcome message.",
+        success_condition="app.py contains the updated welcome message.",
+        allowed_tools=[],
+    )
+    inp = PlannerBoundary.validate_input(stage, objective="Repair the broken import.")
+    assert stage["stage_type"] == "FILE_WORK"
+    assert stage["allowed_tools"] == inp.allowed_tools
+    assert stage["active_targets"] == inp.active_targets
+    assert stage["evidence_required"] == inp.evidence_required
+    assert stage["objective"] == "Repair the broken import."
+    assert stage["file_stage_kind"] in {
+        "INSPECTION",
+        "CONTENT_EDIT",
+        "STRUCTURE_PREP",
+        "BROAD_REORG",
+        "SCRIPT_LAUNCH",
+        "DEPENDENCY_RECOVERY",
+        "UNKNOWN",
+    }
 
 
 def test_missing_stage_goal_raises() -> None:
@@ -222,6 +250,59 @@ def test_missing_fields_default_cleanly() -> None:
     assert not out.clarification_requested
     assert not out.stop_recommended
     assert out.proposal == ""
+
+
+def test_prompt_builder_renders_planner_boundary_block() -> None:
+    stage = _stage(
+        stage_goal="Edit app.py to fix the import error.",
+        success_condition="app.py imports correctly and tests pass.",
+        allowed_tools=[],
+    )
+    planner_input = PlannerBoundary.validate_input(stage, objective="Repair the broken import.")
+    prompt = PromptBuilder.build_planner_prompt(
+        base_template="[STEP]\n[STAGE_CARD]\n\n[PLANNER_BOUNDARY]\n\n[SCRATCHPAD]\n\n[TOOL_GUIDE]",
+        stage=stage,
+        scratchpad_text="",
+        step_count=1,
+        planner_input=planner_input,
+    )
+    assert "[PLANNER_BOUNDARY]" in prompt
+    assert "objective: Repair the broken import." in prompt
+    assert "active_targets: app.py" in prompt
+    assert "evidence_required: app.py imports correctly and tests pass." in prompt
+
+
+def test_prompt_builder_compacts_large_exact_read_for_budget() -> None:
+    stage = _stage(
+        stage_goal="Read and analyze notes/coder-log.md for scrambled date headings.",
+        success_condition="The file content is analyzed and the date-heading issue is grounded in the file.",
+        allowed_tools=["FILE_OP", "RUN_CODE"],
+    )
+    stage["file_stage_kind"] = "INSPECTION"
+    manager_template = (ROOT_DIR / "data" / "prompts" / "manager.txt").read_text(encoding="utf-8")
+    huge_content = "\n".join(
+        f"## 2026-03-{(index % 28) + 1:02d}\nentry {index}: keep the content with this date block."
+        for index in range(1200)
+    )
+    scratchpad = (
+        "=== STAGE 1 START ===\n"
+        "STAGE_GOAL: Inspect notes/coder-log.md.\n"
+        "STAGE_TYPE: FILE_WORK\n"
+        "SUCCESS_CONDITION: The current file is available.\n"
+        "FILE_READ_EXACT_PATH: notes/coder-log.md\n"
+        "FILE_READ_EXACT_CONTENT:\n"
+        f"{huge_content}\n"
+    )
+    prompt = PromptBuilder.build_planner_prompt(
+        base_template=manager_template,
+        stage=stage,
+        scratchpad_text=scratchpad,
+        step_count=2,
+    )
+    assert "FILE_READ_EXACT_PATH: notes/coder-log.md" in prompt
+    assert "TRUNCATED FOR PLANNER BUDGET" in prompt
+    assert huge_content[7000:7600] not in prompt
+    assert len(prompt) < 28000, f"planner prompt too large: {len(prompt)} chars"
 
 
 # ---------------------------------------------------------------------------
