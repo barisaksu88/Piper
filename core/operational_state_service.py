@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List
 
+from core.file_reference_matcher import file_reference_matches
 from core.routing.route_dates import extract_date_phrase, resolve_date_phrase
 from memory.state_owner import SharedStateOwner
 
@@ -90,24 +91,17 @@ class OperationalStateService:
         target = str(path or "").strip().lower()
         if not target:
             return []
-        # Derive the bare filename as a secondary search term.  Skip when it
-        # equals target (already a bare filename) to avoid double-matching.
-        import posixpath as _pp
-        basename = _pp.basename(target.replace("\\", "/"))
-        search_terms = [target]
-        if basename and basename != target:
-            search_terms.append(basename)
 
         # Use a wide horizon so long-running tasks/events are included.
         snapshot = self.snapshot(horizon_days=3650)
         refs: list[dict] = []
         for task in snapshot.tasks:
-            blob = " ".join(str(v or "").lower() for v in task.values())
-            if any(term in blob for term in search_terms):
+            blob = " ".join(str(v or "") for v in task.values())
+            if file_reference_matches(blob, target):
                 refs.append({"kind": "task", **task})
         for event in snapshot.events:
-            blob = " ".join(str(v or "").lower() for v in event.values())
-            if any(term in blob for term in search_terms):
+            blob = " ".join(str(v or "") for v in event.values())
+            if file_reference_matches(blob, target):
                 refs.append({"kind": "event", **event})
         return refs
 

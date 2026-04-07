@@ -7,6 +7,10 @@ chromadb
 sentence-transformers
 pypdf
 duckduckgo-search
+playwright
 faster-whisper
 sounddevice
 kokoro-onnx
+misaki
+num2words
+spacy

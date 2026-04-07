@@ -332,6 +332,69 @@ def parse_reminder_request(user_msg: str, *, now_local: dt.datetime | None = Non
     )
 
 
+def _build_task_event_fallback_route(user_msg: str) -> dict[str, Any] | None:
+    text = str(user_msg or "").strip()
+    if not text or not REMINDER_REQUEST_RE.search(text):
+        return None
+    subject = _extract_reminder_subject(text)
+    if not subject:
+        return None
+
+    date_phrase = extract_date_phrase(text)
+    resolved_date = resolve_date_phrase(date_phrase) if date_phrase else ""
+    if resolved_date:
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Add an event for {subject} on {resolved_date}",
+                "context": [
+                    "The user asked for a dated reminder without a precise fire time.",
+                    "Treat dated reminders as events in the task/event system.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": f"Schedule the event '{subject}' for {resolved_date}",
+                        "stage_type": "TASK_EVENT_WORK",
+                        "success_condition": "Event is created once with the requested date",
+                        "allowed_tools": ["ADD_EVENT"],
+                        "mutation": {
+                            "state_owner": "task_event",
+                            "entity_kind": "event",
+                            "action": "schedule",
+                            "target": subject,
+                            "scheduled_date": resolved_date,
+                        },
+                    }
+                ],
+            },
+        }
+
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Add a task to {subject}",
+            "context": [
+                "The user asked for an undated reminder without a precise fire time.",
+                "Treat undated reminders as tasks in the task/event system.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Create a task to {subject}",
+                    "stage_type": "TASK_EVENT_WORK",
+                    "success_condition": "Task is created once with the requested details",
+                    "allowed_tools": ["ADD_TASK"],
+                    "mutation": {
+                        "state_owner": "task_event",
+                        "entity_kind": "task",
+                        "action": "add",
+                        "target": subject,
+                    },
+                }
+            ],
+        },
+    }
+
+
 def build_proactive_trigger_message(entry: dict[str, Any]) -> str:
     payload = {
         "id": str(entry.get("id") or "").strip(),
@@ -369,8 +432,45 @@ def _registered_reminder_set_interceptor(
     recent_history: Sequence[dict[str, Any]],
 ) -> dict[str, Any] | None:
     del recent_history
-    if not REMINDER_REQUEST_RE.search(str(user_msg or "").strip()):
+    text = str(user_msg or "").strip()
+    if not REMINDER_REQUEST_RE.search(text):
         return None
+    parsed = parse_reminder_request(text)
+    if parsed.ok:
+        return {
+            "kind": "REMINDER_SET",
+            "next_stage": "REMINDER_SET",
+            "stats_decision": "CHAT",
+            "bypass": "reminder_set",
+            "log_message": "   -> Reminder-set interceptor matched. Skipping Secretary/router LLM.",
+        }
+
+    date_phrase = extract_date_phrase(text)
+    resolved_date = resolve_date_phrase(date_phrase) if date_phrase else ""
+    time_of_day = _parse_time_of_day(text)
+    if resolved_date and time_of_day is None:
+        fallback = _build_task_event_fallback_route(text)
+        if fallback is not None:
+            return {
+                "kind": "REMINDER_TASK_EVENT",
+                "next_stage": "MANAGER",
+                "stats_decision": "TASK",
+                "bypass": "reminder_task_event",
+                "log_message": "   -> Dated reminder without a fire time. Routing to task/event event handling.",
+                "route_decision": fallback,
+            }
+    if not resolved_date and time_of_day is None:
+        fallback = _build_task_event_fallback_route(text)
+        if fallback is not None:
+            return {
+                "kind": "REMINDER_TASK_EVENT",
+                "next_stage": "MANAGER",
+                "stats_decision": "TASK",
+                "bypass": "reminder_task_event",
+                "log_message": "   -> Untimed reminder request. Routing to task/event task handling.",
+                "route_decision": fallback,
+            }
+
     return {
         "kind": "REMINDER_SET",
         "next_stage": "REMINDER_SET",

@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Iterable, Sequence
 
+from config import CFG
+from core.browser_route_utils import build_browser_context_followup_route
 from core.contracts import FollowupResolution, KnowledgeMutationIntent, RouteDecision
 from core.route_boundary import FollowupResolutionBoundary
 from core.runtime_context import extract_latest_runtime_context_fields, extract_previous_user_message
@@ -58,6 +60,21 @@ _EVENT_DETAIL_HINT_RE = re.compile(
     r"(?i)\b(?:appointment|appointments|event|events|calendar|schedule|scheduled|deadline|deadlines|reminder|reminders|tomorrow|today|tonight|date|time|when)\b"
 )
 _THINKING_RE = re.compile(r"(?is)^\s*thinking\.\.\.\s*$")
+_EXPLICIT_DEPENDENCY_OVERRIDE_RE = re.compile(
+    r"(?is)^\s*(?:override(?:\s+it)?|proceed|continue|do it anyway|force it|ignore (?:the )?(?:lock|dependency)|yes(?:\s*,\s*override(?:\s+it)?)?)\s*[.!?]*\s*$"
+)
+_ACTIVE_DEPENDENCY_RUNTIME_RE = re.compile(
+    r"ACTIVE_(?:TASK|EVENT)_DEPENDENCY:\s*Cannot\s+(?P<verb>delete|move)\s+'(?P<path>[^']+)':\s*"
+    r"referenced by active (?P<kind>task|event) '(?P<name>[^']+)'\.",
+    re.IGNORECASE,
+)
+_FILE_READBACK_FOLLOWUP_RE = re.compile(
+    r"(?is)^\s*(?:read|show|display|open|print|tell\s+me)\s+(?:it|that|this)"
+    r"(?:\s+back)?(?:\s+(?:exactly|verbatim|word\s+for\s+word|as\s+is))?\s*[.!?]*\s*$"
+)
+_DEPENDENCY_FILE_CLARIFICATION_RE = re.compile(
+    r"(?is)^\s*(?:i\s+mean\s+)?(?:the\s+)?(?:file|document|workspace\s+file|path)\s*[.!?]*\s*$"
+)
 
 
 class FollowupResolutionEngine:
@@ -90,6 +107,18 @@ class FollowupResolutionEngine:
             recent_history=history_list,
             runtime=runtime,
         )
+        file_readback_followup = self._looks_like_file_readback_followup(
+            user_msg=text,
+            recent_history=history_list,
+        )
+        dependency_file_clarification = self._looks_like_dependency_file_clarification_followup(
+            user_msg=text,
+            recent_history=history_list,
+        )
+        dependency_override_followup = self._looks_like_dependency_override_followup(
+            user_msg=text,
+            recent_history=history_list,
+        )
 
         # If the secretary already produced a FILE_WORK card, do not intercept it.
         # The followup resolver handles task/event/memory operations only; overriding
@@ -97,7 +126,11 @@ class FollowupResolutionEngine:
         if route_is_task:
             stages = list(((decision or {}).get("card") or {}).get("stages") or [])
             if any(str(s.get("stage_type") or "").upper() == "FILE_WORK" for s in stages) and not (
-                memory_recall_followup or event_detail_followup
+                memory_recall_followup
+                or event_detail_followup
+                or file_readback_followup
+                or dependency_file_clarification
+                or dependency_override_followup
             ):
                 return False
         previous_user_msg = extract_previous_user_message(history_list, current_text=text)
@@ -117,6 +150,17 @@ class FollowupResolutionEngine:
         if memory_recall_followup:
             return True
         if event_detail_followup:
+            return True
+        if file_readback_followup:
+            return True
+        if dependency_file_clarification:
+            return True
+        if dependency_override_followup:
+            return True
+        if self._looks_like_browser_context_followup(
+            user_msg=text,
+            recent_history=history_list,
+        ):
             return True
         if self._should_resolve_runtime_context_followup(
             decision=decision,
@@ -188,7 +232,12 @@ class FollowupResolutionEngine:
             knowledge_mgr=knowledge_mgr,
             state_payload=state_payload,
         )
-        raw = llm.generate(messages, temperature=0.0, cancel_token=cancel_token)
+        raw = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=int(getattr(CFG, "FOLLOWUP_RESOLUTION_MAX_TOKENS", 220)),
+            cancel_token=cancel_token,
+        )
         resolution = FollowupResolutionBoundary.validate(raw)
         return self._build_route_from_resolution(resolution)
 
@@ -317,6 +366,12 @@ class FollowupResolutionEngine:
         )
         if memory_recall_route is not None:
             return memory_recall_route
+        browser_followup_route = self._build_browser_context_followup_route(
+            user_msg=text,
+            recent_history=recent_history,
+        )
+        if browser_followup_route is not None:
+            return browser_followup_route
         runtime_followup_route = self._build_runtime_context_followup_route(
             decision=decision,
             user_msg=text,
@@ -325,6 +380,24 @@ class FollowupResolutionEngine:
         )
         if runtime_followup_route is not None:
             return runtime_followup_route
+        file_readback_route = self._build_file_readback_followup_route(
+            user_msg=text,
+            recent_history=recent_history,
+        )
+        if file_readback_route is not None:
+            return file_readback_route
+        dependency_file_clarification_route = self._build_dependency_file_clarification_route(
+            user_msg=text,
+            recent_history=recent_history,
+        )
+        if dependency_file_clarification_route is not None:
+            return dependency_file_clarification_route
+        dependency_override_route = self._build_dependency_override_followup_route(
+            user_msg=text,
+            recent_history=recent_history,
+        )
+        if dependency_override_route is not None:
+            return dependency_override_route
 
         wants_delete = bool(re.search(r"(?i)\b(remove|delete|drop|clear|cancel)\b", text))
         wants_complete = bool(re.search(r"(?i)\b(done|did|completed|complete|finished|went|attended|handled|bought)\b", text))
@@ -482,6 +555,52 @@ class FollowupResolutionEngine:
         if active_tasks and not active_events:
             return self._build_readonly_chat_route("What tasks do I have right now?")
         return None
+
+    @staticmethod
+    def _looks_like_browser_context_followup(
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> bool:
+        return build_browser_context_followup_route(user_msg, recent_history) is not None
+
+    @staticmethod
+    def _build_browser_context_followup_route(
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> RouteDecision | None:
+        return build_browser_context_followup_route(user_msg, recent_history)
+
+    def _build_dependency_override_followup_route(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> RouteDecision | None:
+        if not self._looks_like_dependency_override_followup(
+            user_msg=user_msg,
+            recent_history=recent_history,
+        ):
+            return None
+        runtime = extract_latest_runtime_context_fields(recent_history)
+        match = self._extract_active_dependency_runtime_match(recent_history)
+        if not match:
+            return None
+        verb = str(match.group("verb") or "").strip().lower()
+        path = str(match.group("path") or "").strip()
+        kind = str(match.group("kind") or "").strip().lower()
+        name = str(match.group("name") or "").strip()
+        if not verb or not path:
+            return None
+        if verb == "delete":
+            return self._build_file_dependency_override_delete_card(path=path, kind=kind, name=name)
+        return self._build_file_dependency_override_move_card(
+            path=path,
+            kind=kind,
+            name=name,
+            runtime=runtime,
+        )
 
     def _should_resolve_memory_recall_followup(
         self,
@@ -773,6 +892,253 @@ class FollowupResolutionEngine:
             "decision": "CHAT",
             "card": {
                 "query": str(query or "").strip(),
+            },
+        }
+
+    @staticmethod
+    def _build_file_dependency_override_delete_card(*, path: str, kind: str, name: str) -> RouteDecision:
+        clean_path = str(path or "").strip().replace("\\", "/")
+        clean_kind = kind or "item"
+        clean_name = name or "unknown"
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Delete '{clean_path}' with explicit dependency override authorization.",
+                "context": [
+                    "The workspace root is '.'.",
+                    f"The blocked target file path is '{clean_path}'.",
+                    f"The user explicitly authorized overriding the active {clean_kind} dependency '{clean_name}'.",
+                    "Retry the FILE_WORK operation directly. Do not create TASK_EVENT_WORK stages and do not mutate task/event state as part of this override.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": f"Delete the file '{clean_path}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": f"'{clean_path}' does not exist in the workspace.",
+                        "allowed_tools": ["FILE_OP"],
+                        "active_targets": [clean_path],
+                        "dependency_override_authorized": True,
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
+    def _build_file_dependency_retry_delete_card(*, path: str) -> RouteDecision:
+        clean_path = str(path or "").strip().replace("\\", "/")
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Delete '{clean_path}'.",
+                "context": [
+                    "The workspace root is '.'.",
+                    f"The blocked target file path is '{clean_path}'.",
+                    "The user clarified they mean the file target. This is not permission to mutate task/event state or override the dependency block.",
+                    "Retry the FILE_WORK operation directly and keep task/event state unchanged unless the user explicitly asks to modify it too.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": f"Delete the file '{clean_path}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": f"'{clean_path}' does not exist in the workspace.",
+                        "allowed_tools": ["FILE_OP"],
+                        "active_targets": [clean_path],
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
+    def _extract_active_dependency_runtime_match(
+        recent_history: Sequence[dict[str, Any]],
+    ) -> re.Match[str] | None:
+        runtime = extract_latest_runtime_context_fields(recent_history)
+        if str(runtime.get("previous_route") or "").strip().upper() != "TASK":
+            return None
+        runtime_note = str(runtime.get("runtime_note") or "").strip()
+        return _ACTIVE_DEPENDENCY_RUNTIME_RE.search(runtime_note)
+
+    def _looks_like_dependency_override_followup(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> bool:
+        text = str(user_msg or "").strip()
+        if not text or _NEGATIVE_OR_CANCEL_RE.match(text) or _QUESTION_START_RE.match(text):
+            return False
+        if not (
+            _AFFIRMATIVE_CONFIRM_RE.match(text)
+            or _EXPLICIT_DEPENDENCY_OVERRIDE_RE.match(text)
+        ):
+            return False
+        return self._extract_active_dependency_runtime_match(recent_history) is not None
+
+    def _build_dependency_file_clarification_route(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> RouteDecision | None:
+        if not self._looks_like_dependency_file_clarification_followup(
+            user_msg=user_msg,
+            recent_history=recent_history,
+        ):
+            return None
+        runtime = extract_latest_runtime_context_fields(recent_history)
+        match = self._extract_active_dependency_runtime_match(recent_history)
+        if not match:
+            return None
+        verb = str(match.group("verb") or "").strip().lower()
+        path = str(match.group("path") or "").strip()
+        if not path:
+            return None
+        if verb == "delete":
+            return self._build_file_dependency_retry_delete_card(path=path)
+        return self._build_file_dependency_retry_move_card(path=path, runtime=runtime)
+
+    def _looks_like_dependency_file_clarification_followup(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> bool:
+        text = str(user_msg or "").strip()
+        if not _DEPENDENCY_FILE_CLARIFICATION_RE.match(text):
+            return False
+        return self._extract_active_dependency_runtime_match(recent_history) is not None
+
+    def _build_file_readback_followup_route(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> RouteDecision | None:
+        if not self._looks_like_file_readback_followup(
+            user_msg=user_msg,
+            recent_history=recent_history,
+        ):
+            return None
+        runtime = extract_latest_runtime_context_fields(recent_history)
+        relevant_paths = self._extract_runtime_relevant_paths(runtime)
+        if len(relevant_paths) != 1:
+            return None
+        return self._build_file_readback_card(relevant_paths[0])
+
+    def _looks_like_file_readback_followup(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> bool:
+        text = str(user_msg or "").strip()
+        if not _FILE_READBACK_FOLLOWUP_RE.match(text):
+            return False
+        runtime = extract_latest_runtime_context_fields(recent_history)
+        if str(runtime.get("previous_route") or "").strip().upper() != "TASK":
+            return False
+        return len(self._extract_runtime_relevant_paths(runtime)) == 1
+
+    @staticmethod
+    def _extract_runtime_relevant_paths(runtime: dict[str, str]) -> list[str]:
+        raw = str(runtime.get("relevant_paths") or "").strip()
+        if not raw:
+            return []
+        paths = [part.strip().replace("\\", "/") for part in raw.split("|")]
+        return [path for path in paths if path]
+
+    @staticmethod
+    def _build_file_readback_card(path: str) -> RouteDecision:
+        clean_path = str(path or "").strip().replace("\\", "/")
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Read the exact contents of '{clean_path}'.",
+                "context": [
+                    "The workspace root is '.'.",
+                    f"The active follow-up file path is '{clean_path}'.",
+                    "This is a contextual exact-read follow-up after prior FILE_WORK. Read the same file directly instead of doing a fuzzy lookup.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": f"Read the exact contents of the file '{clean_path}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": f"The exact contents of '{clean_path}' are read once.",
+                        "allowed_tools": ["FILE_OP"],
+                        "active_targets": [clean_path],
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
+    def _build_file_dependency_override_move_card(
+        *,
+        path: str,
+        kind: str,
+        name: str,
+        runtime: dict[str, str],
+    ) -> RouteDecision:
+        clean_path = str(path or "").strip().replace("\\", "/")
+        clean_kind = kind or "item"
+        clean_name = name or "unknown"
+        previous_request = str(runtime.get("previous_user_request") or "").strip()
+        task_goal = str(runtime.get("task_goal") or "").strip()
+        success_condition = task_goal or f"The previously requested move for '{clean_path}' is reflected in the workspace."
+        context = [
+            "The workspace root is '.'.",
+            f"The blocked source path is '{clean_path}'.",
+            f"The user explicitly authorized overriding the active {clean_kind} dependency '{clean_name}'.",
+            "Retry the FILE_WORK move directly. Do not create TASK_EVENT_WORK stages and do not mutate task/event state as part of this override.",
+        ]
+        if previous_request:
+            context.append(f"Original file operation request: {previous_request}")
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": previous_request or f"Complete the previously requested move for '{clean_path}' with explicit dependency override authorization.",
+                "context": context,
+                "stages": [
+                    {
+                        "stage_goal": previous_request or f"Complete the previously requested move for '{clean_path}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": success_condition,
+                        "allowed_tools": ["FILE_OP", "RUN_CODE"],
+                        "active_targets": [clean_path],
+                        "dependency_override_authorized": True,
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
+    def _build_file_dependency_retry_move_card(
+        *,
+        path: str,
+        runtime: dict[str, str],
+    ) -> RouteDecision:
+        clean_path = str(path or "").strip().replace("\\", "/")
+        previous_request = str(runtime.get("previous_user_request") or "").strip()
+        task_goal = str(runtime.get("task_goal") or "").strip()
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": previous_request or task_goal or f"Complete the previously requested move for '{clean_path}'.",
+                "context": [
+                    "The workspace root is '.'.",
+                    f"The blocked source path is '{clean_path}'.",
+                    "The user clarified they mean the file target. This is not permission to mutate task/event state or override the dependency block.",
+                    "Retry the FILE_WORK move directly and keep task/event state unchanged unless the user explicitly asks to modify it too.",
+                ],
+                "stages": [
+                    {
+                        "stage_goal": previous_request or task_goal or f"Complete the previously requested move for '{clean_path}'.",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": task_goal or f"The previously requested move for '{clean_path}' is reflected in the workspace.",
+                        "allowed_tools": ["FILE_OP", "RUN_CODE"],
+                        "active_targets": [clean_path],
+                    }
+                ],
             },
         }
 

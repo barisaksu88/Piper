@@ -16,12 +16,15 @@ from core.prompt_context import PromptContextService
 from core.style import StyleManager
 from llm.boot import BootManager
 from llm.llm_server_client import LlamaServerClient, LlamaServerConfig
-from memory.brain import get_brain
 from memory.chat_state import ChatState
-from memory.documents import DocumentMemoryManager
-from memory import KnowledgeManager
-from memory.state_owner import SharedStateOwner
-from memory.transient_state import TransientStateManager
+from memory.user_runtime import (
+    ActiveUserBrainProxy,
+    ActiveUserDocumentMemoryProxy,
+    ActiveUserKnowledgeManagerProxy,
+    ActiveUserRuntime,
+    ActiveUserStateOwnerProxy,
+    ActiveUserTransientStateManagerProxy,
+)
 from memory.vision_session import VisionSessionMemory
 from tools.image_gen import ImageGenerator
 from tools.live_screen import LiveScreenSession
@@ -35,8 +38,6 @@ W, H = 1450, 860
 
 def build_controller() -> PiperController:
     ui_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
-    chat_state = ChatState(memory_path=CFG.MEMORY_PATH, session_marker_prefix="=== New session")
-
     styles_dir = CFG.STYLES_DIR
     style_mgr = StyleManager(
         styles_dir,
@@ -51,8 +52,9 @@ def build_controller() -> PiperController:
             enabled=getattr(CFG, "TTS_ENABLED", True),
             model_path=kokoro_dir / getattr(CFG, "KOKORO_MODEL", "kokoro-v1.0.onnx"),
             voices_path=kokoro_dir / getattr(CFG, "KOKORO_VOICES", "voices-v1.0.bin"),
+            backend=str(getattr(CFG, "TTS_BACKEND", "auto")),
             voice=getattr(CFG, "TTS_VOICE", "af_heart"),
-            speed=float(getattr(CFG, "TTS_SPEED", 0.9)),
+            speed=float(getattr(CFG, "TTS_SPEED", 0.85)),
         )
     )
 
@@ -68,25 +70,31 @@ def build_controller() -> PiperController:
         )
     )
 
-    state_owner = SharedStateOwner.for_data_dir(CFG.DATA_DIR)
-    knowledge_mgr = KnowledgeManager(
+    user_runtime = ActiveUserRuntime(
         CFG.DATA_DIR,
         llm,
-        world_model_store=state_owner.world_model_store,
-        knowledge_store=state_owner.knowledge_store,
+        admin_user_id="admin_baris",
+        admin_name="Baris",
+        default_style_filename=style_mgr.active_filename,
     )
-    document_mgr = DocumentMemoryManager(CFG.DATA_DIR)
+    active_user_style = user_runtime.current_style_filename()
+    if active_user_style:
+        style_mgr.active_filename = active_user_style
+    chat_state = ChatState(memory_path=user_runtime.current_memory_path(), session_marker_prefix="=== New session")
+
+    state_owner = ActiveUserStateOwnerProxy(user_runtime)
+    memory_brain = ActiveUserBrainProxy(user_runtime)
+    knowledge_mgr = ActiveUserKnowledgeManagerProxy(user_runtime)
+    transient_state_mgr = ActiveUserTransientStateManagerProxy(user_runtime)
+    document_mgr = ActiveUserDocumentMemoryProxy(user_runtime)
     vision_session_memory = VisionSessionMemory()
-    transient_state_mgr = TransientStateManager(
-        situational_store=state_owner.situational_state_store,
-        intent_store=state_owner.intent_state_store,
-        knowledge_mgr=knowledge_mgr,
-    )
     agent_brain = AgentBrain(
         CFG.DATA_DIR,
+        workspace_root=CFG.WORKSPACE_DIR,
         state_owner=state_owner,
         knowledge_manager=knowledge_mgr,
         transient_state_manager=transient_state_mgr,
+        memory_brain=memory_brain,
     )
     prompt_context_service = PromptContextService(
         instruction_loader=InstructionLoader(CFG.INSTRUCTIONS_PATH),
@@ -94,9 +102,10 @@ def build_controller() -> PiperController:
         operational_state_service=OperationalStateService(state_owner),
         knowledge_mgr=knowledge_mgr,
         transient_state_mgr=transient_state_mgr,
-        brain=get_brain(CFG.DATA_DIR),
+        brain=memory_brain,
         document_memory=document_mgr,
         vision_session_memory=vision_session_memory,
+        user_runtime=user_runtime,
     )
     live_screen = LiveScreenSession(CFG.DATA_DIR)
 
@@ -107,19 +116,18 @@ def build_controller() -> PiperController:
 
     boot_mgr = BootManager(
         ui_queue,
-        post_boot_tasks=[
-            ("Warming TTS engine...", tts.warm_up),
-        ],
         background_boot_tasks=[
+            ("Warming TTS engine...", tts.warm_up),
             ("Checking engineering channel...", _probe_engineering_channel),
         ]
         if CFG.CODEX_BOOT_PROBE_ENABLED
-        else [],
+        else [("Warming TTS engine...", tts.warm_up)],
     )
     img_gen = ImageGenerator(CFG.DATA_DIR)
 
     atexit.register(boot_mgr.shutdown)
     atexit.register(live_screen.stop)
+    atexit.register(agent_brain.shutdown)
 
     return PiperController(
         app_title=APP_TITLE,
@@ -134,6 +142,7 @@ def build_controller() -> PiperController:
         document_mgr=document_mgr,
         agent_brain=agent_brain,
         prompt_context_service=prompt_context_service,
+        user_runtime=user_runtime,
         boot_mgr=boot_mgr,
         img_gen=img_gen,
         live_screen=live_screen,

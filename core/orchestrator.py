@@ -31,6 +31,7 @@ class Orchestrator:
         chat_state, pipeline, ui_queue, get_context_fn, boot_mgr, img_gen,
                  prompt_context_service,
                  live_screen=None,
+                 conversation_summary_path=None,
                  cancel_token: CancellationToken | None = None,
                  retain_cancel_token_fn=None,
                  release_cancel_token_fn=None,
@@ -50,6 +51,7 @@ class Orchestrator:
         self.img_gen = img_gen
         self.prompt_context = prompt_context_service
         self.live_screen = live_screen
+        self.conversation_summary_path = conversation_summary_path or CFG.CONVERSATION_SUMMARY_PATH
         self.cancel_token = cancel_token
         self.retain_cancel_token = retain_cancel_token_fn or (lambda token: None)
         self.release_cancel_token = release_cancel_token_fn or (lambda token: None)
@@ -166,11 +168,11 @@ class Orchestrator:
             self.cancel_token.raise_if_cancelled()
 
     def _load_conversation_summary(self) -> str:
-        return self.conversation_compressor.load_summary(CFG.CONVERSATION_SUMMARY_PATH)
+        return self.conversation_compressor.load_summary(self.conversation_summary_path)
 
     def save_conversation_summary(self) -> None:
         self.conversation_compressor.save_summary(
-            CFG.CONVERSATION_SUMMARY_PATH,
+            self.conversation_summary_path,
             self.conversation_summary,
         )
 
@@ -304,6 +306,7 @@ def run_agent_loop(
     img_gen,
     prompt_context_service,
     live_screen=None,
+    conversation_summary_path=None,
     cancel_token: CancellationToken | None = None,
     retain_cancel_token_fn=None,
     release_cancel_token_fn=None,
@@ -317,6 +320,7 @@ def run_agent_loop(
         chat_state, pipeline, ui_queue, get_current_context_fn, boot_mgr, img_gen,
         prompt_context_service=prompt_context_service,
         live_screen=live_screen,
+        conversation_summary_path=conversation_summary_path,
         cancel_token=cancel_token,
         retain_cancel_token_fn=retain_cancel_token_fn,
         release_cancel_token_fn=release_cancel_token_fn,

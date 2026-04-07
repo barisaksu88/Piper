@@ -5,7 +5,14 @@ from pathlib import PurePosixPath
 import re
 from typing import Any, Callable, Dict, List, Sequence
 
+from core.browser_route_utils import (
+    build_browser_context_followup_route,
+    build_explicit_browser_task_card as build_browser_task_card,
+    extract_browser_url as extract_browser_url,
+    looks_like_explicit_browser_request as shared_looks_like_explicit_browser_request,
+)
 from core.contracts import RouteDecision, StageCard
+from core.file_reference_matcher import file_reference_matches
 from core.file_target_confirmation import (
     build_confirmed_route_decision,
     classify_pending_file_target_confirmation_reply,
@@ -118,6 +125,40 @@ _FILEISH_DELETE_HINT_RE = re.compile(
     r"(?i)\b(file|files|doc|docs|document|documents|note|notes|list|lists|txt|text|log|logs|config|configs|report|reports|script|scripts|code|folder|folders|directory|directories|image|images|photo|photos|pdf|json|yaml|yml|csv)\b"
 )
 _INTERACTIVE_VERIFY_RE = re.compile(r"\b(verify|confirm|check|observe|test|try|report)\b", re.IGNORECASE)
+_COUNT_TOKEN_TO_INT: dict[str, int] = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "10": 10,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_FOLDER_WITH_DUMMY_FILES_RE = re.compile(
+    r"(?is)^(?:in the workspace,\s*)?(?:please\s+)?create\s+(?:a\s+)?(?:folder|directory)\s+called\s+"
+    r"['\"]?(?P<folder>[\w./\\-]+)['\"]?\s+and\s+add\s+(?P<count>\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+dummy\s+files?\s+inside\s+it[.?!]*$"
+)
+_COMPOUND_RENAME_RE = re.compile(
+    rf"(?is)\brename(?:\s+file)?\s+(?P<src>{_FILE_PATH_TOKEN})\s+to\s+(?P<renamed>{_FILE_PATH_TOKEN})\b"
+)
+_COMPOUND_MOVE_INTO_FOLDER_RE = re.compile(
+    rf"(?is)\b(?:then|and then)\s+(?:move|put)\s+(?:the\s+new\s+)?(?:file\s+)?(?P<reported>{_FILE_PATH_TOKEN})\s+"
+    rf"(?:into|to)\s+(?:a\s+folder\s+called|a\s+folder\s+named|folder\s+called|folder\s+named|the\s+folder\s+called|the\s+folder\s+named)?\s*"
+    rf"['\"]?(?P<folder>[\w./\\-]+)['\"]?"
+)
 _INTERACTIVE_CONTROL_RE = re.compile(
     r"\b(controls?|input|movement|left|right|up|down|keyboard|mouse|responsive|respond|press|click|catch|gameplay|works?)\b",
     re.IGNORECASE,
@@ -153,6 +194,12 @@ _WORKSPACE_SOURCE_CHOICE_RE = re.compile(
 )
 _LOOKUP_SOURCE_CLARIFICATION_GOAL_RE = re.compile(
     r"(?is)^clarify lookup source \(web vs workspace\) for:\s*(?P<subject>.+?)\s*$"
+)
+_LOOKUP_SOURCE_CLARIFICATION_QUESTION_RE = re.compile(
+    r'(?is)did you want me to search the web for "(?P<subject>.+?)",\s+or look for it in your workspace files\?'
+)
+_WORKSPACE_LOOKUP_TASK_GOAL_RE = re.compile(
+    r"(?is)^find the workspace path that best matches ['\"](?P<subject>.+?)['\"]\.?\s*$"
 )
 _FINAL_STATE_CORRECTION_RE = re.compile(
     r"(?is)^\s*(?:i\s+think\s+)?(?:its|it's|the)\s+final\s+state\s+should\s+be\s+(?P<state>.+?)\s*[.?!]*\s*$"
@@ -341,6 +388,16 @@ def _registered_lookup_source_choice_followup(
 
 
 @register_normalizer
+def _registered_explicit_browser_task(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision, recent_history
+    return _normalize_explicit_browser_task(user_msg)
+
+
+@register_normalizer
 def _registered_explicit_web_search(
     decision: RouteDecision,
     user_msg: str,
@@ -348,6 +405,16 @@ def _registered_explicit_web_search(
 ) -> RouteDecision | None:
     del recent_history
     return _normalize_explicit_web_search(decision, user_msg)
+
+
+@register_normalizer
+def _registered_contextual_browser_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision
+    return _normalize_contextual_browser_followup(user_msg, recent_history)
 
 
 @register_normalizer
@@ -834,6 +901,29 @@ def _normalize_explicit_web_search(
     }
 
 
+def _normalize_explicit_browser_task(user_msg: str) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    url = extract_browser_url(text)
+    if not url:
+        return None
+    if not shared_looks_like_explicit_browser_request(text):
+        return None
+    return build_browser_task_card(text, url)
+
+
+def looks_like_explicit_browser_request(text: str) -> bool:
+    return shared_looks_like_explicit_browser_request(text)
+
+
+def _normalize_contextual_browser_followup(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return build_browser_context_followup_route(user_msg, recent_history)
+
+
 def _normalize_lookup_source_choice_followup(
     decision: RouteDecision,
     user_msg: str,
@@ -844,10 +934,6 @@ def _normalize_lookup_source_choice_followup(
         return None
 
     runtime = extract_latest_runtime_context_fields(recent_history)
-    task_goal = str(runtime.get("task_goal") or "").strip()
-    match = _LOOKUP_SOURCE_CLARIFICATION_GOAL_RE.match(task_goal)
-    if not match:
-        return None
 
     # A genuine source choice is short ("web", "web pls", "workspace files").
     # A longer message is a new search intent that should not be hijacked by
@@ -860,10 +946,7 @@ def _normalize_lookup_source_choice_followup(
     if not source_choice:
         return None
 
-    subject = _clean_document_lookup_subject(match.group("subject"))
-    if not subject:
-        previous_request = str(runtime.get("previous_user_request") or "").strip()
-        subject = _extract_lookup_source_subject(previous_request)
+    subject = _extract_lookup_source_followup_subject(runtime, recent_history)
     if not subject:
         return None
 
@@ -881,6 +964,39 @@ def _normalize_lookup_source_choice_followup(
     if _subject_looks_like_workspace_document(subject):
         return _build_workspace_document_search_card(subject)
     return None
+
+
+def _extract_lookup_source_followup_subject(
+    runtime: dict[str, str],
+    recent_history: Sequence[dict[str, Any]],
+) -> str:
+    task_goal = str(runtime.get("task_goal") or "").strip()
+    match = _LOOKUP_SOURCE_CLARIFICATION_GOAL_RE.match(task_goal)
+    if match:
+        subject = _clean_document_lookup_subject(match.group("subject"))
+        if subject:
+            return subject
+
+    match = _WORKSPACE_LOOKUP_TASK_GOAL_RE.match(task_goal)
+    if match:
+        subject = _clean_document_lookup_subject(match.group("subject"))
+        if subject:
+            return subject
+
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        match = _LOOKUP_SOURCE_CLARIFICATION_QUESTION_RE.search(content)
+        if match:
+            subject = _clean_document_lookup_subject(match.group("subject"))
+            if subject:
+                return subject
+
+    previous_request = str(runtime.get("previous_user_request") or "").strip()
+    return _extract_lookup_source_subject(previous_request)
 
 
 def _classify_lookup_source_choice(text: str) -> str:
@@ -1049,24 +1165,7 @@ def _lookup_source_is_resolved_by_context(
 
 
 def _lookup_subject_matches_file_reference(normalized_subject: str, file_reference: str) -> bool:
-    clean_target = _clean_route_path(file_reference)
-    if not clean_target:
-        return False
-    basename = PurePosixPath(clean_target).name
-    stem = PurePosixPath(clean_target).stem
-    variants = {
-        _normalize_lookup_text(clean_target),
-        _normalize_lookup_text(basename),
-        _normalize_lookup_text(stem),
-    }
-    return any(
-        normalized_subject and variant and (
-            normalized_subject == variant
-            or normalized_subject in variant
-            or variant in normalized_subject
-        )
-        for variant in variants
-    )
+    return file_reference_matches(normalized_subject, _clean_route_path(file_reference))
 
 
 def _lookup_subject_is_generic_reference(normalized_subject: str) -> bool:
@@ -1907,6 +2006,16 @@ def _normalize_direct_file_work(user_msg: str) -> RouteDecision | None:
     if compound_sequence is not None:
         return compound_sequence
 
+    folder_dummy_files = _extract_folder_dummy_files_request(text)
+    if folder_dummy_files is not None:
+        folder, count = folder_dummy_files
+        return _build_folder_dummy_files_card(folder, count)
+
+    compound_rename_move = _extract_compound_rename_then_move_request(text)
+    if compound_rename_move is not None:
+        src, renamed, folder = compound_rename_move
+        return _build_compound_rename_then_move_card(src, renamed, folder)
+
     compound_replace_append = _extract_direct_file_replace_append_request(text)
     if compound_replace_append is not None:
         path, old_text, new_text, appended_line = compound_replace_append
@@ -2036,6 +2145,103 @@ def _normalize_direct_file_work(user_msg: str) -> RouteDecision | None:
         return _build_explicit_workspace_file_delete_card(path)
 
     return None
+
+
+def _extract_folder_dummy_files_request(text: str) -> tuple[str, int] | None:
+    match = _FOLDER_WITH_DUMMY_FILES_RE.match(text or "")
+    if not match:
+        return None
+    folder = _clean_route_path(match.group("folder")).rstrip("/\\")
+    count = _COUNT_TOKEN_TO_INT.get(str(match.group("count") or "").strip().lower(), 0)
+    if not folder or count <= 0:
+        return None
+    return folder, count
+
+
+def _build_folder_dummy_files_card(folder: str, count: int) -> RouteDecision:
+    clean_folder = _clean_route_path(folder).rstrip("/\\")
+    stages: list[StageCard] = [
+        {
+            "stage_goal": f"Create the directory '{clean_folder}' in the workspace root.",
+            "stage_type": "FILE_WORK",
+            "success_condition": f"The directory '{clean_folder}' exists.",
+            "allowed_tools": ["FILE_OP"],
+        }
+    ]
+    for idx in range(1, count + 1):
+        filename = f"dummy{idx}.txt"
+        rel_path = PurePosixPath(clean_folder, filename).as_posix()
+        quoted_content = json.dumps(f"Dummy content {idx}", ensure_ascii=False)
+        stages.append(
+            {
+                "stage_goal": f"Create the text file '{rel_path}' with the exact contents {quoted_content}.",
+                "stage_type": "FILE_WORK",
+                "success_condition": f"The file '{rel_path}' exists and its exact contents are {quoted_content}.",
+                "allowed_tools": ["FILE_OP"],
+            }
+        )
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Create the folder '{clean_folder}' and populate it with {count} dummy files.",
+            "context": [
+                "The workspace root is '.'.",
+                f"Use deterministic dummy file names inside '{clean_folder}' so the result is easy to verify.",
+            ],
+            "stages": stages,
+        },
+    }
+
+
+def _extract_compound_rename_then_move_request(text: str) -> tuple[str, str, str] | None:
+    rename_match = _COMPOUND_RENAME_RE.search(text or "")
+    move_match = _COMPOUND_MOVE_INTO_FOLDER_RE.search(text or "")
+    if not rename_match or not move_match:
+        return None
+    src = _clean_route_path(rename_match.group("src"))
+    renamed = _clean_route_path(rename_match.group("renamed"))
+    reported = _clean_route_path(move_match.group("reported"))
+    folder = _clean_route_path(move_match.group("folder")).rstrip("/\\")
+    if not src or not renamed or not folder:
+        return None
+    if reported and PurePosixPath(reported).name.lower() != PurePosixPath(renamed).name.lower():
+        return None
+    return src, renamed, folder
+
+
+def _build_compound_rename_then_move_card(src: str, renamed: str, folder: str) -> RouteDecision:
+    clean_src = _clean_route_path(src)
+    clean_renamed = _clean_route_path(renamed)
+    clean_folder = _clean_route_path(folder).rstrip("/\\")
+    final_dst = PurePosixPath(clean_folder, PurePosixPath(clean_renamed).name).as_posix()
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": f"Rename '{clean_src}' to '{PurePosixPath(clean_renamed).name}' and place it in '{clean_folder}'.",
+            "context": [
+                "The workspace root is '.'.",
+                f"The source path is '{clean_src}'.",
+                f"The final destination path is '{final_dst}'.",
+                f"Perform this as one direct rename-and-move to '{final_dst}'. Do not stop after creating an intermediate '{PurePosixPath(clean_renamed).name}' in the original directory.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Move '{clean_src}' directly to '{final_dst}' so the file is renamed and placed in '{clean_folder}' in one step.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": f"'{clean_src}' no longer exists and '{final_dst}' exists with the original file content.",
+                    "allowed_tools": ["FILE_OP"],
+                    "constraints": [
+                        {
+                            "type": "MOVED",
+                            "scope": "FILE",
+                            "from_path": clean_src,
+                            "to_path": final_dst,
+                        }
+                    ],
+                }
+            ],
+        },
+    }
 
 
 def _normalize_compound_file_undo_redo_sequence(text: str) -> RouteDecision | None:

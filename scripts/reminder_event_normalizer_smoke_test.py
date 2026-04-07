@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -18,6 +19,8 @@ class ReminderEventNormalizerReport:
     success: bool
     date_phrase: str
     resolved_date: str
+    next_tuesday_resolved: str
+    next_tuesday_expected: str
     normalized_goal: str
     normalized_stage_goal: str
     allowed_tools: list[str]
@@ -93,6 +96,12 @@ def run_smoke() -> ReminderEventNormalizerReport:
 
     date_phrase = extract_date_phrase(user_msg)
     resolved_date = resolve_date_phrase(date_phrase)
+    today = dt.date.today()
+    next_tuesday_delta = (1 - today.weekday()) % 7
+    if next_tuesday_delta == 0:
+        next_tuesday_delta = 7
+    next_tuesday_expected = (today + dt.timedelta(days=next_tuesday_delta)).strftime("%Y-%m-%d")
+    next_tuesday_resolved = resolve_date_phrase("next Tuesday")
     goal = str(card.get("goal") or "")
     stage_goal = str(stage.get("stage_goal") or "")
     allowed_tools = list(stage.get("allowed_tools") or [])
@@ -108,11 +117,14 @@ def run_smoke() -> ReminderEventNormalizerReport:
         and retry_goal == f"Add an event for get a new yearly insurance on {resolved_date}"
         and retry_stage_goal == f"Schedule the event 'get a new yearly insurance' for {resolved_date}"
         and retry_allowed_tools == ["ADD_EVENT"]
+        and next_tuesday_resolved == next_tuesday_expected
     )
     return ReminderEventNormalizerReport(
         success=bool(success),
         date_phrase=date_phrase,
         resolved_date=resolved_date,
+        next_tuesday_resolved=next_tuesday_resolved,
+        next_tuesday_expected=next_tuesday_expected,
         normalized_goal=goal,
         normalized_stage_goal=stage_goal,
         allowed_tools=allowed_tools,

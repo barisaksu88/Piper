@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -21,11 +22,14 @@ class StatsCollectorSmokeReport:
     record_count: int
     alert_count: int
     last_outcome: str
+    dashboard_points: int
+    dashboard_outliers: int
     report_preview: str
 
 
 def _build_state(*, persona_ms: float, total_ms: float, outcome: str = "VERIFIED") -> TurnStatsState:
     state = TurnStatsState()
+    state.started_at_monotonic = time.perf_counter() - (float(total_ms) / 1000.0)
     state.decision = "CHAT"
     state.user_msg = "hello"
     state.phase_ms["route"] = 15.0
@@ -53,6 +57,7 @@ def run_smoke() -> StatsCollectorSmokeReport:
         alert_lines = collector.load_alert_lines(limit=20)
         last_payload = json.loads(stats_lines[-1]) if stats_lines else {}
         report = collector.build_readonly_report()
+        dashboard = collector.build_dashboard_snapshot(graph_limit=20)
         success = (
             len(stats_lines) == 7
             and bool(alert_lines)
@@ -60,12 +65,18 @@ def run_smoke() -> StatsCollectorSmokeReport:
             and str(last_payload.get("outcome") or "") == "VERIFIED"
             and "Phase Latency" in report
             and "Recent Turns" in report
+            and int(dashboard.get("graph_window_count") or 0) == 7
+            and len(dashboard.get("turn_numbers") or []) == 7
+            and len(dashboard.get("total_ms") or []) == 7
+            and bool(dashboard.get("total_outlier_x") or [])
         )
         return StatsCollectorSmokeReport(
             success=bool(success),
             record_count=len(stats_lines),
             alert_count=len(alert_lines),
             last_outcome=str(last_payload.get("outcome") or ""),
+            dashboard_points=len(dashboard.get("turn_numbers") or []),
+            dashboard_outliers=len(dashboard.get("total_outlier_x") or []),
             report_preview=report[:400],
         )
 

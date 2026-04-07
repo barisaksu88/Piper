@@ -335,8 +335,7 @@ class TestSummaryEngine:
         from core.engines.summary import SummaryEngine
 
         scratchpad = [
-            "=== STAGE 1 OUTCOME ===",
-            "LAST_LOG: File operation completed",
+            "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: File operation completed",
         ]
         result = SummaryEngine.build_runtime_note(scratchpad)
 
@@ -2054,6 +2053,72 @@ class TestEngineeringEscalation:
         self._record(det, sig)
         r2 = self._record(det, sig)
         assert r2 is None
+
+
+class TestScratchpadFormatterTerminalMissing:
+    """Missing explicit file targets must disable persona reroutes."""
+
+    def test_json_target_not_found_disables_persona_reroute(self):
+        from core.scratchpad_formatter import ScratchpadFormatter
+
+        stage = {
+            "stage_goal": "Read the existing file 'stent_file.txt', append a new line exactly 'test' to the end, and save the updated file.",
+            "stage_type": "FILE_WORK",
+            "success_condition": "The existing file 'stent_file.txt' was updated by appending a new line exactly 'test'; do not create a new file if it is missing.",
+            "context": ["The target file path is 'stent_file.txt'."],
+        }
+        entry = ScratchpadFormatter.format_step(
+            1,
+            "Read the target file before editing it.",
+            '[FILE_OP] {"action":"read_text","path":"stent_file.txt"}',
+            {
+                "tool": "FILE_OP",
+                "status": "FAILED",
+                "summary": "FILE_OP target not found: stent_file.txt",
+                "action": "read_text",
+            },
+        )
+
+        pack = ScratchpadFormatter.build_outcome_pack(
+            success=False,
+            stage_type="FILE_WORK",
+            last_observation=entry,
+            stage_entries=[entry],
+            stage=stage,
+        )
+
+        assert pack.allow_persona_reroute is False
+
+    def test_json_source_not_found_disables_persona_reroute(self):
+        from core.scratchpad_formatter import ScratchpadFormatter
+
+        stage = {
+            "stage_goal": "Rename 'missing.txt' to 'ready.txt'.",
+            "stage_type": "FILE_WORK",
+            "success_condition": "The file 'missing.txt' is renamed to 'ready.txt'.",
+            "context": ["The source path is 'missing.txt' and the destination path is 'ready.txt'."],
+        }
+        entry = ScratchpadFormatter.format_step(
+            1,
+            "Rename the requested file.",
+            '[FILE_OP] {"action":"move_path","src":"missing.txt","dst":"ready.txt"}',
+            {
+                "tool": "FILE_OP",
+                "status": "FAILED",
+                "summary": "FILE_OP source not found: missing.txt",
+                "action": "move_path",
+            },
+        )
+
+        pack = ScratchpadFormatter.build_outcome_pack(
+            success=False,
+            stage_type="FILE_WORK",
+            last_observation=entry,
+            stage_entries=[entry],
+            stage=stage,
+        )
+
+        assert pack.allow_persona_reroute is False
 
 
 # =============================================================================

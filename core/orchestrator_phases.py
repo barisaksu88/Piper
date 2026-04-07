@@ -32,7 +32,12 @@ from core.persona_output import sanitize_persona_output
 from core.prompting import ScratchpadFormatter, PromptBuilder, build_persona_messages
 from core.route_boundary import BoundaryValidationError, RouterBoundary
 from core.routing.environment_queries import looks_like_live_environment_query
-from core.routing.route_normalizer import annotate_file_stage_kinds, detect_route_interceptor, normalize_route_decision
+from core.routing.route_normalizer import (
+    annotate_file_stage_kinds,
+    detect_route_interceptor,
+    looks_like_explicit_browser_request,
+    normalize_route_decision,
+)
 from core.skills import apply_route_skill_layer
 from core.stage_policy import stage_requires_user_approval, stage_requires_user_input
 from core.stream_filter import stream_thinking_filter
@@ -441,6 +446,55 @@ def _latest_runtime_context_message(messages: list[dict] | tuple[dict, ...] | No
     return ""
 
 
+def _build_followup_resolution_history(
+    messages: list[dict] | tuple[dict, ...] | None,
+    *,
+    current_user_msg: str = "",
+) -> list[dict[str, Any]]:
+    """Preserve the latest hidden runtime context for deterministic follow-up routing.
+
+    The router prompt uses a small trimmed history for token economy. The follow-up
+    resolver is local logic and needs a slightly richer view so short clarifications
+    like "I mean the file" still see the latest `[LATEST_RUNTIME_CONTEXT]` block even
+    when hidden explanation messages have pushed it out of the router prompt tail.
+    """
+    current_clean = " ".join(str(current_user_msg or "").split()).strip().lower()
+    skipped_current = False
+    history: list[dict[str, Any]] = []
+
+    for message in reversed(list(messages or [])):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "")
+        if role == "assistant" and content.strip() == "Thinking...":
+            continue
+        if role == "user":
+            content_clean = " ".join(content.split()).strip().lower()
+            if not skipped_current and (not current_clean or content_clean == current_clean):
+                skipped_current = True
+                continue
+        history.append(dict(message))
+
+    history.reverse()
+
+    latest_runtime_context = _latest_runtime_context_message(messages)
+    if latest_runtime_context and not any(
+        str(item.get("role") or "").strip().lower() == "system"
+        and str(item.get("content") or "").strip().startswith(_LATEST_RUNTIME_CONTEXT_PREFIX)
+        for item in history
+    ):
+        history.append(
+            {
+                "role": "system",
+                "content": latest_runtime_context,
+                "hidden": True,
+            }
+        )
+
+    return history
+
+
 def _extract_latest_stage_outcome_entry(scratchpad: list[str]) -> str:
     for entry in reversed(scratchpad or []):
         text = str(entry or "")
@@ -653,6 +707,15 @@ def _maybe_pause_for_missing_file_target_confirmation(
     requested_target = str(getattr(executor, "terminal_missing_file_target", "") or "").strip()
     if not requested_target:
         return False
+    if not FileStagePolicy.stage_is_file_work(stage):
+        return False
+    if FileStagePolicy.stage_allows_absence_confirmation(stage):
+        return False
+    if FileStagePolicy.stage_may_create_missing_target(stage):
+        return False
+    stage_text = FileStagePolicy.stage_goal_success_text(stage)
+    if not re.search(r"\b(delete|remove)\b", stage_text):
+        return False
     workspace = Path(getattr(orc.brain, "workspace", "."))
     candidates = FileStagePolicy.find_workspace_target_candidates(workspace, requested_target, limit=3)
     if not candidates:
@@ -821,6 +884,10 @@ def phase_route(orc) -> None:
             continue
         router_history.append(_msg)
     router_history.reverse()
+    followup_history = _build_followup_resolution_history(
+        full_history,
+        current_user_msg=orc.user_msg,
+    )
 
     orc.is_search_result = any(_is_pending_search_payload(message) for message in recent_history)
 
@@ -911,7 +978,10 @@ def phase_route(orc) -> None:
         ingested_documents = orc.prompt_context.document_memory.list_documents()
     except Exception:
         ingested_documents = []
-    if _should_route_ingested_document_chat(orc.user_msg, recent_history, ingested_documents):
+    if (
+        not looks_like_explicit_browser_request(orc.user_msg)
+        and _should_route_ingested_document_chat(orc.user_msg, recent_history, ingested_documents)
+    ):
         orc.route_decision = {"decision": "CHAT"}
         orc.ingested_document_chat = True
         orc.ui.put(("agent_log", "   -> Ingested document chat heuristic matched. Skipping Secretary/router LLM."))
@@ -962,10 +1032,16 @@ def phase_route(orc) -> None:
                 image_path=live_screen_path,
                 attachment_text=_LIVE_SCREEN_ROUTER_ATTACHMENT,
                 temperature=0.1,
+                max_tokens=int(getattr(CFG, "ROUTER_MAX_TOKENS", 400)),
                 cancel_token=orc.cancel_token,
             )
         else:
-            raw = orc.llm.generate(messages, temperature=0.1, cancel_token=orc.cancel_token)
+            raw = orc.llm.generate(
+                messages,
+                temperature=0.1,
+                max_tokens=int(getattr(CFG, "ROUTER_MAX_TOKENS", 400)),
+                cancel_token=orc.cancel_token,
+            )
         orc.ui.put(("agent_log", f"   -> Secretary Raw: {raw}"))
         try:
             parsed: RouteDecision = RouterBoundary.validate(raw)
@@ -973,7 +1049,7 @@ def phase_route(orc) -> None:
             parsed = exc.fallback or RouterBoundary.fallback()
             orc.ui.put(("agent_log", f"   -> Router validation failed: {exc}. Applying CHAT fallback."))
         normalized = normalize_route_decision(parsed, orc.user_msg, router_history)
-        followup_resolved = _resolve_followup_route_with_llm(orc, normalized, router_history)
+        followup_resolved = _resolve_followup_route_with_llm(orc, normalized, followup_history)
         if followup_resolved is not None and followup_resolved != normalized:
             normalized = followup_resolved
             orc.ui.put(("agent_log", "   -> Follow-up resolver refined ambiguous continuation route."))
@@ -1363,7 +1439,12 @@ def phase_reporter(orc) -> None:
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": f"Summarize the search findings for '{query}' using the instructions above."},
         ]
-        summary = orc.llm.generate(reporter_messages, temperature=0.1, cancel_token=orc.cancel_token)
+        summary = orc.llm.generate(
+            reporter_messages,
+            temperature=0.1,
+            max_tokens=int(getattr(CFG, "REPORTER_MAX_TOKENS", 700)),
+            cancel_token=orc.cancel_token,
+        )
         orc.ui.put(("agent_log", f"   -> Reporter Summary: {summary[:100]}..."))
     except OperationCancelled:
         raise
@@ -1823,12 +1904,14 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
                 image_path=live_screen_path,
                 attachment_text=_live_screen_persona_attachment_text(orc),
                 temperature=orc.temperature,
+                max_tokens=int(getattr(CFG, "PERSONA_MAX_TOKENS", 700)),
                 cancel_token=orc.cancel_token,
             )
         else:
             stream = orc.llm.generate_stream(
                 messages,
                 temperature=orc.temperature,
+                max_tokens=int(getattr(CFG, "PERSONA_MAX_TOKENS", 700)),
                 cancel_token=orc.cancel_token,
             )
         # Wrap raw stream with PIPE-IN trace when pipeline debug is on.
@@ -1888,6 +1971,7 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
         stream = orc.llm.generate_stream(
             messages,
             temperature=orc.temperature,
+            max_tokens=int(getattr(CFG, "PERSONA_MAX_TOKENS", 700)),
             cancel_token=orc.cancel_token,
         )
         _raw = _debug_log_stream(stream, "PIPE-IN") if CFG.DEBUG_STREAMING_PIPELINE else stream

@@ -93,6 +93,7 @@ def refresh_top_bar(controller) -> None:
             controller.stage_meta,
             getattr(controller, "code_session_meta", ""),
             controller.session_meta,
+            getattr(controller, "user_meta", ""),
             controller.style_meta,
             getattr(controller, "screen_meta", ""),
         ]

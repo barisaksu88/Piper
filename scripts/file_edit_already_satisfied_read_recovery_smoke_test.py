@@ -75,7 +75,7 @@ def run_smoke() -> FileEditAlreadySatisfiedReadRecoveryReport:
         }
         executor._last_successful_tool_name = "FILE_OP"
         executor._last_successful_tool_result = read_result
-        executor._append_exact_file_read_note_from_result(read_result)
+        executor._append_exact_file_read_note_if_available(stage)
         recovered = executor._auto_finish_verified_current_state_after_successful_read(stage)
 
     verdict = executor._last_file_verdict

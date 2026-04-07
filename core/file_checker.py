@@ -225,7 +225,12 @@ class FileWorkChecker:
         try:
             if self.cancel_token is not None:
                 self.cancel_token.raise_if_cancelled()
-            raw = self.llm.generate(messages, temperature=0.0, cancel_token=self.cancel_token)
+            raw = self.llm.generate(
+                messages,
+                temperature=0.0,
+                max_tokens=int(getattr(CFG, "FILE_CHECKER_MAX_TOKENS", 220)),
+                cancel_token=self.cancel_token,
+            )
             if self.cancel_token is not None:
                 self.cancel_token.raise_if_cancelled()
             self.ui.put(("agent_log", f"[FILE_CHECKER] {raw.strip()}"))

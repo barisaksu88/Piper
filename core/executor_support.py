@@ -214,7 +214,12 @@ def run_inspector(*, llm, ui, scratchpad: list[str], stage: StageCard, cancel_to
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": "Return the inspector decision JSON for the stage above."},
         ]
-        raw = llm.generate(messages, temperature=0.0, cancel_token=cancel_token)
+        raw = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=int(getattr(CFG, "INSPECTOR_MAX_TOKENS", 120)),
+            cancel_token=cancel_token,
+        )
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
         ui.put(("agent_log", f"[INSPECTOR] {raw.strip()}"))

@@ -20,6 +20,12 @@ from core.json_utils import parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
 from core.engines.change_journal import ChangeJournal
+from core.engines.computer_use_verifier import (
+    build_verified_payload as build_verified_computer_use_payload,
+    evaluate_stage as evaluate_computer_use_stage,
+    new_stage_evidence as new_computer_use_stage_evidence,
+    update_stage_evidence as update_computer_use_stage_evidence,
+)
 from core.engines.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.verification import VerificationEngine, VerificationResult
@@ -84,6 +90,8 @@ class StageExecutor:
         self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)
         self.completed_change_operations: list[dict[str, Any]] = []
         self.terminal_missing_file_target = ""
+        self._stage_all_mutated_paths: list[str] = []
+        self._computer_use_stage_evidence: dict[str, Any] = {}
 
     def _log_dashboard(self, text: str):
         """Logs a clean message to the UI Dashboard."""
@@ -274,6 +282,7 @@ class StageExecutor:
         # Used by _append_verified_file_work_result_note so the LAST_LOG covers
         # every file touched across all tool calls, not just the final one.
         self._stage_all_mutated_paths: list[str] = []
+        self._computer_use_stage_evidence = new_computer_use_stage_evidence(stage)
         # R-5: tracks whether the constraints schema reminder has been sent
         # for this stage so we only fire it once before falling through.
         _constraints_reminder_sent = False
@@ -341,7 +350,12 @@ class StageExecutor:
             try:
                 raw = ""
                 planner_started_at = time.perf_counter()
-                for delta in self.llm.generate_stream(messages, temperature=0.0, cancel_token=self.cancel_token):
+                for delta in self.llm.generate_stream(
+                    messages,
+                    temperature=0.0,
+                    max_tokens=int(getattr(CFG, "PLANNER_MAX_TOKENS", 700)),
+                    cancel_token=self.cancel_token,
+                ):
                     raw += delta
                 planner_time_s += max(0.0, time.perf_counter() - planner_started_at)
             except LLMClientError as e:
@@ -563,6 +577,8 @@ class StageExecutor:
                         self.scratchpad.append(hint)
                     self.ui.put(("agent_log", f"   -> {hint}"))
                     continue
+                if self._stage_is_computer_use(stage) and not self._accept_computer_use_completion(stage):
+                    continue
                 self.ui.put(("agent_log", "   -> Planner signaled completion."))
                 self._log_dashboard("Stage Complete.")
                 success = True
@@ -645,6 +661,8 @@ class StageExecutor:
                         self.ui.put(("agent_log", "   -> Completion blocked: FILE_WORK requires VERIFIED checker evidence."))
                         self.scratchpad.append("SYSTEM ERROR: FILE_WORK cannot complete until FILE_CHECKER_VERDICT is VERIFIED.")
                         continue
+                if self._stage_is_computer_use(stage) and not self._accept_computer_use_completion(stage):
+                    continue
                 self.ui.put(("agent_log", "   -> Planner signaled completion (tool: null)."))
                 self._log_dashboard("Stage Complete.")
                 success = True
@@ -779,7 +797,9 @@ class StageExecutor:
                         break
                     continue
                 _run_code_block = FileWorkEngine._check_run_code_dependency(
-                    tool_tag, self.operational_state_service
+                    tool_tag,
+                    self.operational_state_service,
+                    dependency_override_authorized=bool(stage.get("dependency_override_authorized")),
                 )
                 if _run_code_block.blocked:
                     entry = ScratchpadFormatter.format_step(step_count, thought, tool_tag, _run_code_block.reason)
@@ -829,6 +849,8 @@ class StageExecutor:
                 pkg_name = pkg_match.group(1).strip() if pkg_match else ""
                 self._log_dashboard(f"Installing package: {pkg_name or 'unknown'}")
                 self.ui.put(("agent_log", f"   -> Installing package: {pkg_name or 'unknown'}"))
+            if base_tag == "BROWSER_OP":
+                tool_tag = self._inject_browser_stage_context(tool_tag, stage)
             action = self.brain.parse_and_execute(tool_tag, cancel_token=self.cancel_token)
             self._raise_if_cancelled()
 
@@ -886,6 +908,19 @@ class StageExecutor:
                             _clean = str(_p or "").strip().replace("\\", "/")
                             if _clean and _clean not in self._stage_all_mutated_paths:
                                 self._stage_all_mutated_paths.append(_clean)
+                if self._stage_is_computer_use(stage) and base_tag == "BROWSER_OP":
+                    self._computer_use_stage_evidence = update_computer_use_stage_evidence(
+                        self._computer_use_stage_evidence,
+                        tool_result,
+                    )
+                    browser_verification = evaluate_computer_use_stage(stage, self._computer_use_stage_evidence)
+                    self._last_verification = browser_verification
+                    if browser_verification.verdict == "VERIFIED":
+                        self._append_verified_computer_use_result_note(stage, browser_verification)
+                        self.ui.put(("agent_log", "   -> COMPUTER_USE verified from accumulated browser evidence."))
+                        self._log_dashboard("COMPUTER_USE verified.")
+                        success = True
+                        break
                 if base_tag == "FILE_OP":
                     journal_operation = self.change_journal.finalize_file_op_capture(
                         pending_change_capture,
@@ -1358,6 +1393,90 @@ class StageExecutor:
         if note not in self.scratchpad:
             self.scratchpad.append(note)
 
+    @staticmethod
+    def _stage_is_computer_use(stage: StageCard) -> bool:
+        return str(stage.get("stage_type", "") or "").strip().upper() == "COMPUTER_USE"
+
+    def _accept_computer_use_completion(self, stage: StageCard) -> bool:
+        verification = evaluate_computer_use_stage(stage, self._computer_use_stage_evidence)
+        self._last_verification = verification
+        if verification.verdict != "VERIFIED":
+            hint = f"SYSTEM ERROR: COMPUTER_USE completion is not yet verified. {verification.evidence_summary}"
+            if not self.scratchpad or self.scratchpad[-1] != hint:
+                self.scratchpad.append(hint)
+            self.ui.put(("agent_log", f"   -> {hint}"))
+            return False
+        self._append_verified_computer_use_result_note(stage, verification)
+        return True
+
+    def _append_verified_computer_use_result_note(
+        self,
+        stage: StageCard,
+        verification: VerificationResult,
+    ) -> None:
+        payload = build_verified_computer_use_payload(stage, self._computer_use_stage_evidence, verification)
+        note = "COMPUTER_USE_VERIFIED_RESULT: " + json.dumps(payload, ensure_ascii=False)
+        if note not in self.scratchpad:
+            self.scratchpad.append(note)
+
+    @staticmethod
+    def _inject_browser_stage_context(tool_tag: str, stage: StageCard) -> str:
+        if not StageExecutor._stage_is_computer_use(stage):
+            return tool_tag
+        match = re.search(r"\[BROWSER_OP\](.*?)\[/BROWSER_OP\]", str(tool_tag or ""), re.DOTALL | re.IGNORECASE)
+        if not match:
+            return tool_tag
+        payload_text = str(match.group(1) or "").strip()
+        try:
+            payload = json.loads(payload_text)
+        except Exception:
+            return tool_tag
+        if not isinstance(payload, dict):
+            return tool_tag
+
+        meta = dict(stage.get("computer_use") or {})
+        action = str(payload.get("action") or "").strip().lower()
+        changed = False
+
+        if action == "goto_url" and not payload.get("allowed_domains"):
+            allowed_domains = meta.get("allowed_domains")
+            if isinstance(allowed_domains, list) and allowed_domains:
+                payload["allowed_domains"] = allowed_domains
+                changed = True
+
+        if action not in {"goto_url", "open_page"} and not payload.get("start_url"):
+            start_url = str(meta.get("start_url") or "").strip()
+            if start_url:
+                payload["start_url"] = start_url
+                changed = True
+
+        if action == "extract_text" and not payload.get("topic"):
+            requested_topic = str(meta.get("requested_topic") or "").strip()
+            if requested_topic:
+                payload["topic"] = requested_topic
+                changed = True
+        if action == "extract_text" and not payload.get("avoid_heading"):
+            avoid_heading = str(meta.get("avoid_heading") or "").strip()
+            if avoid_heading:
+                payload["avoid_heading"] = avoid_heading
+                changed = True
+
+        if action == "download":
+            download_dir = str(meta.get("download_dir") or "").strip()
+            if download_dir and not payload.get("download_dir"):
+                payload["download_dir"] = download_dir
+                changed = True
+            download_hint = str(meta.get("download_hint") or "").strip()
+            if download_hint and not payload.get("selector") and not payload.get("text"):
+                payload["text"] = download_hint
+                changed = True
+
+        if not changed:
+            return tool_tag
+
+        normalized_payload = json.dumps(payload, ensure_ascii=False)
+        return f"[BROWSER_OP]\n{normalized_payload}\n[/BROWSER_OP]"
+
     def _maybe_launch_code_session(self, tool_result: Any) -> None:
         if not isinstance(tool_result, dict):
             return
@@ -1423,7 +1542,7 @@ class StageExecutor:
         action = str(tool_result.get("action", "")).lower()
         if action == "read_text":
             summary = str(tool_result.get("summary", "")).strip().lower()
-            requested = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip().lower()
+            requested = self._missing_file_request_target(tool_result).lower()
             return "target not found" in summary and self._matches_missing_target(requested, target_terms)
 
         if action == "find_paths":
@@ -1448,11 +1567,24 @@ class StageExecutor:
         return False
 
     @staticmethod
+    def _missing_file_request_target(tool_result: Any) -> str:
+        if not isinstance(tool_result, dict):
+            return ""
+        requested = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip()
+        if requested:
+            return requested
+        summary = str(tool_result.get("summary", "")).strip()
+        match = re.search(r"(?:target|source) not found:\s*([^\n]+)", summary, flags=re.IGNORECASE)
+        if match:
+            return str(match.group(1) or "").strip()
+        return ""
+
+    @staticmethod
     def _extract_missing_file_target(stage: StageCard, tool_result: Any) -> str:
         if isinstance(tool_result, dict):
             action = str(tool_result.get("action", "")).lower()
             if action == "read_text":
-                path = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip()
+                path = StageExecutor._missing_file_request_target(tool_result)
                 if path:
                     return path
             if action == "find_paths":

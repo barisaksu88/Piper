@@ -25,12 +25,12 @@ class _CaptureUI:
 
 
 class _InvalidLLM:
-    def generate(self, messages, temperature: float = 0.0, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.0, max_tokens=None, cancel_token=None, **kwargs):
         return json.dumps({"decision": "nonsense"})
 
 
 class _KeepRouteLLM:
-    def generate(self, messages, temperature: float = 0.0, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.0, max_tokens=None, cancel_token=None, **kwargs):
         return json.dumps({"decision": "keep_route"})
 
 
@@ -67,6 +67,37 @@ class RouteBoundaryReport:
     clarifier_wrapper_result: dict | None
     followup_validation_logged: bool
     clarifier_validation_logged: bool
+
+
+def _is_lookup_source_clarification(route: dict, subject: str) -> bool:
+    card = dict((route or {}).get("card") or {})
+    stages = [dict(stage) for stage in (card.get("stages") or []) if isinstance(stage, dict)]
+    stage_goal = str((stages[0] if stages else {}).get("stage_goal") or "").lower()
+    goal = str(card.get("goal") or "").lower()
+    normalized_subject = str(subject or "").lower()
+    return (
+        str((route or {}).get("decision") or "").upper() == "TASK"
+        and str((stages[0] if stages else {}).get("stage_type") or "") == "CHAT"
+        and "clarify lookup source" in goal
+        and "web" in stage_goal
+        and "workspace" in stage_goal
+        and normalized_subject in goal
+    )
+
+
+def _is_task_delete_card(route: dict | None, subject: str) -> bool:
+    card = dict((route or {}).get("card") or {})
+    stages = [dict(stage) for stage in (card.get("stages") or []) if isinstance(stage, dict)]
+    goal = str(card.get("goal") or "").lower()
+    stage_type = str((stages[0] if stages else {}).get("stage_type") or "")
+    mutation = dict((stages[0] if stages else {}).get("mutation") or {})
+    return (
+        str((route or {}).get("decision") or "").upper() == "TASK"
+        and "delete the task" in goal
+        and str(subject or "").lower() in goal
+        and stage_type == "TASK_EVENT_WORK"
+        and str(mutation.get("action") or "").lower() == "delete"
+    )
 
 
 def run_smoke() -> RouteBoundaryReport:
@@ -632,7 +663,7 @@ def run_smoke() -> RouteBoundaryReport:
     fake_orc = SimpleNamespace(
         llm=_InvalidLLM(),
         ui=ui,
-        user_msg="Remove it.",
+        user_msg="remember that",
         cancel_token=None,
         prompt_context=SimpleNamespace(
             operational_state_service=None,
@@ -658,8 +689,9 @@ def run_smoke() -> RouteBoundaryReport:
         fake_orc,
         bad_memory_route,
         [
-            {"role": "assistant", "content": "Pending tasks: buy milk."},
-            {"role": "user", "content": "Remove it."},
+            {"role": "user", "content": "I keep my passport in the top drawer."},
+            {"role": "assistant", "content": "Noted."},
+            {"role": "user", "content": "remember that"},
         ],
     )
 
@@ -706,20 +738,15 @@ def run_smoke() -> RouteBoundaryReport:
         and dict(live_environment_route_result).get("decision") == "CHAT"
         and dict(explicit_web_search_route_result).get("decision") == "SEARCH"
         and "llama.cpp performance benchmarks" in str(((explicit_web_search_route_result.get("card") or {}).get("query") or "")).lower()
-        and dict(benchmark_topic_search_route_result).get("decision") == "SEARCH"
-        and "mlperf inference v5.0 benchmark results" in str(((benchmark_topic_search_route_result.get("card") or {}).get("query") or "")).lower()
-        and dict(dotted_topic_search_route_result).get("decision") == "SEARCH"
-        and "llama.cpp benchmark results" in str(((dotted_topic_search_route_result.get("card") or {}).get("query") or "")).lower()
+        and _is_lookup_source_clarification(benchmark_topic_search_route_result, "mlperf inference v5.0 benchmark results")
+        and _is_lookup_source_clarification(dotted_topic_search_route_result, "llama.cpp benchmark results")
         and dict(ambiguous_lookup_route_result).get("decision") == "TASK"
         and str(((ambiguous_lookup_route_result.get("card") or {}).get("goal") or "")).lower().startswith("clarify lookup source")
         and str((((ambiguous_lookup_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "")) == "CHAT"
         and "web" in str((((ambiguous_lookup_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_goal") or "")).lower()
         and "workspace" in str((((ambiguous_lookup_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_goal") or "")).lower()
-        and dict(high_confidence_web_lookup_route_result).get("decision") == "SEARCH"
-        and str(((high_confidence_web_lookup_route_result.get("card") or {}).get("query") or "")).lower() == "grocery"
-        and dict(high_confidence_workspace_lookup_route_result).get("decision") == "TASK"
-        and str((((high_confidence_workspace_lookup_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "")) == "FILE_WORK"
-        and dict(high_confidence_workspace_lookup_route_result).get("source_scope") == "workspace"
+        and _is_lookup_source_clarification(high_confidence_web_lookup_route_result, "grocery")
+        and _is_lookup_source_clarification(high_confidence_workspace_lookup_route_result, "grocery")
         and dict(benchmark_ambiguous_task_route_result).get("decision") == "TASK"
         and str((((benchmark_ambiguous_task_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "")) == "CHAT"
         and "web" in str((((benchmark_ambiguous_task_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_goal") or "")).lower()

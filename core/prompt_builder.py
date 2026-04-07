@@ -288,6 +288,9 @@ class PromptBuilder:
         if context.env_block:
             parts.append(context.env_block)
 
+        if context.active_user_block:
+            parts.append(context.active_user_block)
+
         if context.world_state:
             parts.append(context.world_state)
 

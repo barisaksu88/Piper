@@ -132,12 +132,10 @@ class ChatState:
             self.style_bootstrap_pending = False
             self._streaming_assistant_index = None
 
-    def new_session(self) -> None:
-        """Start a fresh session.
+    def bind_memory_path(self, memory_path: Path) -> None:
+        self.memory_path = Path(memory_path)
 
-        Adds a session marker message and arms bootstrap_pending.
-        IMPORTANT: This now WIPES the memory.jsonl file to prevent 'Zombie Memory'.
-        """
+    def begin_fresh_session(self, *, wipe_persistent: bool) -> None:
         with self._lock:
             self.messages.clear()
             self.messages.append({"role": "system", "content": self.session_marker_prefix})
@@ -145,18 +143,23 @@ class ChatState:
             self.style_bootstrap_pending = False
             self._streaming_assistant_index = None
 
-        # --- FIX: WIPE DISK MEMORY ---
-        # Open in 'w' mode to truncate/clear the file immediately.
+        if not wipe_persistent:
+            return
+
         try:
             self.memory_path.parent.mkdir(parents=True, exist_ok=True)
             with self.memory_path.open("w", encoding="utf-8") as f:
-                # Write the marker immediately so the file isn't empty
-                f.write("") 
-                # Optionally write the marker to the file too? 
-                # We decided just to wipe it for a clean slate.
-                # The in-memory marker handles the prompt logic.
+                f.write("")
         except Exception as e:
             print(f"[ChatState] Error wiping memory file: {e}")
+
+    def new_session(self) -> None:
+        """Start a fresh session.
+
+        Adds a session marker message and arms bootstrap_pending.
+        IMPORTANT: This now WIPES the memory.jsonl file to prevent 'Zombie Memory'.
+        """
+        self.begin_fresh_session(wipe_persistent=True)
 
     def arm_style_bootstrap(self) -> None:
         """Arm a one-time style bootstrap injection for the next prompt build.

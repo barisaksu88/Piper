@@ -22,7 +22,8 @@ class _DummyKnowledge:
 
 
 class _DummyLLM:
-    def generate(self, messages, temperature: float = 0.0, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.0, max_tokens: int | None = None, cancel_token=None):
+        del max_tokens
         payload = json.loads(messages[-1]["content"])
         latest = str(payload.get("latest_user_input") or "").strip().lower()
         if latest == "well, remove it.":
@@ -83,7 +84,8 @@ class _DummyLLM:
 
 
 class _FallbackOnlyLLM:
-    def generate(self, messages, temperature: float = 0.0, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.0, max_tokens: int | None = None, cancel_token=None):
+        del max_tokens
         payload = json.loads(messages[-1]["content"])
         latest = str(payload.get("latest_user_input") or "").strip().lower()
         if latest == "remove it.":
@@ -101,6 +103,12 @@ class FollowupResolutionEngineReport:
     chat_route: dict
     store_memory_route: dict
     remove_memory_route: dict
+    browser_followup_route: dict
+    browser_title_followup_route: dict
+    browser_topic_reply_route: dict
+    browser_anything_else_route: dict
+    browser_retrieve_details_route: dict
+    browser_download_followup_route: dict
 
 
 def run_smoke() -> FollowupResolutionEngineReport:
@@ -216,12 +224,152 @@ def run_smoke() -> FollowupResolutionEngineReport:
             operational_state_service=ops,
             knowledge_mgr=knowledge,
         )
+        browser_followup_history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Previous user request: Open iana.org/domains/reserved in the browser and tell me the main heading.\n"
+                    "Task goal: Use the browser to complete the requested interaction at 'https://iana.org/domains/reserved'.\n"
+                    "Execution status: SUCCESS\n"
+                    "Runtime note: The main heading at https://www.iana.org/domains/reserved is \"IANA-managed Reserved Domains\".\n"
+                    "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                ),
+            },
+            {"role": "assistant", "content": "The main heading at https://www.iana.org/domains/reserved is \"IANA-managed Reserved Domains\"."},
+            {"role": "user", "content": "what else is there"},
+        ]
+        browser_followup_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="what else is there",
+            recent_history=browser_followup_history,
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
+        browser_title_followup_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="What's the title?",
+            recent_history=browser_followup_history[:-1] + [{"role": "user", "content": "What's the title?"}],
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
+        browser_topic_history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Previous user request: what else is there\n"
+                    "Task goal: Clarify the user's ambiguous request: what else is there\n"
+                    "Execution status: PAUSED / AWAITING USER INPUT\n"
+                    "Runtime note: PROPOSAL: Which specific piece of information from the Python license page would you like me to extract next?\n"
+                    "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": 'The page title at https://docs.python.org/3/license.html is "History and License — Python 3.14.3 documentation".',
+            },
+            {
+                "role": "assistant",
+                "content": "Which specific piece of information from the Python license page would you like me to extract next?",
+            },
+            {"role": "user", "content": "general info"},
+        ]
+        browser_topic_reply_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "TASK", "card": {"goal": "Clarify browser request", "stages": [{"stage_type": "CHAT"}]}},
+            user_msg="general info",
+            recent_history=browser_topic_history,
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
+        browser_anything_else_history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Previous user request: general info\n"
+                    "Task goal: Extract the 'general info' section from the Python license page\n"
+                    "Execution status: SUCCESS\n"
+                    "Runtime note: The page title at https://docs.python.org/3/license.html is \"History and License — Python 3.14.3 documentation\".\n"
+                    "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": 'The page title at https://docs.python.org/3/license.html is "History and License — Python 3.14.3 documentation".',
+            },
+            {"role": "user", "content": "anything else?"},
+        ]
+        browser_anything_else_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="anything else?",
+            recent_history=browser_anything_else_history,
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
+        browser_retrieve_details_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="retrieve those details for me",
+            recent_history=browser_anything_else_history[:-1]
+            + [
+                {
+                    "role": "assistant",
+                    "content": "If you wish to explore specific clauses, simply let me know and I shall retrieve those details for you.",
+                },
+                {"role": "user", "content": "retrieve those details for me"},
+            ],
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
+        browser_download_followup_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="download the quarterly report into browser_downloads",
+            recent_history=[
+                {
+                    "role": "system",
+                    "content": (
+                        "[LATEST_RUNTIME_CONTEXT]\n"
+                        "Previous route: TASK\n"
+                        "Previous user request: Open http://127.0.0.1:9000/download_hub.html in the browser and tell me the page title.\n"
+                        "Task goal: Use the browser to inspect the current page.\n"
+                        "Execution status: SUCCESS\n"
+                        "Runtime note: The page title at http://127.0.0.1:9000/download_hub.html is \"Download Hub Fixture\".\n"
+                        "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                    ),
+                },
+                {"role": "assistant", "content": 'The page title at http://127.0.0.1:9000/download_hub.html is "Download Hub Fixture".'},
+                {"role": "user", "content": "download the quarterly report into browser_downloads"},
+            ],
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
 
     delete_stage = dict((((delete_task_route or {}).get("card") or {}).get("stages") or [{}])[0])
     fallback_delete_stage = dict((((fallback_delete_task_route or {}).get("card") or {}).get("stages") or [{}])[0])
     complete_stage = dict((((complete_task_route or {}).get("card") or {}).get("stages") or [{}])[0])
     store_stage = dict((((store_memory_route or {}).get("card") or {}).get("stages") or [{}])[0])
     remove_stage = dict((((remove_memory_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_stage = dict((((browser_followup_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_title_stage = dict((((browser_title_followup_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_topic_stage = dict((((browser_topic_reply_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_anything_stage = dict((((browser_anything_else_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_details_stage = dict((((browser_retrieve_details_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_meta = dict(browser_stage.get("computer_use") or {})
+    browser_title_meta = dict(browser_title_stage.get("computer_use") or {})
+    browser_topic_meta = dict(browser_topic_stage.get("computer_use") or {})
+    browser_anything_meta = dict(browser_anything_stage.get("computer_use") or {})
+    browser_details_meta = dict(browser_details_stage.get("computer_use") or {})
+    browser_download_stage = dict((((browser_download_followup_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_download_meta = dict(browser_download_stage.get("computer_use") or {})
 
     success = (
         (delete_task_route or {}).get("decision") == "TASK"
@@ -247,6 +395,33 @@ def run_smoke() -> FollowupResolutionEngineReport:
         and str(remove_stage.get("stage_type") or "") == "MEMORY_WORK"
         and "catch the stars" in str(remove_stage.get("stage_goal") or "").lower()
         and str((remove_stage.get("mutation") or {}).get("action") or "") == "remove"
+        and (browser_followup_route or {}).get("decision") == "TASK"
+        and str(browser_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
+        and str(browser_meta.get("selector_hint") or "") == "body"
+        and "requested on-page information" in str(browser_stage.get("stage_goal") or "").lower()
+        and (browser_title_followup_route or {}).get("decision") == "TASK"
+        and str(browser_title_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_title_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
+        and bool(browser_title_meta.get("report_title"))
+        and (browser_topic_reply_route or {}).get("decision") == "TASK"
+        and str(browser_topic_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_topic_meta.get("start_url") or "") == "https://docs.python.org/3/license.html"
+        and str(browser_topic_meta.get("requested_topic") or "") == "general info"
+        and str(browser_topic_meta.get("selector_hint") or "") == "body"
+        and (browser_anything_else_route or {}).get("decision") == "TASK"
+        and str(browser_anything_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_anything_meta.get("start_url") or "") == "https://docs.python.org/3/license.html"
+        and str(browser_anything_meta.get("selector_hint") or "") == "body"
+        and (browser_retrieve_details_route or {}).get("decision") == "TASK"
+        and str(browser_details_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_details_meta.get("start_url") or "") == "https://docs.python.org/3/license.html"
+        and str(browser_details_meta.get("selector_hint") or "") == "body"
+        and (browser_download_followup_route or {}).get("decision") == "TASK"
+        and str(browser_download_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_download_meta.get("start_url") or "") == "http://127.0.0.1:9000/download_hub.html"
+        and str(browser_download_meta.get("download_dir") or "") == "browser_downloads"
+        and str(browser_download_meta.get("download_hint") or "") == "quarterly report"
     )
 
     return FollowupResolutionEngineReport(
@@ -258,6 +433,12 @@ def run_smoke() -> FollowupResolutionEngineReport:
         chat_route=chat_route or {},
         store_memory_route=store_memory_route or {},
         remove_memory_route=remove_memory_route or {},
+        browser_followup_route=browser_followup_route or {},
+        browser_title_followup_route=browser_title_followup_route or {},
+        browser_topic_reply_route=browser_topic_reply_route or {},
+        browser_anything_else_route=browser_anything_else_route or {},
+        browser_retrieve_details_route=browser_retrieve_details_route or {},
+        browser_download_followup_route=browser_download_followup_route or {},
     )
 
 
