@@ -50,6 +50,17 @@ def _percentile(values: list[float], percentile: float) -> float:
     return round(value, 3)
 
 
+def _upper_control_bound(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return round(float(values[0]), 3)
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    stddev = math.sqrt(max(0.0, variance))
+    return round(mean + (2.0 * stddev), 3)
+
+
 def _phase_bucket(record: dict[str, Any]) -> dict[str, Any]:
     bucket = dict(record.get("phase_ms") or {})
     bucket["planner_total"] = record.get("planner_total_ms", 0.0)
@@ -378,10 +389,76 @@ class StatsCollector:
 
     def build_readonly_report(self, *, limit: int | None = None, alert_limit: int = 10) -> str:
         records = self.load_records(limit=limit or self.history_limit)
+        alerts = self.load_alert_lines(limit=alert_limit)
+        return self._build_readonly_report_from_records(records, alerts)
+
+    def build_dashboard_snapshot(
+        self,
+        *,
+        limit: int | None = None,
+        alert_limit: int = 10,
+        graph_limit: int = 60,
+    ) -> dict[str, Any]:
+        records = self.load_records(limit=limit or self.history_limit)
+        alerts = self.load_alert_lines(limit=alert_limit)
+        summary_text = self._build_readonly_report_from_records(records, alerts)
+        if not records:
+            return {
+                "summary_text": summary_text,
+                "alerts": alerts,
+                "record_count": 0,
+                "graph_window_count": 0,
+                "turn_numbers": [],
+                "turn_labels": [],
+                "total_ms": [],
+                "total_upper_ms": [],
+                "total_outlier_x": [],
+                "total_outlier_y": [],
+                "route_ms": [],
+                "manager_ms": [],
+                "reporter_ms": [],
+                "persona_ms": [],
+                "tts_ms": [],
+                "planner_total_ms": [],
+                "executor_total_ms": [],
+            }
+
+        recent_records = records[-max(12, int(graph_limit or 60)) :]
+        turn_numbers = [float(index + 1) for index in range(len(recent_records))]
+        total_values = [self._record_field_value(record, "total") for record in recent_records]
+        total_upper = _upper_control_bound(total_values)
+        return {
+            "summary_text": summary_text,
+            "alerts": alerts,
+            "record_count": len(records),
+            "graph_window_count": len(recent_records),
+            "turn_numbers": turn_numbers,
+            "turn_labels": [self._short_turn_label(record) for record in recent_records],
+            "total_ms": total_values,
+            "total_upper_ms": [total_upper for _ in recent_records],
+            "total_outlier_x": [
+                turn_numbers[index]
+                for index, value in enumerate(total_values)
+                if total_upper > 0.0 and float(value or 0.0) > total_upper
+            ],
+            "total_outlier_y": [
+                float(value or 0.0)
+                for value in total_values
+                if total_upper > 0.0 and float(value or 0.0) > total_upper
+            ],
+            "route_ms": [self._record_field_value(record, "route") for record in recent_records],
+            "manager_ms": [self._record_field_value(record, "manager") for record in recent_records],
+            "reporter_ms": [self._record_field_value(record, "reporter") for record in recent_records],
+            "persona_ms": [self._record_field_value(record, "persona") for record in recent_records],
+            "tts_ms": [self._record_field_value(record, "tts") for record in recent_records],
+            "planner_total_ms": [self._record_field_value(record, "planner_total") for record in recent_records],
+            "executor_total_ms": [self._record_field_value(record, "executor_total") for record in recent_records],
+        }
+
+    def _build_readonly_report_from_records(self, records: list[dict[str, Any]], alerts: list[str]) -> str:
         if not records:
             return "No stats recorded yet."
         lines: list[str] = []
-        alerts = self.load_alert_lines(limit=alert_limit)
         if alerts:
             lines.append("Alerts")
             lines.extend(f"- {line}" for line in alerts)
@@ -410,11 +487,19 @@ class StatsCollector:
             lines.append(f"- {timestamp} | {decision} | {outcome} | total {total_ms} ms{reroute}{suffix}")
         return "\n".join(lines).strip()
 
+    def _record_field_value(self, record: dict[str, Any], field: str) -> float:
+        return round(float(_phase_bucket(record).get(field) or 0.0), 3)
+
+    def _short_turn_label(self, record: dict[str, Any]) -> str:
+        timestamp = str(record.get("timestamp") or "").replace("T", " ")
+        if len(timestamp) >= 19:
+            return timestamp[11:19]
+        return timestamp or f"Turn {record.get('turn_id') or '?'}"
+
     def _field_values(self, records: list[dict[str, Any]], field: str) -> list[float]:
         values: list[float] = []
         for record in records:
-            bucket = _phase_bucket(record)
-            value = _safe_float(bucket.get(field))
+            value = _safe_float(_phase_bucket(record).get(field))
             if value is None:
                 continue
             values.append(value)

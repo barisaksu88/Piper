@@ -1,4 +1,4 @@
-﻿"""core/stt.py
+"""core/stt.py
 
 Speech-to-Text using Faster-Whisper.
 """
@@ -8,15 +8,40 @@ from __future__ import annotations
 import os
 import numpy as np
 
-try:
-    import sounddevice as sd
-except ImportError:
-    sd = None
+_sd = None
+_sounddevice_error: Exception | None = None
+_WhisperModel = None
+_whisper_import_error: Exception | None = None
 
-try:
-    from faster_whisper import WhisperModel
-except ImportError:
-    WhisperModel = None
+
+def _load_sounddevice():
+    global _sd, _sounddevice_error
+    if _sd is not None:
+        return _sd
+    if _sounddevice_error is not None:
+        raise STTError("sounddevice not installed.") from _sounddevice_error
+    try:
+        import sounddevice as sd  # type: ignore
+    except Exception as exc:
+        _sounddevice_error = exc
+        raise STTError("sounddevice not installed.") from exc
+    _sd = sd
+    return sd
+
+
+def _load_whisper_model_class():
+    global _WhisperModel, _whisper_import_error
+    if _WhisperModel is not None:
+        return _WhisperModel
+    if _whisper_import_error is not None:
+        raise STTError("faster-whisper not installed.") from _whisper_import_error
+    try:
+        from faster_whisper import WhisperModel as model_cls  # type: ignore
+    except Exception as exc:
+        _whisper_import_error = exc
+        raise STTError("faster-whisper not installed.") from exc
+    _WhisperModel = model_cls
+    return model_cls
 
 class STTError(RuntimeError):
     pass
@@ -33,15 +58,13 @@ class STTEngine:
     def _load_model(self):
         if self.model:
             return
-        if WhisperModel is None:
-            raise STTError("faster-whisper not installed.")
-        
+        whisper_model_cls = _load_whisper_model_class()
+
         print("[STT] Loading Model...")
-        self.model = WhisperModel("base", device="cpu", compute_type="float32")
+        self.model = whisper_model_cls("base", device="cpu", compute_type="float32")
 
     def start_recording(self):
-        if sd is None:
-            raise STTError("sounddevice not installed.")
+        sd = _load_sounddevice()
 
         try:
             devices = sd.query_devices()

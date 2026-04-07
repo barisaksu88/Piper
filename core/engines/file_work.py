@@ -343,7 +343,11 @@ class FileWorkEngine:
         # Guard 1 (cross-domain dependency): applies before the content-edit
         # gate so it fires for RELOCATION and other non-content-edit stages too.
         if operational_state_service is not None:
-            _dep_block = cls._check_active_dependency(tool_tag, operational_state_service)
+            _dep_block = cls._check_active_dependency(
+                tool_tag,
+                operational_state_service,
+                dependency_override_authorized=bool(stage.get("dependency_override_authorized")),
+            )
             if _dep_block.blocked:
                 return _dep_block
 
@@ -402,7 +406,13 @@ class FileWorkEngine:
         return FileWorkBlock()
 
     @classmethod
-    def _check_run_code_dependency(cls, tool_tag: str, operational_state_service: Any) -> FileWorkBlock:
+    def _check_run_code_dependency(
+        cls,
+        tool_tag: str,
+        operational_state_service: Any,
+        *,
+        dependency_override_authorized: bool = False,
+    ) -> FileWorkBlock:
         """Return a fatal FileWorkBlock if a RUN_CODE payload deletes or moves a
         file that is referenced by an active task or event (R-6 State Mutex).
 
@@ -414,6 +424,8 @@ class FileWorkEngine:
         Called by the executor when ``base_tag == "RUN_CODE"`` and
         ``operational_state_service`` is available.
         """
+        if dependency_override_authorized:
+            return FileWorkBlock()
         import re as _re
         code = cls._extract_run_code_body(tool_tag)
         if not code.strip():
@@ -523,13 +535,21 @@ class FileWorkEngine:
         return FileWorkBlock(blocked=True, reason=reason)
 
     @classmethod
-    def _check_active_dependency(cls, tool_tag: str, operational_state_service: Any) -> FileWorkBlock:
+    def _check_active_dependency(
+        cls,
+        tool_tag: str,
+        operational_state_service: Any,
+        *,
+        dependency_override_authorized: bool = False,
+    ) -> FileWorkBlock:
         """Return a fatal FileWorkBlock if a DELETE or MOVE targets a path that
         is referenced by an active task or event.
 
         Called by should_block() when operational_state_service is provided.
         Returns FileWorkBlock() (not blocked) when the action is safe to proceed.
         """
+        if dependency_override_authorized:
+            return FileWorkBlock()
         planned_action = FileStagePolicy.planned_file_op_action(tool_tag)
         _delete_actions = {"delete_path", "delete_many"}
         _move_actions = {"move_path", "move_many"}

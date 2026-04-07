@@ -7,6 +7,7 @@ import shutil
 import fnmatch
 import re
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 # --- PATH SETUP ---
 # This ensures scripts in sub-folders (like core/, tools/) can find 'config.py'
@@ -108,6 +109,32 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if not value:
         return default
     return value in {"1", "true", "yes", "on"}
+
+
+def _normalize_host_token(raw_value: str) -> str:
+    token = str(raw_value or "").strip().lower()
+    if not token:
+        return ""
+    probe = token if "://" in token else f"http://{token}"
+    parsed = urlparse(probe)
+    host = str(parsed.hostname or "").strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _env_host_list(name: str, default: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    raw = os.environ.get(name)
+    source = raw if raw is not None else ",".join(default or [])
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for token in re.split(r"[,\s;]+", str(source or "")):
+        host = _normalize_host_token(token)
+        if not host or host in seen:
+            continue
+        seen.add(host)
+        ordered.append(host)
+    return ordered
 
 
 def _dedupe_paths(paths) -> list[Path]:
@@ -258,6 +285,93 @@ def _to_wsl_path_text(raw_path: str | Path) -> str:
         suffix = match.group(2).replace("\\", "/")
         return f"/mnt/{drive}/{suffix}"
     return raw.replace("\\", "/")
+
+
+def _is_wsl_runtime() -> bool:
+    if os.name == "nt":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    try:
+        return "microsoft" in os.uname().release.lower()
+    except AttributeError:
+        return False
+
+
+def _default_gateway_ip() -> str | None:
+    route_path = Path("/proc/net/route")
+    if not route_path.exists():
+        return None
+    try:
+        for raw_line in route_path.read_text(encoding="utf-8", errors="replace").splitlines()[1:]:
+            fields = raw_line.strip().split()
+            if len(fields) < 3 or fields[1] != "00000000":
+                continue
+            gateway_hex = fields[2].strip()
+            if len(gateway_hex) != 8:
+                continue
+            octets = [str(int(gateway_hex[idx : idx + 2], 16)) for idx in (6, 4, 2, 0)]
+            return ".".join(octets)
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_windows_host_ip() -> str | None:
+    override = os.environ.get("PIPER_WINDOWS_HOST_IP", "").strip()
+    if override:
+        return override
+    if not _is_wsl_runtime():
+        return None
+    gateway_ip = _default_gateway_ip()
+    if gateway_ip:
+        return gateway_ip
+    try:
+        resolv_conf = Path("/etc/resolv.conf")
+        if resolv_conf.exists():
+            for line in resolv_conf.read_text(encoding="utf-8", errors="replace").splitlines():
+                parts = line.strip().split()
+                if len(parts) == 2 and parts[0].lower() == "nameserver":
+                    return parts[1].strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _url_targets_loopback(raw_url: str) -> bool:
+    parsed = urlparse(str(raw_url or "").strip())
+    return (parsed.hostname or "").strip().lower() in {"127.0.0.1", "localhost"}
+
+
+def _should_bridge_wsl_windows_llama(raw_url: str, server_exe: Path | str) -> bool:
+    return _is_wsl_runtime() and str(server_exe or "").strip().lower().endswith(".exe") and _url_targets_loopback(raw_url)
+
+
+def _resolve_llama_server_bind_host(raw_url: str, server_exe: Path | str) -> str:
+    if _should_bridge_wsl_windows_llama(raw_url, server_exe):
+        return "0.0.0.0"
+    parsed = urlparse(str(raw_url or "").strip())
+    return (parsed.hostname or "127.0.0.1").strip() or "127.0.0.1"
+
+
+def _resolve_llama_server_url(raw_url: str, server_exe: Path | str) -> str:
+    url_text = str(raw_url or "").strip() or "http://127.0.0.1:8080"
+    if not _should_bridge_wsl_windows_llama(url_text, server_exe):
+        return url_text
+    host_ip = _resolve_windows_host_ip()
+    if not host_ip:
+        return url_text
+    parsed = urlparse(url_text)
+    auth = ""
+    if parsed.username:
+        auth = parsed.username
+        if parsed.password:
+            auth += f":{parsed.password}"
+        auth += "@"
+    netloc = f"{auth}{host_ip}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 def _resolve_codex_wsl_executable() -> str:
@@ -451,6 +565,14 @@ class Config:
         return self.DATA_DIR / "workspace"
 
     @property
+    def USERS_PATH(self) -> Path:
+        return self.DATA_DIR / "users.json"
+
+    @property
+    def USER_SILOS_DIR(self) -> Path:
+        return self.DATA_DIR / "users"
+
+    @property
     def TASKS_PATH(self) -> Path:
         return data_state_path(self.DATA_DIR, "tasks.json")
 
@@ -582,15 +704,32 @@ class Config:
 
     # Preferred backend (current): llama.cpp server (OpenAI-compatible HTTP)
     # You start the server separately (llama-server.exe) and Piper connects to it.
-    LLAMA_SERVER_URL: str = os.environ.get("PIPER_LLAMA_SERVER_URL", "http://127.0.0.1:8080").strip() or "http://127.0.0.1:8080"
+    _raw_llama_server_url: str = os.environ.get("PIPER_LLAMA_SERVER_URL", "http://127.0.0.1:8080").strip() or "http://127.0.0.1:8080"
     LLAMA_SERVER_MODEL: str = "qwen"
     LLAMA_SERVER_TIMEOUT_S: float = 300.0
     LLAMA_SERVER_STREAM_READ_TIMEOUT_S: float = float(os.environ.get("PIPER_LLM_STREAM_READ_TIMEOUT_S", "30"))
     LLAMA_SERVER_HEALTH_TIMEOUT_S: float = float(os.environ.get("PIPER_LLM_HEALTH_TIMEOUT_S", "120"))
     LLAMA_SERVER_GPU_LAYERS: int = int(os.environ.get("PIPER_LLM_GPU_LAYERS", "99"))
     LLAMA_SERVER_CTX_SIZE: int = int(os.environ.get("PIPER_LLM_CTX_SIZE", "8192"))
+    ROUTER_MAX_TOKENS: int = int(os.environ.get("PIPER_ROUTER_MAX_TOKENS", "400"))
+    ROUTE_CLARIFIER_MAX_TOKENS: int = int(os.environ.get("PIPER_ROUTE_CLARIFIER_MAX_TOKENS", "120"))
+    FOLLOWUP_RESOLUTION_MAX_TOKENS: int = int(os.environ.get("PIPER_FOLLOWUP_RESOLUTION_MAX_TOKENS", "220"))
+    PLANNER_MAX_TOKENS: int = int(os.environ.get("PIPER_PLANNER_MAX_TOKENS", "700"))
+    INSPECTOR_MAX_TOKENS: int = int(os.environ.get("PIPER_INSPECTOR_MAX_TOKENS", "120"))
+    FILE_CHECKER_MAX_TOKENS: int = int(os.environ.get("PIPER_FILE_CHECKER_MAX_TOKENS", "220"))
+    REPORTER_MAX_TOKENS: int = int(os.environ.get("PIPER_REPORTER_MAX_TOKENS", "700"))
+    PERSONA_MAX_TOKENS: int = int(os.environ.get("PIPER_PERSONA_MAX_TOKENS", "700"))
+    CONVERSATION_SUMMARY_MAX_TOKENS: int = int(os.environ.get("PIPER_CONVERSATION_SUMMARY_MAX_TOKENS", "500"))
     EXECUTOR_MAX_STEPS: int = int(os.environ.get("PIPER_EXECUTOR_MAX_STEPS", "12"))
     SKILL_LAYER_ENABLED: bool = _env_flag("PIPER_SKILL_LAYER_ENABLED", True)
+    COMPUTER_USE_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_ENABLED", True)
+    COMPUTER_USE_HTTP_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_HTTP_ENABLED", True)
+    COMPUTER_USE_ALLOWED_HTTP_DOMAINS: list[str] = field(
+        default_factory=lambda: _env_host_list(
+            "PIPER_COMPUTER_USE_ALLOWED_HTTP_DOMAINS",
+            ["example.com", "iana.org", "apache.org", "w3.org", "python.org", "rfc-editor.org", "localhost", "127.0.0.1"],
+        )
+    )
     DEBUG_LLM_HTTP_PAYLOADS: bool = _env_flag("PIPER_DEBUG_LLM_HTTP_PAYLOADS", False)
     # Prompt debug is light enough to keep on by default; full HTTP payload dumps stay opt-in.
     DEBUG_LLM_PROMPTS: bool = _env_flag("PIPER_DEBUG_LLM_PROMPTS", True)
@@ -631,6 +770,8 @@ class Config:
     # working Qwen 2.5 14B model. `PIPER_MODEL_PATH` can override both.
     MODEL_PATH = _resolve_llama_model_path()
     MMPROJ_PATH = _resolve_mmproj_path(MODEL_PATH)
+    LLAMA_SERVER_BIND_HOST: str = _resolve_llama_server_bind_host(_raw_llama_server_url, LLAMA_SERVER_EXE)
+    LLAMA_SERVER_URL: str = _resolve_llama_server_url(_raw_llama_server_url, LLAMA_SERVER_EXE)
     LLAMA_SERVER_REASONING_BUDGET: int = int(
         os.environ.get(
             "PIPER_LLM_REASONING_BUDGET",
@@ -672,8 +813,16 @@ class Config:
     # ---------------------------------------------------------------------
 
     TTS_ENABLED: bool = True
+    TTS_BACKEND: str = "auto"
     TTS_VOICE: str = "af_heart"
     TTS_SPEED: float = 0.85
+    TTS_KOKORO_TIMEOUT_S: float = 8.0
+    TTS_KOKORO_TORCH_READY_WAIT_S: float = 2.0
+    TTS_KOKORO_HF_REPO_ID: str = "hexgrad/Kokoro-82M"
+    KOKORO_TORCH_SUBDIR: str = "torch"
+    KOKORO_TORCH_MODEL: str = "kokoro-v1_0.pth"
+    KOKORO_TORCH_CONFIG: str = "config.json"
+    BOOT_SCREEN_MIN_VISIBLE_S: float = 0.75
     TTS_LANG: str = "en-us"
     LIVE_SCREEN_INTERVAL_S: float = 10.0
     LIVE_SCREEN_FILENAME: str = "live_screen.jpg"

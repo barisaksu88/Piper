@@ -24,6 +24,31 @@ PlanConstraintType = Literal[
 ]
 
 
+ComputerUseBackend = Literal["browser"]
+ComputerUseGoalKind = Literal["navigate", "extract", "form_fill", "download"]
+
+
+class ComputerUseRequest(TypedDict, total=False):
+    backend: ComputerUseBackend
+    start_url: str
+    allowed_domains: List[str]
+    goal_kind: ComputerUseGoalKind
+    download_dir: str
+    download_hint: str
+    selector_hint: str
+    requested_topic: str
+    input_text: str
+    expected_text: str
+    submit_requested: bool
+    require_download: bool
+    require_extract: bool
+    require_form_fill: bool
+    require_navigation: bool
+    report_title: bool
+    report_status_text: bool
+    navigation_hint: str
+
+
 class PlanConstraint(TypedDict, total=False):
     type: PlanConstraintType
     scope: Literal["FILE", "FILENAME", "DIRECTORY", "EXTENSION"]
@@ -57,8 +82,10 @@ class StageCard(TypedDict, total=False):
     stage_type: str
     success_condition: str
     allowed_tools: List[str]
+    dependency_override_authorized: bool
     file_stage_kind: FileStageKind
     mutation: StateMutationRequest
+    computer_use: ComputerUseRequest
     skill: "SkillDecision"
     # Planner-boundary fields (may be set by router or filled by PlannerBoundary.validate_input)
     objective: str          # Parent route-card goal; why this workflow exists
@@ -274,6 +301,7 @@ class UiEvent:
 class PromptContext:
     instructions: str = ""
     style_overlay: str = ""
+    active_user_block: str = ""
     knowledge: Dict[str, Any] = field(default_factory=dict)
     world_state: str = ""
     situational_state: str = ""
@@ -294,6 +322,7 @@ class PersonaContextPack:
     knowledge_enabled: bool = True
     instructions: str = ""
     style_overlay: str = ""
+    active_user_block: str = ""
     knowledge: Dict[str, Any] = field(default_factory=dict)
     world_state: str = ""
     situational_state: str = ""
@@ -331,6 +360,7 @@ class PersonaRuntimePack:
     exact_file_read_answer: str = ""
     file_lookup_answer: str = ""
     verified_file_work_answer: str = ""
+    verified_browser_answer: str = ""
     latest_stage_requires_analysis_report: bool = False
     latest_stage_is_targeted_read: bool = False
     latest_stage_is_targeted_lookup: bool = False

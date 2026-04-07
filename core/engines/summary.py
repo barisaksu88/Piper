@@ -152,6 +152,14 @@ class SummaryEngine:
         return ""
 
     @classmethod
+    def extract_verified_browser_answer(cls, scratchpad: list[str]) -> str:
+        """Return a natural-language answer from the latest verified browser result."""
+        data = cls._extract_latest_verified_browser_payload(scratchpad)
+        if not data:
+            return ""
+        return cls._format_verified_browser_answer(data)
+
+    @classmethod
     def extract_proposal(cls, scratchpad: list[str]) -> str:
         """Return the text of the last ``PROPOSAL:`` marker in the latest stage.
 
@@ -273,6 +281,10 @@ class SummaryEngine:
         verified = cls.extract_verified_result(scratchpad)
         if verified:
             return cls.sanitize_note(verified)
+
+        verified_browser = cls.extract_verified_browser_answer(scratchpad)
+        if verified_browser:
+            return cls.sanitize_note(verified_browser)
 
         exact_path = cls._extract_latest_exact_read_path(scratchpad)
         if exact_path:
@@ -439,6 +451,14 @@ class SummaryEngine:
                     if entry.lstrip().startswith(prefix):
                         return entry
 
+        if str(stage_type or "").upper() == "COMPUTER_USE":
+            for entry in reversed(entries):
+                if entry.lstrip().startswith("COMPUTER_USE_VERIFIED_RESULT:"):
+                    return entry
+            for entry in reversed(entries):
+                if '"tool": "BROWSER_OP"' in entry or '"tool":"BROWSER_OP"' in entry:
+                    return entry
+
         for entry in reversed(entries):
             if "PROPOSAL:" in entry:
                 return entry
@@ -497,6 +517,47 @@ class SummaryEngine:
                     return reason
                 if paths:
                     return ", ".join(paths[:3])
+        if last_observation.startswith("COMPUTER_USE_VERIFIED_RESULT:"):
+            _, _, payload = last_observation.partition("COMPUTER_USE_VERIFIED_RESULT:")
+            try:
+                data = json.loads(payload.strip())
+            except Exception:
+                data = {}
+            if isinstance(data, dict):
+                rendered = cls._format_verified_browser_answer(data)
+                if rendered:
+                    return rendered
+        if '"tool": "BROWSER_OP"' in last_observation or '"tool":"BROWSER_OP"' in last_observation:
+            try:
+                if "OBSERVATION_TEXT:" in last_observation:
+                    _, _, payload = last_observation.partition("OBSERVATION_TEXT:")
+                    data = json.loads(payload.strip())
+                else:
+                    data = json.loads(last_observation.strip())
+            except Exception:
+                data = {}
+            if isinstance(data, dict):
+                summary = str(data.get("summary") or "").strip()
+                extracted_text = str(data.get("extracted_text") or "").strip()
+                title = str(data.get("title") or "").strip()
+                field_value = str(data.get("field_value") or "").strip()
+                saved_path = str(data.get("saved_path") or "").strip()
+                current_url = str(data.get("current_url") or "").strip()
+                requested_topic = str(data.get("topic") or "").strip()
+                if extracted_text:
+                    if requested_topic:
+                        return f"Extracted text about {requested_topic}: {extracted_text}"
+                    return f"Extracted text: {extracted_text}"
+                if field_value:
+                    return f"Verified field value: {field_value}"
+                if saved_path:
+                    return f"Downloaded artifact: {saved_path}"
+                if title and current_url:
+                    return f"Verified browser page '{title}' at {current_url}"
+                if title:
+                    return f"Verified browser page title: {title}"
+                if summary:
+                    return summary
         if "OBSERVATION_TEXT:" in last_observation:
             try:
                 parts = last_observation.split("OBSERVATION_TEXT:")
@@ -505,6 +566,173 @@ class SummaryEngine:
             except Exception:
                 return ""
         return last_observation[-200:]
+
+    @staticmethod
+    def _extract_latest_verified_browser_payload(scratchpad: list[str]) -> dict:
+        entries = [
+            str(entry or "")
+            for entry in SummaryEngine.latest_stage_entries(scratchpad)
+            if str(entry or "").lstrip().startswith("COMPUTER_USE_VERIFIED_RESULT:")
+        ]
+        if not entries:
+            return {}
+        _, _, payload = entries[-1].partition("COMPUTER_USE_VERIFIED_RESULT:")
+        try:
+            data = json.loads(payload.strip())
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _format_verified_browser_answer(data: dict[str, object]) -> str:
+        summary = str(data.get("summary") or "").strip()
+        status_text = str(data.get("status_text") or "").strip()
+        extracted_text = str(data.get("extracted_text") or "").strip()
+        saved_path = str(data.get("saved_path") or "").strip()
+        download_label = str(data.get("download_label") or "").strip()
+        download_hint = str(data.get("download_hint") or "").strip()
+        reported_title = str(data.get("reported_title") or data.get("title") or "").strip()
+        current_url = str(data.get("current_url") or "").strip()
+        requested_topic = str(data.get("requested_topic") or "").strip()
+        matched_heading = str(data.get("matched_heading") or "").strip()
+        extracts = [item for item in (data.get("extracts") or []) if isinstance(item, dict)]
+        element_inventory = [item for item in (data.get("element_inventory") or []) if isinstance(item, dict)]
+
+        heading_text = ""
+        for item in extracts:
+            selector = str(item.get("selector") or "").strip().lower()
+            text_value = str(item.get("text") or "").strip()
+            topic_value = str(item.get("topic") or "").strip()
+            normalized_text = " ".join(text_value.split())
+            if (
+                selector == "h1"
+                and not topic_value
+                and normalized_text
+                and len(normalized_text) <= 160
+                and normalized_text.count(".") <= 1
+                and normalized_text.count("?") == 0
+                and normalized_text.count("!") == 0
+            ):
+                heading_text = text_value
+                break
+
+        extra_headings: list[str] = []
+        link_texts: list[str] = []
+        seen_heading_texts: set[str] = set()
+        seen_link_texts: set[str] = set()
+        for item in element_inventory:
+            tag = str(item.get("tag") or "").strip().lower()
+            text_value = str(item.get("text") or "").strip()
+            if not text_value:
+                continue
+            normalized = " ".join(text_value.split())
+            if tag in {"h2", "h3"}:
+                key = normalized.lower()
+                if key not in seen_heading_texts:
+                    seen_heading_texts.add(key)
+                    extra_headings.append(normalized)
+            elif tag == "a":
+                key = normalized.lower()
+                if key not in seen_link_texts:
+                    seen_link_texts.add(key)
+                    link_texts.append(normalized)
+
+        is_generic_browser_overview = requested_topic.lower() in {
+            "general info",
+            "general information",
+            "overview",
+            "summary",
+        }
+
+        if not extracted_text:
+            for item in extracts:
+                text_value = str(item.get("text") or "").strip()
+                if text_value:
+                    extracted_text = text_value
+                    break
+
+        if status_text and saved_path:
+            return f'The status text is "{status_text}", and the download was saved to `{saved_path}`.'
+        if status_text:
+            return f'The status text is "{status_text}".'
+        if heading_text and saved_path:
+            if current_url:
+                return f'The main heading at {current_url} is "{heading_text}", and the download was saved to `{saved_path}`.'
+            return f'The main heading is "{heading_text}", and the download was saved to `{saved_path}`.'
+        if heading_text:
+            if current_url:
+                return f'The main heading at {current_url} is "{heading_text}".'
+            return f'The main heading is "{heading_text}".'
+        if extracted_text and saved_path:
+            preview_limit = 420 if is_generic_browser_overview else 260
+            preview = SummaryEngine.truncate_text(" ".join(extracted_text.split()), preview_limit)
+            if requested_topic:
+                return (
+                    f"Here is the section about '{requested_topic}': {preview} "
+                    f"The download was saved to `{saved_path}`."
+                )
+            return f"Here is the requested text: {preview} The download was saved to `{saved_path}`."
+        if extracted_text:
+            preview_limit = 420 if is_generic_browser_overview else 260
+            preview = SummaryEngine.truncate_text(" ".join(extracted_text.split()), preview_limit)
+            extra_bits: list[str] = []
+            if is_generic_browser_overview and extra_headings:
+                extra_bits.append(
+                    "Other visible sections include "
+                    + ", ".join(f'"{item}"' for item in extra_headings[:3])
+                    + "."
+                )
+            if is_generic_browser_overview and not extra_headings and link_texts:
+                extra_bits.append(
+                    "Visible links or items include "
+                    + ", ".join(f'"{item}"' for item in link_texts[:3])
+                    + "."
+                )
+            if requested_topic and current_url:
+                if matched_heading:
+                    base = (
+                        f"Here is the section about '{requested_topic}' from {current_url} "
+                        f"under \"{matched_heading}\": {preview}"
+                    )
+                    if extra_bits:
+                        return base + " " + " ".join(extra_bits)
+                    return base
+                base = f"Here is the section about '{requested_topic}' from {current_url}: {preview}"
+                if extra_bits:
+                    return base + " " + " ".join(extra_bits)
+                return base
+            if requested_topic:
+                if matched_heading:
+                    base = f"Here is the section about '{requested_topic}' under \"{matched_heading}\": {preview}"
+                    if extra_bits:
+                        return base + " " + " ".join(extra_bits)
+                    return base
+                base = f"Here is the section about '{requested_topic}': {preview}"
+                if extra_bits:
+                    return base + " " + " ".join(extra_bits)
+                return base
+            if current_url:
+                base = f"Here is the requested text from {current_url}: {preview}"
+                if extra_bits:
+                    return base + " " + " ".join(extra_bits)
+                return base
+            base = f"Here is the requested text: {preview}"
+            if extra_bits:
+                return base + " " + " ".join(extra_bits)
+            return base
+        if saved_path:
+            if download_label:
+                return f'Downloaded "{download_label}" to `{saved_path}`.'
+            if download_hint:
+                return f"Downloaded the artifact matching '{download_hint}' to `{saved_path}`."
+            return f'The download was saved to `{saved_path}`.'
+        if reported_title and current_url:
+            return f'The page title at {current_url} is "{reported_title}".'
+        if reported_title:
+            return f'The page title is "{reported_title}".'
+        if summary:
+            return summary
+        return ""
 
     # ------------------------------------------------------------------ #
     # F. Generic summary detection                                        #

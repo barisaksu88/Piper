@@ -7,6 +7,7 @@ from typing import Any
 
 from core.contracts import FileStageKind, StageCard
 from core.file_extensions import CODE_FILE_EXTENSIONS
+from core.file_reference_matcher import file_reference_matches
 
 
 class FileStagePolicy:
@@ -41,6 +42,9 @@ class FileStagePolicy:
     )
     _MUTATION_ACTION_RE = re.compile(
         r"\b(?:creat\w*|writ\w*|rewrit\w*|updat\w*|modif\w*|edit\w*|append\w*|insert\w*|sav\w*|chang\w*|delet\w*|remov\w*|renam\w*|relocat\w*|cop(?:y|ies|ied|ying)|move(?:s|d|ing)?|add inside)\b"
+    )
+    _STRONG_MUTATION_ACTION_RE = re.compile(
+        r"\b(?:creat\w*|writ\w*|rewrit\w*|modif\w*|edit\w*|append\w*|insert\w*|sav\w*|chang\w*|delet\w*|remov\w*|renam\w*|relocat\w*|cop(?:y|ies|ied|ying)|move(?:s|d|ing)?|add inside)\b"
     )
     _CODE_FILE_EXTENSIONS = CODE_FILE_EXTENSIONS  # canonical source: core/file_extensions.py
 
@@ -150,11 +154,24 @@ class FileStagePolicy:
     @classmethod
     def is_file_inspection_stage(cls, stage: StageCard) -> bool:
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "INSPECTION"
         text = cls.stage_intent_text(stage)
         if not text:
             return False
+        explicit_readback = bool(
+            re.search(r"\b(read|show|tell|report|display|return)\b", text)
+            and re.search(r"\b(contents?|text|full text|exact contents|file contents?)\b", text)
+        )
+        if explicit_readback:
+            contextual_only = re.sub(
+                r"\bafter the (?:requested )?(?:removal|change|edit|update|replacement|cleanup)\b|\bafter the [a-z]+ step\b",
+                " ",
+                text,
+            )
+            contextual_only = re.sub(r"\bupdated\b", " ", contextual_only)
+            if not cls._STRONG_MUTATION_ACTION_RE.search(contextual_only):
+                return True
         inspection_re = re.compile(
             r"\b(read|show|tell|report|summarize|display|list|return|inspect|check|search|find|locate|identify|verify|confirm|scan|analy[sz]e|analysis|diagnos\w*|debug|review|audit|root cause|why)\b"
         )
@@ -255,7 +272,7 @@ class FileStagePolicy:
         if not cls.stage_is_file_work(stage):
             return False
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "SCRIPT_LAUNCH"
         raw = cls.stage_goal_success_text(stage)
         text = cls.stage_intent_text(stage)
@@ -304,7 +321,7 @@ class FileStagePolicy:
         if cls.stage_requires_user_approval(stage):
             return True
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "INSPECTION"
         return not cls.stage_is_script_launch_stage(stage) and (
             cls.is_file_inspection_stage(stage)
@@ -330,7 +347,7 @@ class FileStagePolicy:
         if not cls.stage_is_file_work(stage):
             return False
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "CONTENT_EDIT"
         intent = cls.stage_intent_text(stage)
         raw = cls.stage_goal_success_text(stage)
@@ -352,7 +369,7 @@ class FileStagePolicy:
         if not cls.stage_is_file_work(stage):
             return False
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "BROAD_REORG"
         text = cls.stage_intent_text(stage)
         if not text:
@@ -393,7 +410,7 @@ class FileStagePolicy:
         if not cls.stage_is_file_work(stage):
             return False
         kind = cls.stage_kind(stage)
-        if kind:
+        if kind and kind != "UNKNOWN":
             return kind == "DEPENDENCY_RECOVERY"
         text = cls.stage_intent_text(stage)
         return bool(
@@ -754,6 +771,8 @@ class FileStagePolicy:
         for target in cls.stage_lookup_terms(stage):
             target_norm = cls._normalize_lookup_term(target)
             if target_norm and any(target_norm in candidate for candidate in candidate_norms):
+                return True
+            if file_reference_matches(target, path_l):
                 return True
         return False
 

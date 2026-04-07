@@ -23,6 +23,21 @@ _EXCLUSION_CLAUSE_RE = re.compile(
 
 
 class LocalFileOpRuleChecker:
+    _COUNT_WORDS: dict[str, int] = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+    }
+
     def __init__(self, workspace: Path, stage: StageCard, preferred_paths: list[str] | None = None) -> None:
         self.workspace = Path(workspace)
         self.stage = stage
@@ -60,6 +75,8 @@ class LocalFileOpRuleChecker:
             return self._check_ensure_dirs(tool_result)
         if action == "write_text":
             return self._check_write_text(requested_path, tool_result)
+        if action == "append_text":
+            return self._check_append_text(requested_path, tool_result)
         if action == "verify_text_state":
             return self._check_text_state(requested_path, tool_result)
         if action == "write_json":
@@ -125,6 +142,14 @@ class LocalFileOpRuleChecker:
             int(match.group(1))
             for match in re.finditer(r"\b(\d+)\s+(?:entries|entry|files|file|items|item|paths|path)\b", self.stage_eval_text)
         ]
+        counts.extend(
+            self._COUNT_WORDS[word]
+            for word in re.findall(
+                r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+"
+                r"(?:entries|entry|files|file|items|item|paths|path)\b",
+                self.stage_eval_text,
+            )
+        )
         return max(counts) if counts else 0
 
     def _stage_requires_broad_coverage(self) -> bool:
@@ -558,6 +583,13 @@ class LocalFileOpRuleChecker:
         actual_sha1 = hashlib.sha1(path.read_text(encoding="utf-8").encode("utf-8", errors="replace")).hexdigest()
         expected_sha1 = str(tool_result.get("requested_content_sha1", "")).strip()
         if expected_sha1 and actual_sha1 == expected_sha1:
+            scope_partial = self._multi_file_scope_partial(
+                completed_count=1,
+                evidence_files=[requested_path],
+                action_label="file update",
+            )
+            if scope_partial is not None:
+                return scope_partial
             return {
                 "verdict": "VERIFIED",
                 "reason": f"Text file at {requested_path} matches the requested content exactly.",
@@ -566,6 +598,57 @@ class LocalFileOpRuleChecker:
         return {
             "verdict": "FAILED",
             "reason": f"Text file at {requested_path} does not match the requested content.",
+            "evidence_files": [requested_path],
+        }
+
+    def _check_append_text(self, requested_path: str, tool_result: dict[str, Any]) -> FileCheckDecision | None:
+        if not requested_path:
+            return None
+        path = self._resolved(requested_path)
+        if not path.is_file():
+            return {
+                "verdict": "FAILED",
+                "reason": f"Expected text file is missing at {requested_path}.",
+                "evidence_files": [],
+            }
+        actual_text = path.read_text(encoding="utf-8")
+        appended_text = str(tool_result.get("requested_append_text", ""))
+        if not appended_text and str(tool_result.get("requested_append_sha1", "")).strip():
+            return {
+                "verdict": "FAILED",
+                "reason": f"Append evidence for {requested_path} is missing the appended text payload.",
+                "evidence_files": [requested_path],
+            }
+        if appended_text and not actual_text.endswith(appended_text):
+            return {
+                "verdict": "FAILED",
+                "reason": f"Text file at {requested_path} does not end with the requested appended text.",
+                "evidence_files": [requested_path],
+            }
+        previous_sha1 = str(tool_result.get("previous_content_sha1", "")).strip()
+        if previous_sha1:
+            prior_text = actual_text[:-len(appended_text)] if appended_text else actual_text
+            actual_previous_sha1 = hashlib.sha1(prior_text.encode("utf-8", errors="replace")).hexdigest()
+            if actual_previous_sha1 != previous_sha1:
+                return {
+                    "verdict": "FAILED",
+                    "reason": f"Existing content in {requested_path} changed beyond the requested append.",
+                    "evidence_files": [requested_path],
+                }
+        scope_partial = self._multi_file_scope_partial(
+            completed_count=1,
+            evidence_files=[requested_path],
+            action_label="file update",
+        )
+        if scope_partial is not None:
+            return scope_partial
+        if appended_text:
+            reason = f"Text file at {requested_path} preserved its previous content and appended the requested text."
+        else:
+            reason = f"Text file at {requested_path} remained unchanged after the empty append request."
+        return {
+            "verdict": "VERIFIED",
+            "reason": reason,
             "evidence_files": [requested_path],
         }
 
@@ -628,6 +711,13 @@ class LocalFileOpRuleChecker:
                 "evidence_files": [requested_path],
             }
         if actual_data == tool_result.get("requested_data"):
+            scope_partial = self._multi_file_scope_partial(
+                completed_count=1,
+                evidence_files=[requested_path],
+                action_label="file update",
+            )
+            if scope_partial is not None:
+                return scope_partial
             return {
                 "verdict": "VERIFIED",
                 "reason": f"JSON file at {requested_path} matches the requested object exactly.",
@@ -661,6 +751,13 @@ class LocalFileOpRuleChecker:
         if not isinstance(actual_data, dict) or not isinstance(expected_updates, dict):
             return None
         if all(actual_data.get(key) == value for key, value in expected_updates.items()):
+            scope_partial = self._multi_file_scope_partial(
+                completed_count=1,
+                evidence_files=[requested_path],
+                action_label="file update",
+            )
+            if scope_partial is not None:
+                return scope_partial
             return {
                 "verdict": "VERIFIED",
                 "reason": f"JSON file at {requested_path} contains all requested updates.",
@@ -671,6 +768,27 @@ class LocalFileOpRuleChecker:
             "reason": f"JSON file at {requested_path} does not contain all requested updates.",
             "evidence_files": [requested_path],
         }
+
+    def _multi_file_scope_partial(
+        self,
+        *,
+        completed_count: int,
+        evidence_files: list[str],
+        action_label: str,
+    ) -> FileCheckDecision | None:
+        expected_count = self._stage_expected_item_count()
+        scope_count = self._stage_scope_file_count() if self._stage_requires_broad_coverage() else 0
+        target_count = max(expected_count, scope_count)
+        if target_count and completed_count < target_count:
+            return {
+                "verdict": "PARTIAL",
+                "reason": (
+                    f"Verified {completed_count} {action_label}, but the stage scope implies "
+                    f"{target_count} file(s) still need coverage."
+                ),
+                "evidence_files": evidence_files[:6],
+            }
+        return None
 
     def _exclusion_patterns_from_stage(self) -> list[str]:
         """Extract lowercase keyword tokens from exclusion clauses in stage text."""

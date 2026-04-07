@@ -128,7 +128,12 @@ class ConversationCompressor:
             },
         ]
         try:
-            raw = llm.generate(messages, temperature=0.1, cancel_token=cancel_token)
+            raw = llm.generate(
+                messages,
+                temperature=0.1,
+                max_tokens=int(getattr(CFG, "CONVERSATION_SUMMARY_MAX_TOKENS", 500)),
+                cancel_token=cancel_token,
+            )
         except Exception:
             return self._truncate_to_budget(candidate)
         summary = self._normalize_summary(raw)

@@ -53,10 +53,17 @@ def handle_write_text(runtime: Any, payload: dict[str, Any], action: str) -> dic
     }
 
 
-def handle_append_text(runtime: Any, payload: dict[str, Any], action: str) -> dict[str, Any]:
+def handle_append_text(runtime: Any, payload: dict[str, Any], action: str, file_op_error) -> dict[str, Any]:
     full_path, rel_path = resolve_workspace_path(runtime.workspace, payload.get("path"))
-    content = runtime._normalize_text_content(payload.get("content", ""))
-    full_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_content = payload["content"] if "content" in payload else payload.get("text", "")
+    content = runtime._normalize_text_content(raw_content)
+    if not full_path.exists():
+        return file_op_error(f"FILE_OP target not found: {rel_path}", missing_files=[rel_path])
+    if not full_path.is_file():
+        return file_op_error(f"FILE_OP append_text requires a file target: {rel_path}")
+    previous_text = full_path.read_text(encoding="utf-8")
+    if "content" not in payload and "text" not in payload:
+        return file_op_error("FILE_OP append_text requires 'content' or 'text'.")
     with full_path.open("a", encoding="utf-8") as handle:
         handle.write(content)
     return {
@@ -66,7 +73,9 @@ def handle_append_text(runtime: Any, payload: dict[str, Any], action: str) -> di
         "action": action,
         "path": rel_path,
         "requested_path": rel_path,
+        "requested_append_text": content,
         "requested_append_sha1": hashlib.sha1(content.encode("utf-8", errors="replace")).hexdigest(),
+        "previous_content_sha1": hashlib.sha1(previous_text.encode("utf-8", errors="replace")).hexdigest(),
     }
 
 

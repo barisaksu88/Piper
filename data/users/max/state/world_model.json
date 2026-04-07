@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "root_entity_id": "person:user",
+  "nodes": {
+    "person:user": {
+      "id": "person:user",
+      "type": "person",
+      "label": "max",
+      "aliases": [
+        "user",
+        "me",
+        "max"
+      ],
+      "attributes": {},
+      "updated_at": 1775359006
+    },
+    "person:baris": {
+      "id": "person:baris",
+      "type": "person",
+      "label": "Baris",
+      "aliases": [
+        "baris"
+      ],
+      "attributes": {},
+      "updated_at": 1775358459
+    }
+  },
+  "edges": [],
+  "metadata": {
+    "created_at": 1775358423,
+    "updated_at": 1775359006,
+    "migrated_from_legacy_knowledge": false
+  }
+}

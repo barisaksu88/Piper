@@ -4,6 +4,8 @@ import json
 import re
 from typing import Any, Iterable
 
+from config import CFG
+from core.browser_route_utils import build_browser_context_followup_route
 from core.contracts import RouteClarifierResolution, RouteDecision
 from core.file_stage_policy import FileStagePolicy
 from core.route_boundary import RouteClarifierBoundary
@@ -61,13 +63,17 @@ class RouteClarifier:
             return False
         if _task_is_targeted_file_lookup(decision):
             return False
+        if _task_is_computer_use(decision):
+            return False
         text = str(user_msg or "").strip()
         if not text or _PATHISH_RE.search(text):
+            return False
+        history = list(recent_history or [])
+        if build_browser_context_followup_route(text, history) is not None:
             return False
 
         # If there is existing conversation context the user is almost certainly
         # following up — don't demand clarification mid-thread.
-        history = list(recent_history or [])
         if any(str((m or {}).get("role") or "").lower() == "assistant" for m in history):
             return False
 
@@ -80,15 +86,25 @@ class RouteClarifier:
             return True
         return False
 
-    def should_refine_task_route(self, *, decision: RouteDecision, user_msg: str) -> bool:
+    def should_refine_task_route(
+        self,
+        *,
+        decision: RouteDecision,
+        user_msg: str,
+        recent_history: Iterable[dict[str, Any]] | None = None,
+    ) -> bool:
         if str((decision or {}).get("decision") or "").strip().upper() != "TASK":
             return False
         if _task_is_targeted_file_lookup(decision):
+            return False
+        if _task_is_computer_use(decision):
             return False
         text = str(user_msg or "").strip()
         if not text:
             return False
         if _PATHISH_RE.search(text):
+            return False
+        if build_browser_context_followup_route(text, list(recent_history or [])) is not None:
             return False
 
         tokens = re.findall(r"[a-z0-9']+", text.lower())
@@ -120,7 +136,11 @@ class RouteClarifier:
             return proposal_confirmation
         if self.should_force_clarification(decision=decision, user_msg=user_msg, recent_history=recent_history):
             return self._build_clarification_route(user_msg=user_msg)
-        if not self.should_refine_task_route(decision=decision, user_msg=user_msg):
+        if not self.should_refine_task_route(
+            decision=decision,
+            user_msg=user_msg,
+            recent_history=recent_history,
+        ):
             return None
 
         messages = self._build_classifier_messages(
@@ -128,7 +148,12 @@ class RouteClarifier:
             user_msg=user_msg,
             recent_history=recent_history or [],
         )
-        raw = llm.generate(messages, temperature=0.0, cancel_token=cancel_token)
+        raw = llm.generate(
+            messages,
+            temperature=0.0,
+            max_tokens=int(getattr(CFG, "ROUTE_CLARIFIER_MAX_TOKENS", 120)),
+            cancel_token=cancel_token,
+        )
         parsed = RouteClarifierBoundary.validate(raw)
         return self._build_route_from_resolution(parsed, user_msg=user_msg)
 
@@ -316,3 +341,13 @@ def _task_is_targeted_file_lookup(decision: RouteDecision) -> bool:
         or FileStagePolicy.stage_requires_targeted_lookup(stage)
         for stage in stages
     )
+
+
+def _task_is_computer_use(decision: RouteDecision) -> bool:
+    if str((decision or {}).get("decision") or "").strip().upper() != "TASK":
+        return False
+    card = dict((decision or {}).get("card") or {})
+    stages = [dict(stage) for stage in card.get("stages") or [] if isinstance(stage, dict)]
+    if not stages:
+        return False
+    return any(str(stage.get("stage_type") or "").strip().upper() == "COMPUTER_USE" for stage in stages)

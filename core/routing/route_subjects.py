@@ -31,6 +31,8 @@ def extract_event_subject(user_msg: str) -> str:
     date_phrase = extract_date_phrase(text)
     if date_phrase:
         text = re.sub(re.escape(date_phrase), "", text, flags=re.IGNORECASE).strip(" ,.-")
+    text = re.sub(r"(?i)^(?:for|on|by|at)\b\s*", "", text).strip(" ,.-")
+    text = re.sub(r"(?i)^to\s+", "", text).strip(" ,.-")
     text = re.sub(r"(?i)\b(on|by|for|at)\b(?:\s+the)?\s*$", "", text).strip(" ,.-")
     text = re.sub(r"(?i)\b(?:is|am|are|was|were)\s+off\b", "", text).strip(" ,.-")
     text = re.sub(r"\s+", " ", text)

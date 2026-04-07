@@ -35,6 +35,13 @@ _SUSPICIOUS_VALUE_RE = re.compile(
     r"[{}\[\]]",
     re.IGNORECASE,
 )
+_QUESTIONISH_VALUE_RE = re.compile(
+    r"\?|"
+    r"^\s*(?:what|which|who|where|when|why|how|do|does|did|can|could|would|will|shall|should|is|are|am)\b|"
+    r"^[a-z][a-z .'-]{0,30},\s*(?:what|which|who|where|when|why|how|do|does|did|can|could|would|will|shall|should|is|are|am)\b|"
+    r"\b(?:do you|are you|can you|could you|would you|will you|what is yours|what's yours|who are you|what do you know)\b",
+    re.IGNORECASE,
+)
 _SUSPICIOUS_KEY_RE = re.compile(
     r"^\s*(?:i\b|i['’]?m\b|im\b|we\b|we['’]?re\b|were\b)"
     r"|"
@@ -67,6 +74,8 @@ def profile_fact_shape_is_allowed(key: str, value: Any) -> bool:
     if not candidate:
         return False
     if _SUSPICIOUS_VALUE_RE.search(candidate):
+        return False
+    if _QUESTIONISH_VALUE_RE.search(candidate):
         return False
     return True
 

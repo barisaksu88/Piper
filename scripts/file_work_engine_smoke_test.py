@@ -73,6 +73,7 @@ class FileWorkEngineReport:
     classify_content_edit: bool
     classify_structure_prep: bool
     classify_script_launch: bool
+    classify_readback_inspection: bool
 
     # 8. CODE_FILE_EXTENSIONS
     extensions_py_in: bool
@@ -332,7 +333,7 @@ def _test_recovery_hint() -> tuple[bool, bool, bool]:
 # 7. classify
 # ---------------------------------------------------------------------------
 
-def _test_classify() -> tuple[bool, bool, bool, bool]:
+def _test_classify() -> tuple[bool, bool, bool, bool, bool]:
     inspection = _stage("FILE_WORK", "Read and inspect all files to diagnose the issue", "diagnosis complete")
     ok_inspection = FileWorkEngine.classify(inspection) == "INSPECTION"
 
@@ -361,7 +362,14 @@ def _test_classify() -> tuple[bool, bool, bool, bool]:
     }
     ok_script = FileWorkEngine.classify(script) in {"SCRIPT_LAUNCH", "UNKNOWN"}
 
-    return ok_inspection, ok_content_edit, ok_structure, ok_script
+    readback = _stage(
+        "FILE_WORK",
+        'Read the updated exact contents of the workspace file matching "grocery list".',
+        'A matching file is identified and its exact updated contents are read once after the requested removal.',
+    )
+    ok_readback = FileWorkEngine.classify(readback) == "INSPECTION"
+
+    return ok_inspection, ok_content_edit, ok_structure, ok_script, ok_readback
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +393,7 @@ def run_smoke() -> FileWorkEngineReport:
     cap1, cap2, cap3, cap4 = _test_capture_exact_read()
     b1, b2, b3, b4, b5, b6, b7 = _test_should_block()
     h1, h2, h3 = _test_recovery_hint()
-    cl1, cl2, cl3, cl4 = _test_classify()
+    cl1, cl2, cl3, cl4, cl5 = _test_classify()
     ex1, ex2 = _test_extensions()
 
     success = all([
@@ -395,7 +403,7 @@ def run_smoke() -> FileWorkEngineReport:
         cap1, cap2, cap3, cap4,
         b1, b2, b3, b4, b5, b6, b7,
         h1, h2, h3,
-        cl1, cl2, cl3, cl4,
+        cl1, cl2, cl3, cl4, cl5,
         ex1, ex2,
     ])
 
@@ -427,6 +435,7 @@ def run_smoke() -> FileWorkEngineReport:
         classify_content_edit=cl2,
         classify_structure_prep=cl3,
         classify_script_launch=cl4,
+        classify_readback_inspection=cl5,
         extensions_py_in=ex1,
         extensions_pdf_not_in=ex2,
         success=success,

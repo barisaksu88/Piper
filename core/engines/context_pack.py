@@ -101,6 +101,7 @@ class ContextPackRenderer:
         return PromptContext(
             instructions=pack.instructions,
             style_overlay=pack.style_overlay or "",
+            active_user_block=pack.active_user_block or "",
             knowledge=dict(pack.knowledge),
             world_state=pack.world_state,
             situational_state=pack.situational_state,
@@ -185,6 +186,7 @@ class ContextPackEngine:
     document_memory: Any
     vision_session_memory: Any | None = None
     transient_state_mgr: Any | None = None
+    user_runtime: Any | None = None
     renderer: ContextPackRenderer = field(default_factory=ContextPackRenderer)
 
     def build_persona_pack(
@@ -197,6 +199,12 @@ class ContextPackEngine:
         document_limit: int = 5,
     ) -> PersonaContextPack:
         instructions = self.instruction_loader.load()
+        active_user_block = ""
+        if self.user_runtime is not None and hasattr(self.user_runtime, "render_active_user_block"):
+            try:
+                active_user_block = str(self.user_runtime.render_active_user_block() or "").strip()
+            except Exception:
+                active_user_block = ""
         situational_state = ""
         intent_state = ""
         if knowledge_enabled and self.transient_state_mgr is not None:
@@ -285,6 +293,7 @@ class ContextPackEngine:
             knowledge_enabled=bool(knowledge_enabled),
             instructions=instructions,
             style_overlay=style_overlay or "",
+            active_user_block=active_user_block,
             knowledge=knowledge,
             world_state=world_state,
             situational_state=situational_state,
@@ -409,6 +418,7 @@ class ContextPackEngine:
         exact_file_read_answer = SummaryEngine.extract_exact_file_read(scratchpad)
         file_lookup_answer = SummaryEngine.extract_file_lookup(scratchpad)
         verified_file_work_answer = SummaryEngine.extract_verified_result(scratchpad)
+        verified_browser_answer = SummaryEngine.extract_verified_browser_answer(scratchpad)
         analysis_report_answer = (
             proposal_answer
             if stage and FileStagePolicy.stage_requires_analysis_report(stage)
@@ -439,6 +449,7 @@ class ContextPackEngine:
             exact_file_read_answer=exact_file_read_answer,
             file_lookup_answer=file_lookup_answer,
             verified_file_work_answer=verified_file_work_answer,
+            verified_browser_answer=verified_browser_answer,
             latest_stage_requires_analysis_report=latest_stage_requires_analysis_report,
             latest_stage_is_targeted_read=latest_stage_is_targeted_read,
             latest_stage_is_targeted_lookup=latest_stage_is_targeted_lookup,
@@ -482,6 +493,8 @@ class ContextPackEngine:
         direct_answer = ""
         if runtime.outcome_paused and runtime.proposal_answer:
             direct_answer = runtime.proposal_answer
+        elif runtime.outcome_failed:
+            direct_answer = self._build_dependency_failure_direct_answer(runtime)
         elif not runtime.outcome_failed and not runtime.outcome_paused and not reporter_just_ran:
             if runtime.analysis_report_answer:
                 direct_answer = runtime.analysis_report_answer
@@ -494,10 +507,36 @@ class ContextPackEngine:
                 # produce a full summary that covers every stage.  The fast-path
                 # only covers single-stage, single-file completions reliably.
                 direct_answer = runtime.verified_file_work_answer
+            elif runtime.verified_browser_answer and runtime.outcome_block.count("=== STAGE") <= 1:
+                direct_answer = runtime.verified_browser_answer
 
         return PersonaDirectivePack(
             tail_system_blocks=tail_system_blocks,
             direct_answer=direct_answer,
+        )
+
+    @staticmethod
+    def _build_dependency_failure_direct_answer(runtime: PersonaRuntimePack) -> str:
+        outcome_text = str(runtime.outcome_block or "").strip()
+        if not outcome_text:
+            return ""
+        match = re.search(
+            r"ACTIVE_(?:TASK|EVENT)_DEPENDENCY:\s*Cannot\s+(?P<verb>delete|move)\s+'(?P<path>[^']+)':\s*"
+            r"referenced by active (?P<kind>task|event) '(?P<name>[^']+)'\.",
+            outcome_text,
+            re.IGNORECASE,
+        )
+        if not match:
+            return ""
+        verb = str(match.group("verb") or "").strip().lower() or "change"
+        path = str(match.group("path") or "").strip()
+        kind = str(match.group("kind") or "").strip().lower() or "item"
+        name = str(match.group("name") or "").strip()
+        if not path or not name:
+            return ""
+        return (
+            f"I couldn't {verb} `{path}` because it's referenced by the active {kind} `{name}`. "
+            f"Close or update that {kind} first, or tell me to override it explicitly."
         )
 
     # latest_stage_entries, extract_exact_file_read_answer, extract_file_lookup_answer,

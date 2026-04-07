@@ -31,6 +31,7 @@ class PromptContextService:
     document_memory: DocumentMemoryManager
     vision_session_memory: VisionSessionMemory | None = None
     transient_state_mgr: Any | None = None
+    user_runtime: Any | None = None
     engine: ContextPackEngine = field(init=False)
     state_mutation_engine: StateMutationEngine = field(init=False)
 
@@ -44,6 +45,7 @@ class PromptContextService:
             brain=self.brain,
             document_memory=self.document_memory,
             vision_session_memory=self.vision_session_memory,
+            user_runtime=self.user_runtime,
         )
         self.state_mutation_engine = StateMutationEngine()
 

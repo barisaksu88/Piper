@@ -4,10 +4,22 @@
 
 - Windows is the primary runtime.
 - `start_piper.bat` should use `.venv` when it exists.
+- The Windows repo `.venv` now has `playwright` plus Chromium browser binaries installed for `COMPUTER_USE` live-browser runs.
+- WSL browser validation should stay in `.venv-wsl`; do not recreate or repurpose the Windows `.venv` from WSL.
+- WSL Playwright validation expects rootless NSS/NSPR libs under `.venv-wsl/playwright-libs/usr/lib/x86_64-linux-gnu`; `ComputerUseEngine._prepare_playwright_linux_lib_path()` loads that path automatically.
 - Current active model is `Qwen_Qwen3.5-9B-Q6_K.gguf`.
 - The local `llama.cpp` runtime under `runtime/llama.cpp` is the intended server path.
 - Qwen/llama.cpp persona payloads must keep the only `system` message at the beginning; `[LATEST_RUNTIME_CONTEXT]` belongs inside that first system prompt, not as a trailing chat message.
 - `[FINAL_STAGE_OUTCOME]` must be built only from real scratchpad outcome entries that start with `=== STAGE N OUTCOME ===`; exact file reads must not leak in just because the file text contains the word `OUTCOME`.
+- Windows app startup should not eagerly import microphone/audio dependencies before the viewport exists.
+  - `app.build_controller()` should stay lightweight.
+  - `tools/stt.py` and `ui/controller_actions.py` now load STT only when the mic button is actually used.
+- Windows boot should not wait for full vector-memory warm-up or TTS warm-up before the UI becomes interactive.
+  - `memory/brain.py` now brings up fallback memory immediately and warms Chroma/vector memory in the background.
+  - `app.py` now runs `tts.warm_up()` as a background boot task instead of a blocking readiness gate.
+- Windows TTS now defaults to the native system-speech backend when `TTS_BACKEND = "auto"`.
+  - Piper should speak again even if Kokoro is slow or unstable on this machine.
+  - `config.py` can still force `TTS_BACKEND = "kokoro"` later if Kokoro is re-hardened.
 
 ## Tooling
 
@@ -17,6 +29,24 @@
 - Local checker verification now covers directory creation, file writes, JSON writes/updates, moves, copies, and deletes from actual workspace state.
 - Non-mutating file stages now prefer `FILE_OP` reads/lists and no longer need to trust `RUN_CODE` narration for directory inspection.
 - Explicit third-party import errors in `FILE_WORK` can now temporarily unlock `INSTALL_PACKAGE` for the current stage only, and the activity log shows when Piper is installing a package.
+- `COMPUTER_USE` now supports:
+  - `file://` fixture pages
+  - localhost Playwright pages (`127.0.0.1`, `localhost`)
+  - a small live-site pilot allowlist (`example.com`, `iana.org`, `apache.org`, `w3.org`, `python.org`, `rfc-editor.org`, `localhost`, `127.0.0.1`)
+- Bare-domain browser requests like `open example.com in the browser` now normalize to `https://example.com`; localhost/IP inputs normalize to `http://...`.
+- Live-site browser requests outside the pilot allowlist are blocked honestly before navigation instead of failing deep inside the browser step loop.
+- Playwright browser sessions are now suspended at the end of each turn on the worker thread that used them, then rehydrated from the last verified browser state on the next turn if needed. This avoids cross-thread browser reuse and noisy shutdown `EPIPE` errors.
+- Live Playwright harnesses that boot Piper should be run sequentially, not in parallel, because overlapping runs can race the shared llama-server lifecycle.
+- Vague browser follow-ups such as `what else is there`, `anything else?`, and short topical replies like `general info` now stay in `COMPUTER_USE` when recent browser context is active instead of degrading into clarification chat or `FILE_WORK`.
+- Browser follow-ups that continue a page-specific docs conversation now stay pinned to the active verified page URL rather than drifting to a different same-family site.
+- `COMPUTER_USE` download stages now normalize bare element ids like `quarterly-report-link` back into real selectors, auto-open the stage `start_url` before the first non-`goto_url` browser action, and refuse to treat obvious `.html` navigation links as downloaded artifacts.
+- When a valid Playwright artifact link opens inline instead of emitting a browser `download` event, the engine now falls back to a same-scope HTTP fetch using the located link URL and current browser cookies.
+- Current passing real-site pilot pages:
+  - `https://iana.org/domains/reserved`
+  - `https://apache.org/licenses/LICENSE-2.0`
+  - `https://www.w3.org/TR/PNG/`
+  - `https://docs.python.org/3/license.html`
+  - `https://www.rfc-editor.org/rfc/rfc2606.html`
 
 ## Memory
 
@@ -455,3 +485,96 @@
     - simple acknowledgements no longer leak `systems indicate no further mutations were required`
   - Focused green:
     - `python3 scripts/persona_output_sanitizer_smoke_test.py`
+- Browser-first `COMPUTER_USE` now handles more natural read prompts and short page follow-ups.
+  - Green live prompts:
+    - `What's the title of example.com?`
+    - `What's the main heading on example.com?`
+    - `Open iana.org/domains/reserved in the browser and tell me the main heading.` -> `what else is there`
+  - Expected behavior:
+    - explicit browser requests are normalized in `route_normalizer.py`
+    - short page follow-ups are resolved in `FollowupResolutionEngine`, not router normalization
+    - all three stay in `TASK -> MANAGER -> COMPUTER_USE`
+    - short page follow-ups reuse `[LATEST_RUNTIME_CONTEXT]` and the last verified browser URL instead of falling back to generic chat clarification
+    - generic page-text follow-ups answer from verified DOM text, not the page title
+  - Focused green:
+    - `python3 scripts/computer_use_route_normalizer_smoke_test.py --json`
+    - `python3 scripts/followup_resolution_engine_smoke_test.py`
+    - `./.venv-wsl/bin/python scripts/computer_use_browser_followup_harness_smoke_test.py --json --timeout 120`
+    - `./.venv-wsl/bin/python scripts/computer_use_playwright_example_alt_prompt_harness_smoke_test.py --json --timeout 120`
+- Topic-aware browser extraction is now deterministic across both local fixtures and Playwright pages.
+  - Green prompts:
+    - `Open .../topic_sections.html in the browser and tell me the page title.` -> `general info`
+    - `warranty disclaimer`
+    - `liability limitation`
+    - `Open docs.python.org/3/license.html in the browser and tell me the page title.` -> `general info`
+  - Expected behavior:
+    - `requested_topic` is carried on the `COMPUTER_USE` stage card and injected into `BROWSER_OP extract_text` at runtime
+    - the browser engine ranks heading/section candidates and returns the best verified excerpt instead of dumping raw `body` text
+    - the verifier treats topic extraction as a first-class checked outcome
+    - the verified browser answer now says `Here is the section about 'topic' ...`, which keeps later follow-up routing grounded in the same page/topic
+  - Focused green:
+    - `python3 scripts/computer_use_engine_smoke_test.py --json`
+    - `./.venv/Scripts/python.exe scripts/computer_use_playwright_localhost_topic_followup_harness_smoke_test.py --json --timeout 120`
+    - `./.venv/Scripts/python.exe scripts/computer_use_python_docs_followup_harness_smoke_test.py --json --timeout 120`
+- Browser download hints now resolve semantically across both localhost fixtures and allowlisted real sites.
+  - Green prompts:
+    - `Open https://www.rfc-editor.org/rfc/rfc2606.html in the browser and download the text version into browser_downloads_real.`
+    - `Open .../download_hub.html in the browser and download the quarterly report into browser_downloads_nav.`
+  - Expected behavior:
+    - pure download prompts stay download-only unless the user explicitly asked to extract/read something too
+    - Playwright inventory surfaces real visible links like `TEXT`, `PDF`, and hub-page artifact links instead of head/meta noise
+    - download target matching uses semantic hint scoring on text, href, and suffixes, so phrases like `text version` can resolve to `.txt`
+    - verifier uses the same semantic idea when deciding whether the saved artifact satisfies the request, so successful downloads do not linger as false `PARTIAL`
+    - checksum artifacts are de-prioritized unless the user explicitly asked for a checksum/signature
+  - Focused green:
+    - `python3 scripts/computer_use_navigation_download_harness_smoke_test.py --json --timeout 120`
+    - `./.venv-wsl/bin/python scripts/computer_use_playwright_localhost_navigation_download_harness_smoke_test.py --json --timeout 120`
+    - `./.venv-wsl/bin/python scripts/computer_use_playwright_rfc_download_harness_smoke_test.py --json --timeout 150`
+    - `./.venv-wsl/bin/python scripts/computer_use_playwright_real_site_pilot_harness_smoke_test.py --json --timeout 120`
+- Multi-user groundwork now keeps the owner on the legacy root silo while standard users get isolated silos.
+  - Expected behavior:
+    - `admin_baris` resolves to the root `data/` state and keeps Baris's existing memory intact.
+    - newly switched standard users are created under `data/users/<user_id>/`.
+    - `/users`, `/user`, and `/whoami` work in both the UI/controller flow and the harness command path.
+    - document ingestion/index state follows the active user instead of staying global.
+  - Focused green:
+    - `python3 scripts/user_runtime_smoke_test.py --json`
+- Owner unlock is now the privacy boundary layered on top of the multi-user foundation.
+  - Expected behavior:
+    - per-user style filenames persist in `data/users.json` and reload automatically when that user becomes active again.
+    - `/adminpass <password>` stores a hashed owner password for `admin_baris`.
+    - once an admin password exists, typed `/user admin_baris` prompts for a password instead of switching immediately.
+    - password attempts are consumed by the UI/harness auth flow and do not get appended to chat history.
+    - after a successful owner unlock, Baris's saved style and private memory/session are rebound together.
+    - if Piper is restarted while Baris was active, the next boot relocks the owner session and falls back to the `unknown` public speaker.
+  - Focused green:
+    - `python3 scripts/user_runtime_smoke_test.py --json`
+- Public-speaker identification now starts from `unknown` and mirrors durable person facts into Baris's people memory.
+  - Expected behavior:
+    - runtime boot normalizes the active public speaker to `unknown` instead of trusting the previous public user.
+    - typed self-identification like `I'm Max` can switch the active public speaker before the turn is processed.
+    - relation/descriptive phrases like `I am his friend, do you know Baris?` do not create synthetic users or switch speaker identity.
+    - typed `I'm Baris` requests the owner-password flow when an admin password is configured instead of silently unlocking admin memory.
+    - durable public-speaker facts saved into that speaker's world model are mirrored into Baris's admin world graph under `person:<user_id>`.
+    - explicit relation hints like `Baris's friend` create a matching relation edge in Baris's world graph.
+    - prompt context for `unknown` or incomplete public profiles asks at most one short natural identity/relationship question.
+  - Focused green:
+    - `python3 scripts/user_runtime_smoke_test.py --json`
+- World-model scrubbing now rejects question-shaped profile values as malformed memory.
+  - Expected behavior:
+    - values like `max, what is yours` are removed from both `world_model.json` and the legacy `knowledge.json` mirror.
+    - question/dialogue fragments do not survive as durable traits such as `personality_trait`.
+  - Focused green:
+    - `python3 scripts/world_model_suspicious_fact_scrub_smoke_test.py`
+- Startup now keeps the boot UI visible briefly even when boot completes almost immediately.
+  - Expected behavior:
+    - the boot group remains visible for at least `CFG.BOOT_SCREEN_MIN_VISIBLE_S` before `boot_ready` switches the UI into normal status mode.
+    - the fast-start path no longer skips the boot screen entirely just because background warm-up finishes before the first few frames.
+- UI-side style/TTS loads now inherit the active style sheet and config consistently.
+  - Expected behavior:
+    - active-user switches, `/style`, new-session reset, and vision-query TTS all reuse the same style state loader instead of ad hoc `af_heart` / `0.9` fallbacks.
+    - if Windows system speech is selected via `TTS_BACKEND=auto`, `af_*` / `bf_*` Kokoro-style voice ids map to the closest installed female/male SAPI voice when possible.
+- Windows `TTS_BACKEND=auto` once again prefers Kokoro when the Kokoro assets are present.
+  - Expected behavior:
+    - active style voices like `af_bella` from `quinn.style` are spoken through Kokoro rather than being silently flattened to the Windows SAPI voice.
+    - the Windows Kokoro path does not depend on `sounddevice`; playback uses a temporary WAV + `winsound` instead.

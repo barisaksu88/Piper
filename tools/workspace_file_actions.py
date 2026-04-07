@@ -47,7 +47,7 @@ def execute_file_op(runtime: Any, payload: dict[str, Any], action: str, file_op_
     if action == "write_text":
         return handle_write_text(runtime, payload, action)
     if action == "append_text":
-        return handle_append_text(runtime, payload, action)
+        return handle_append_text(runtime, payload, action, file_op_error)
     if action == "write_json":
         return handle_write_json(runtime, payload, action)
     if action == "update_json":

@@ -12,7 +12,9 @@ from pathlib import Path
 
 from core.runtime_control import CancellationToken, OperationCancelled
 # 1. Search Library
-# FIX: Updated to use the modern package name to prevent install errors.
+# Import lazily/fault-tolerantly so test harnesses can patch perform_search/DDGS
+# without requiring the live DuckDuckGo backend in every environment.
+_DDGS_IMPORT_ERROR = ""
 try:
     from duckduckgo_search import DDGS
 except ImportError:
@@ -20,7 +22,8 @@ except ImportError:
     try:
         from ddgs import DDGS
     except ImportError:
-        raise ImportError("Please install: pip install duckduckgo-search")
+        DDGS = None
+        _DDGS_IMPORT_ERROR = "Please install: pip install duckduckgo-search"
 
 from config import CFG, Config
 # Daily facts removed
@@ -92,6 +95,8 @@ def _run_ddgs_query(
     cancel_token: CancellationToken | None = None,
 ) -> list[dict]:
     _raise_if_cancelled(cancel_token)
+    if DDGS is None:
+        raise RuntimeError(_DDGS_IMPORT_ERROR or "DuckDuckGo search backend is unavailable.")
     with DDGS() as ddgs:
         if mode == "news":
             return list(ddgs.news(query, max_results=CFG.SEARCH_MAX_RESULTS))

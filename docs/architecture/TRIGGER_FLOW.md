@@ -71,6 +71,25 @@ phase_route  ──────────────────────�
 
 ---
 
+### Runtime Ownership Note
+
+Piper is Windows-first at runtime. The repo-root `.venv` is part of that Windows
+runtime surface and must remain a Windows-created virtualenv.
+
+- Safe: run Piper from PowerShell / `cmd.exe` using `C:\Projects\Piper\.venv`
+- Safe: use WSL for analysis, repo reads, code edits, and harness work that does not
+  replace the Windows runtime env
+- Safe: if WSL needs its own Python packages, create a separate env such as
+  `.venv-wsl`
+- Unsafe: recreating repo-root `.venv` from WSL (`/usr/bin/python... -m venv .venv`)
+  because it rewrites `.venv/pyvenv.cfg` to Linux paths and breaks PowerShell launches
+  with `No Python at '/usr/bin\\python.exe'`
+
+This is a runtime ownership rule, not part of the Route → Plan → Act → Speak turn
+graph, but it is mandatory for keeping the shipped Windows entrypoint working.
+
+---
+
 ## 2. Route Phase (phase_route)
 
 **Triggered by:** every user turn, and on [ROUTER] / auto-reroute loops
@@ -106,8 +125,9 @@ The router receives a filtered history block:
      - **Explicit-scope request** (user text contains web/internet/online/latest/news/current OR workspace/file/folder keywords): the normalizer commits the route directly — web keywords → `SEARCH`, workspace keywords → `TASK FILE_WORK`. The router's `confidence` and `source_scope` fields are used only as tie-breakers when scope is already explicit.
      - **Ambiguous-scope request** (verb patterns like "search for X", "look for X", "find X" with no explicit scope marker): the normalizer **always** forces a web-vs-workspace clarification pause, regardless of the router's `confidence` field. The LLM over-assigns `confidence: high` for these patterns; the normalizer is the authoritative gate. The router's `question_if_uncertain` value is used as the clarification question when present.
      - Lookup-source **follow-up resolution** (`_normalize_lookup_source_choice_followup`): when the previous turn was a clarification pause, a short reply (≤ 6 normalised tokens, e.g. "web pls", "workspace files") is interpreted as a source choice and the original query is carried forward. A longer reply is treated as a new intent and falls through to normal routing.
+     - Explicit browser requests with a host/URL stay here too. `normalize_route_decision()` owns first-turn `COMPUTER_USE` detection like `Open example.com in the browser...` or `What's the title of example.com?`
      - Validated by `RouterBoundary.validate()` in `core/route_boundary.py`.
-  2. `_resolve_followup_route_with_llm()` — resolves ambiguous continuation routes (pronoun references, affirmative confirmations, short follow-ups) via `FollowupResolutionEngine`
+  2. `_resolve_followup_route_with_llm()` — resolves ambiguous continuation routes (pronoun references, affirmative confirmations, short follow-ups, active browser-page continuations) via `FollowupResolutionEngine`
   3. `_refine_ambiguous_task_route_with_llm()` — converts vague/underspecified tasks into clarification pauses via `RouteClarifier`
   4. `apply_route_skill_layer()` — overlays skill selection when applicable
 
@@ -388,6 +408,7 @@ ChatPipeline → TagScrubber → TTS (lazy start) → UI render
 - Affirmative confirmations of system-initiated offers ("Yes", "Yes please", "Go ahead", "Sure") — detected via `_AFFIRMATIVE_CONFIRM_RE` + `_OFFER_PHRASE_RE` on prior assistant turn
 - Short readonly follow-ups ("Any tasks?")
 - Ambiguous memory follow-ups
+- Active browser-page follow-ups grounded in `[LATEST_RUNTIME_CONTEXT]` ("what else is there", "What's the title?", "What's the main heading?") by reconstructing a new `COMPUTER_USE` task card for the last verified page instead of relying on router heuristics
 
 ### Does NOT resolve:
 
@@ -485,6 +506,10 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 - Validation failure at any LLM output boundary handled with ad hoc recovery logic — every boundary must map to exactly one defined fallback, declared in the validator, not scattered across calling code (see §13.5 fallback table)
 - Reporter turn restarting the search topic as a new speaker — the reporter turn must extend, sharpen, or correct the first-pass answer, not re-introduce the topic from scratch. The only exception is when the first-pass answer was materially wrong; in that case the reporter must explicitly acknowledge the correction rather than quietly contradict. Piper must feel like one mind extending a thought, not two voices swapping turns. Enforced via `[SEARCH_REPORT_RULE]` in `core/engines/context_pack.py`.
 - Router injecting a TASK_EVENT_WORK stage as a precondition for FILE_WORK based on task or event name matches to file paths — cross-domain dependency detection is handled exclusively by `FileWorkEngine._check_active_dependency` at executor level (§13.17). The router must never conflate calendar/task state with filesystem locks. When `_check_active_dependency` blocks an operation and persona reports the dependency to the user, a follow-up user message ("yes", "proceed", "ok") must be routed to FILE_WORK directly — not interpreted as authorization to auto-resolve the dependency via a TASK_EVENT_WORK stage. Enforced by staging rules 10–11 in `data/prompts/secretary.txt`.
+- Repo-root `.venv` recreated from WSL — this replaces Piper's Windows runtime env
+  with a Linux one, rewrites `.venv/pyvenv.cfg` to `/usr/bin/...`, and breaks
+  PowerShell `python app.py` launches. Use a separate WSL env such as `.venv-wsl`
+  instead.
 
 ---
 
@@ -920,7 +945,7 @@ A file could be deleted while an active Task held a reference to it. `phase_mana
 
 **Design:**
 
-`OperationalStateService.find_references(path)` scans all active tasks and events for substring matches on the given path. Returns a list of conflict dicts with a `kind` field.
+`OperationalStateService.find_references(path)` scans all active tasks and events for normalized file-reference matches on the given path. The matching semantics live in `core/file_reference_matcher.py`, so future changes to alias/typo/path matching should be made there instead of re-implementing them in `find_references()`. It still catches literal path/basename substrings, but also accepts extension-aware close matches for humanised filename mentions such as `review Charly TXT` matching `charlie.txt`. Returns a list of conflict dicts with a `kind` field.
 
 `FileWorkEngine._check_active_dependency(tool_tag, operational_state_service)` extracts target path(s) from DELETE or MOVE tool tags and calls `find_references`. Returns a `FileWorkBlock(blocked=True, fatal=True, reason="ACTIVE_TASK_DEPENDENCY: ...")` on conflict.
 
@@ -928,5 +953,5 @@ A file could be deleted while an active Task held a reference to it. `phase_mana
 
 **No automatic resolution:** When `_check_active_dependency` blocks an operation, the persona reports the dependency to the user and stops. The system never automatically closes or updates the referenced task/event. The user must decide: either manage the event/task themselves and retry the file operation, or explicitly ask Piper to do both in the same request. If the user follows up with a short affirmative ("yes", "proceed"), the router re-routes to FILE_WORK only — it does not create a TASK_EVENT_WORK precondition stage. See §12 and staging rules 10–11 in `data/prompts/secretary.txt`.
 
-**Files:** `core/operational_state_service.py` (`find_references`); `core/engines/file_work.py` (`_check_active_dependency`, extended `should_block`); `core/contracts.py` (`FileWorkBlock.fatal`); `core/executor.py` (fatal-block path, new init params); `core/orchestrator_phases.py` (wire params to StageExecutor); `data/prompts/secretary.txt` (staging rules 10–11 enforce no-auto-resolution at router level)
+**Files:** `core/file_reference_matcher.py` (shared normalized file-reference matcher); `core/operational_state_service.py` (`find_references`); `core/engines/file_work.py` (`_check_active_dependency`, extended `should_block`); `core/contracts.py` (`FileWorkBlock.fatal`); `core/executor.py` (fatal-block path, new init params); `core/orchestrator_phases.py` (wire params to StageExecutor); `data/prompts/secretary.txt` (staging rules 10–11 enforce no-auto-resolution at router level)
 

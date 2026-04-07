@@ -25,6 +25,13 @@ from core.routing.route_patterns import (
     COMPLETION_HINT_RE,
     CORRECTION_ONLY_HINT_RE,
     DATE_HINT_RE,
+    DIRECT_FILE_COPY_RE,
+    DIRECT_FILE_CREATE_TEXT_RE,
+    DIRECT_FILE_DELETE_RE,
+    DIRECT_FILE_MOVE_RE,
+    DIRECT_FILE_READ_RE,
+    DIRECT_FILE_REMOVE_TEXT_RE,
+    DIRECT_FILE_REPLACE_TEXT_RE,
     DIRECT_EVENT_ASSERTION_RE,
     EVENT_INSPECTION_HINT_RE,
     EVENT_WORD_RE,
@@ -248,10 +255,50 @@ _COMPLETION_IRREGULAR_TOKEN_MAP = {
     "washing": "wash",
     "went": "go",
 }
+_QUOTED_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_FILE_WORK_ACTION_OBJECT_RE = re.compile(
+    r"(?i)\b(?:create|write|make|edit|append|insert|replace|read|show|display|delete|remove|move|copy|rename|update)\s+"
+    r"(?:the\s+|a\s+|an\s+|existing\s+|new\s+|current\s+|workspace\s+|text\s+){0,4}"
+    r"(?:file|folder|directory|path|workspace|document)\b"
+)
+_FILE_WORK_PATH_ACTION_RE = re.compile(
+    r"(?i)\b(?:edit|append|insert|replace|read|delete|remove|move|copy|rename|update)\s+"
+    r"[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,8}\b"
+)
 
 
 @dataclass(frozen=True)
 class StateMutationEngine:
+    @staticmethod
+    def _strip_quoted_literals(text: str) -> str:
+        return _QUOTED_LITERAL_RE.sub(" ", str(text or ""))
+
+    @staticmethod
+    def _looks_like_file_work_request(
+        *,
+        user_msg: str,
+        stages: Sequence[StageCard] | None = None,
+    ) -> bool:
+        if any(str((stage or {}).get("stage_type") or "").strip().upper() == "FILE_WORK" for stage in (stages or [])):
+            return True
+        text = str(user_msg or "").strip()
+        if not text:
+            return False
+        if any(
+            pattern.match(text)
+            for pattern in (
+                DIRECT_FILE_CREATE_TEXT_RE,
+                DIRECT_FILE_COPY_RE,
+                DIRECT_FILE_MOVE_RE,
+                DIRECT_FILE_READ_RE,
+                DIRECT_FILE_DELETE_RE,
+                DIRECT_FILE_REMOVE_TEXT_RE,
+                DIRECT_FILE_REPLACE_TEXT_RE,
+            )
+        ):
+            return True
+        return bool(_FILE_WORK_ACTION_OBJECT_RE.search(text) or _FILE_WORK_PATH_ACTION_RE.search(text))
+
     @staticmethod
     def build_mutation_request(
         *,
@@ -645,6 +692,13 @@ class StateMutationEngine:
         if retry_replay is not None:
             return retry_replay
 
+        reminder_override = self._normalize_reminder_task_override_followup(
+            user_msg=text,
+            recent_history=history,
+        )
+        if reminder_override is not None:
+            return reminder_override
+
         chat_followup = self._normalize_chat_task_event_followup(
             decision=decision,
             user_msg=text,
@@ -860,7 +914,13 @@ class StateMutationEngine:
             return None
 
         text = str(user_msg or "").strip()
-        if not text or not COMPLETION_HINT_RE.search(text) or CANCEL_HINT_RE.search(text):
+        completion_text = self._strip_quoted_literals(text)
+        if (
+            not text
+            or self._looks_like_file_work_request(user_msg=text)
+            or not COMPLETION_HINT_RE.search(completion_text)
+            or CANCEL_HINT_RE.search(completion_text)
+        ):
             return None
 
         runtime = extract_latest_runtime_context_fields(recent_history)
@@ -1152,44 +1212,9 @@ class StateMutationEngine:
         date_phrase = extract_date_phrase(text)
         if date_phrase:
             resolved_date = resolve_date_phrase(date_phrase) or date_phrase
-            stage = {
-                "stage_goal": f"Schedule the event '{subject}' for {resolved_date}",
-                "stage_type": "TASK_EVENT_WORK",
-                "success_condition": "Event is created once with the requested date",
-                "allowed_tools": ["ADD_EVENT"],
-                "mutation": self.build_mutation_request(
-                    state_owner="task_event",
-                    entity_kind="event",
-                    action="schedule",
-                    target=subject,
-                    scheduled_date=resolved_date,
-                ),
-            }
-            normalized = dict(decision)
-            new_card = dict(card)
-            new_card["goal"] = f"Add an event for {subject} on {resolved_date}"
-            new_card["stages"] = [stage]
-            normalized["card"] = new_card
-            return normalized
+            return self._build_task_event_schedule_card(subject, scheduled_date=resolved_date)
 
-        stage = {
-            "stage_goal": f"Create a task to {subject}",
-            "stage_type": "TASK_EVENT_WORK",
-            "success_condition": "Task is created once with the requested details",
-            "allowed_tools": ["ADD_TASK"],
-            "mutation": self.build_mutation_request(
-                state_owner="task_event",
-                entity_kind="task",
-                action="add",
-                target=subject,
-            ),
-        }
-        normalized = dict(decision)
-        new_card = dict(card)
-        new_card["goal"] = f"Add the task '{subject}'"
-        new_card["stages"] = [stage]
-        normalized["card"] = new_card
-        return normalized
+        return self._build_task_event_add_card(subject)
 
     def classify_task_event_followup(
         self,
@@ -1201,6 +1226,10 @@ class StateMutationEngine:
         text = str(user_msg or "").strip()
         if not text:
             return StateMutationIntent()
+        if self._looks_like_file_work_request(user_msg=text, stages=stages):
+            return StateMutationIntent()
+
+        completion_text = self._strip_quoted_literals(text)
 
         stage_blob = " ".join(
             f"{stage.get('stage_goal', '')} {stage.get('success_condition', '')}"
@@ -1209,7 +1238,7 @@ class StateMutationEngine:
         context_blob = " ".join(str(item) for item in (card.get("context") or []))
         combined = " ".join(filter(None, [text, str(card.get("goal", "")), stage_blob, context_blob]))
 
-        if COMPLETION_HINT_RE.search(text) and not CANCEL_HINT_RE.search(text):
+        if COMPLETION_HINT_RE.search(completion_text) and not CANCEL_HINT_RE.search(completion_text):
             subject = extract_reference_subject(text, card, stages)
             if not subject:
                 return StateMutationIntent()
@@ -1878,6 +1907,61 @@ class StateMutationEngine:
         return normalized in _GENERIC_REFERENCE_SUBJECTS
 
     @staticmethod
+    def _build_task_event_add_card(subject: str) -> RouteDecision:
+        mutation = StateMutationEngine.build_mutation_request(
+            state_owner="task_event",
+            entity_kind="task",
+            action="add",
+            target=subject,
+        )
+        stage = {
+            "stage_goal": f"Create a task to {subject}",
+            "stage_type": "TASK_EVENT_WORK",
+            "success_condition": "Task is created once with the requested details",
+            "allowed_tools": ["ADD_TASK"],
+            "mutation": mutation,
+        }
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Add a task to {subject}",
+                "context": [
+                    "The user asked for an undated task-style reminder.",
+                    "Create a task, not an event.",
+                ],
+                "stages": [stage],
+            },
+        }
+
+    @staticmethod
+    def _build_task_event_schedule_card(subject: str, *, scheduled_date: str) -> RouteDecision:
+        mutation = StateMutationEngine.build_mutation_request(
+            state_owner="task_event",
+            entity_kind="event",
+            action="schedule",
+            target=subject,
+            scheduled_date=scheduled_date,
+        )
+        stage = {
+            "stage_goal": f"Schedule the event '{subject}' for {scheduled_date}",
+            "stage_type": "TASK_EVENT_WORK",
+            "success_condition": "Event is created once with the requested date",
+            "allowed_tools": ["ADD_EVENT"],
+            "mutation": mutation,
+        }
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": f"Add an event for {subject} on {scheduled_date}",
+                "context": [
+                    "The user asked for a dated reminder.",
+                    "Treat dated reminders as events in the task/event system.",
+                ],
+                "stages": [stage],
+            },
+        }
+
+    @staticmethod
     def _build_task_event_delete_card(subject: str, *, is_event: bool) -> RouteDecision:
         tool_name = "REMOVE_EVENT" if is_event else "DELETE_TASK"
         noun = "event" if is_event else "task"
@@ -2054,12 +2138,40 @@ class StateMutationEngine:
                 subject = updated
                 break
 
+        date_phrase = extract_date_phrase(subject)
+        if date_phrase:
+            subject = re.sub(re.escape(date_phrase), "", subject, flags=re.IGNORECASE).strip(" ,.-")
+        subject = re.sub(r"(?i)\bin\s+\d+\s+(seconds?|minutes?|hours?|days?)\b.*$", "", subject).strip(" ,.-")
+        subject = re.sub(r"(?i)\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b.*$", "", subject).strip(" ,.-")
         subject = re.sub(r"(?i)\b(on|by)\s+\d{4}-\d{2}-\d{2}\b.*$", "", subject).strip(" ,.-")
         subject = re.sub(r"(?i)\b(?:on\s+)?(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b.*$", "", subject).strip(" ,.-")
         subject = re.sub(r"(?i)\bfor that\b$", "", subject).strip(" ,.-")
         subject = re.sub(r"(?i)\bfor it\b$", "", subject).strip(" ,.-")
         subject = re.sub(r"\s+", " ", subject)
         return subject.strip("'\" ")
+
+    def _normalize_reminder_task_override_followup(
+        self,
+        *,
+        user_msg: str,
+        recent_history: Sequence[dict[str, Any]],
+    ) -> RouteDecision | None:
+        text = str(user_msg or "").strip()
+        if not text or not looks_like_task_followup(text):
+            return None
+        if not re.search(r"(?i)\b(?:set|make|add|log|put|keep|treat)\b", text):
+            return None
+        if not re.search(r"(?i)\b(?:it|that|this)\b|\bas\s+(?:a\s+)?task\b", text):
+            return None
+
+        previous_user_msg = extract_previous_user_message(recent_history, current_text=text)
+        if not previous_user_msg or not REMINDER_REQUEST_RE.search(previous_user_msg):
+            return None
+
+        subject = self._extract_reminder_request_subject(previous_user_msg)
+        if not subject:
+            return None
+        return self._build_task_event_add_card(subject)
 
     @staticmethod
     def _request_should_be_event(user_msg: str, stages: List[StageCard]) -> bool:
