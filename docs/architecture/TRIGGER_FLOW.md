@@ -990,3 +990,106 @@ The manifest path is stored on the change-journal entry for that turn (`rollback
 
 **Files:** `core/engines/rollback_engine.py` (new — `record_manifest`, `invert_manifest`, `is_bulk_action`, `_prune_old_manifests`); `core/executor.py` (post-bulk-op manifest write, `completed_rollback_manifests` list, `_current_turn_id` propagated from phase); `core/engines/change_journal.py` (`rollback_manifests` field on entry, `mark_entry_undone` method); `core/orchestrator_phases.py` (manifest collection, hook args, `phase_undo` manifest-first path); `data/rollback/` (manifest store); `scripts/bulk_rollback_manifest_smoke_test.py` (11-case smoke test)
 
+---
+
+## 14. TTS Pipeline
+
+Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.
+
+### Overview
+
+The TTS pipeline is fully non-blocking. Synthesis and playback run on background threads; the UI event pump and LLM generation are never stalled waiting for audio.
+
+```
+phase_persona() — persona text ready
+    │  emits word-by-word stream deltas via orc.ui.put()
+    ▼
+controller_queue.py  [UI event pump, 60fps-throttled]
+    │  assistant_stream_start / assistant_stream_delta / assistant_stream_end
+    ▼
+core/pipeline.py — ChatPipeline.handle_event()
+    │  tag scrubbing (TagScrubber — strips [TOOL_NAME] commands)
+    │  number cleaning (_clean_numbers_for_tts — decimals → "point", strip commas)
+    │  stage direction parsing (StageDirectionProcessor — *action* markers)
+    │  → text fragments   → tts.stream_push(text)
+    │  → SFX markers      → tts.stream_flush() then tts.play_wav(path)
+    ▼
+tools/tts.py — TTS singleton (get_tts())
+    │  lazy start: tts.stream_start() deferred until first real content delta
+    │  (skips long thinking blocks; no wasted synthesis on <think> output)
+    ▼
+_StreamChunker — accumulates text, emits utterances to _job_q
+    │  sentence-end regex: r"(?:(?<!\d)[.!?]|\n)"
+    │  first utterance: min 20 chars, max 300 chars
+    │  subsequent: min 300 chars, max 300 chars
+    │  safety valve: force-split at 300 chars on whitespace if no boundary found
+    │  newlines treated as hard stops (fixes list/bullet reading)
+    ▼
+_job_q  (synthesis queue — strict FIFO, epoch-tagged)
+    │  items: ("text", text, voice, speed, backend) | ("sfx", filepath)
+    ▼
+_synth_loop worker thread
+    │  backend chain: Kokoro ONNX → Kokoro Torch → Windows SAPI
+    │  synthesizes text → numpy audio array
+    │  for SFX: loads WAV, mono-converts, applies volume boost, clips to [-1, 1]
+    │  discards stale jobs (epoch mismatch — stop() was called)
+    ▼
+_audio_q  (playback queue — epoch-tagged)
+    ▼
+_play_loop worker thread
+    │  blocks until audio finishes playing
+    ▼
+audio out
+```
+
+### Lazy TTS start
+
+`tts.stream_start()` is not called on `assistant_stream_start`. It is deferred to the **first real content delta** that passes through `ChatPipeline`. This means long `<think>` blocks (which `stream_thinking_filter` strips before they reach the pipeline) never trigger TTS initialization, and the first word a user hears is always real persona content.
+
+### Text splitting
+
+**Streaming path** (`_StreamChunker`, used during live persona output):
+- Accumulates raw text fragments pushed by `stream_push()`
+- Emits an utterance when a sentence boundary is found and the minimum size is met
+- First utterance fires early (min 20 chars) to minimize perceived latency
+- Subsequent utterances batch to ≥300 chars for smoother synthesis
+
+**Non-streaming path** (`_split_3stage`, used by direct `speak()` calls):
+- Splits on `[.!?;]\s+|\n+` into sentence-sized chunks (≤260 chars each)
+- Packs sentences into 3 logical pipeline chunks: fast-start (~100 chars), normal (~500 chars), remainder
+- Three-chunk design allows synthesis of chunk 2 to overlap with playback of chunk 1
+
+### Stage direction processing
+
+`*action*` markers in persona output are intercepted by `StageDirectionProcessor` in `ChatPipeline` before text reaches the TTS engine:
+
+| Marker pattern | Behaviour |
+|---|---|
+| `*sigh*`, `*laugh*`, etc. | Flush current text utterance, then play matching `data/sfx/*.wav` |
+| `*softly*`, `*sternly*`, etc. | Prepend semantic text cue before next utterance |
+| `*smirk*`, `*pause*` | Insert "… " pause token into text stream |
+
+SFX playback is ordered relative to the surrounding text via the shared `_job_q` (SFX jobs sit in-queue between the text jobs that surround them).
+
+### Backend chain
+
+| Priority | Backend | Class | Notes |
+|---|---|---|---|
+| 1 (primary) | Kokoro ONNX | `_KokoroEngine` | `kokoro-v1.0.onnx` + `voices-v1.0.bin`; lazy model load |
+| 2 (fallback) | Kokoro Torch | `_KokoroTorchEngine` | Subprocess worker; HF hub `hexgrad/Kokoro-82M`; Windows probe patch |
+| 3 (last resort) | Windows SAPI | `_WindowsSystemSpeechEngine` | `pyttsx3`; system-installed voices only |
+
+Backend is selected per synthesis job; if the primary engine raises an exception the synth worker steps down the chain automatically.
+
+### Epoch-based cancellation
+
+Each `stop()` call increments `_epoch`. The synthesis worker checks epoch before pushing to `_audio_q`; any job whose epoch is older than the current value is silently discarded. This ensures a hard stop (e.g. user interrupts mid-sentence) drains cleanly without deadlock.
+
+### Configuration keys
+
+`config.py`: `TTS_ENABLED`, `TTS_BACKEND` (`"auto"`), `TTS_VOICE` (`"af_heart"`), `TTS_SPEED` (`0.85`), `TTS_KOKORO_TIMEOUT_S`, `TTS_KOKORO_TORCH_READY_WAIT_S`, `TTS_KOKORO_HF_REPO_ID`, `KOKORO_DIR`, `KOKORO_MODEL`, `KOKORO_VOICES`.
+
+### Key files
+
+`tools/tts.py` — TTS singleton, all three backend engines, `_StreamChunker`, `_split_3stage`, synth/play workers, epoch tracking; `core/pipeline.py` — `ChatPipeline`, `TagScrubber`, `StageDirectionProcessor`, number cleaning; `ui/controller_queue.py` — UI event pump, 60fps delta throttle; `core/orchestrator_phases.py` — persona stream emission; `app.py` — singleton init (`get_tts(TTSConfig(...))`); `scripts/tts_windows_probe.py` — latency benchmark tool
+
