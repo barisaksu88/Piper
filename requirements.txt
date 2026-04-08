@@ -1,16 +1,46 @@
+# Piper — Python dependencies
+# Install: pip install -r requirements.txt
+#
+# Optional heavy deps (TTS backends, STT, vector store) are marked.
+# They are imported lazily and Piper degrades gracefully without them.
+
+# ── Core UI ──────────────────────────────────────────────────────────────────
 dearpygui
+
+# ── Utilities ────────────────────────────────────────────────────────────────
 numpy
 psutil
 requests
-urllib3
-chromadb
-sentence-transformers
-pypdf
-duckduckgo-search
-playwright
-faster-whisper
-sounddevice
-kokoro-onnx
-misaki
-num2words
-spacy
+
+# ── LLM runtime (llama.cpp server lives in runtime/llama.cpp/) ───────────────
+# No Python package needed — communicates via HTTP to the local server.
+
+# ── TTS — primary backend ────────────────────────────────────────────────────
+kokoro-onnx          # Kokoro ONNX engine (primary)
+onnxruntime          # ONNX runtime required by kokoro-onnx
+sounddevice          # Audio playback
+soundfile            # WAV/audio file I/O (Kokoro Torch fallback path)
+
+# ── TTS — Kokoro Torch fallback (optional, downloads model on first use) ─────
+torch                # PyTorch — only used if ONNX backend fails
+huggingface-hub      # Model download for hexgrad/Kokoro-82M
+
+# ── STT ──────────────────────────────────────────────────────────────────────
+faster-whisper       # Speech-to-text (Whisper via CTranslate2)
+
+# ── Memory / vector store ────────────────────────────────────────────────────
+chromadb             # Vector store for knowledge/recall
+sentence-transformers  # Embedding model used by chromadb
+
+# ── Document handling ────────────────────────────────────────────────────────
+pypdf                # PDF text extraction (pure Python, lightweight)
+PyMuPDF              # PDF rendering / complex docs (import: fitz)
+
+# ── Search ───────────────────────────────────────────────────────────────────
+duckduckgo-search    # Web search backend
+
+# ── Computer use (browser automation) ───────────────────────────────────────
+playwright           # Browser control (ComputerUseEngine WIP)
+
+# ── Dev / testing ────────────────────────────────────────────────────────────
+pytest
