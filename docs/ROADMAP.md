@@ -35,7 +35,7 @@ Pattern hints are injected as a `[PATTERN HINTS]` block — soft suggestions, no
 
 ---
 
-**Computer use v0 (browser-first)**
+**Computer use v0 (browser-first)** *(WIP — implementation in progress, not yet complete)*
 
 Piper can already see. This adds the action side for browser work first: click, type, scroll, navigate, extract, submit, and download in a controlled browser session.
 
@@ -213,36 +213,7 @@ Use local static fixture pages or a tightly controlled local test app first. Avo
 
 ---
 
-**Bulk mutation rollback manifests** *(extends existing undo; does not replace it)*
-
-The existing undo system in `docs/architecture/TRIGGER_FLOW.md §13.9` already handles supported single-operation `FILE_OP` mutations by snapshotting pre-mutation state into the change journal.
-
-The remaining gap is bulk mutation tools whose effective scope is too wide to reconstruct after the fact. Operations like `consolidate_by_extension`, `move_many`, `copy_many`, and `delete_many` can touch many files at once; when the user says "undo that", the current journal does not retain a full reversible recipe for the whole batch, so the undo path falls back to planner guesswork and can loop.
-
-**Design:**
-
-Before any supported bulk mutation tool (`consolidate_by_extension`, `move_many`, `copy_many`, `delete_many`) executes, the executor writes a rollback manifest to `data/rollback/rollback_<timestamp>.json`:
-
-```json
-{
-  "timestamp": "…",
-  "action": "consolidate_by_extension",
-  "moves": [{"from": "root/photo.png", "to": "images/photo.png"}, …],
-  "deletions": []
-}
-```
-
-The manifest is written *before* the action so a crash mid-run leaves a usable record. On success it is marked `committed: true`. At most the last N manifests are kept (configurable, default 5).
-
-The manifest is linked from the normal change-journal entry for that task, rather than replacing the journal. When the user says "undo" or "reverse that", the existing `UNDO` interceptor / `phase_undo()` flow stays in charge. If the latest journal entry points at a committed bulk manifest, the undo path reads that manifest and replays each move/deletion in reverse. The manifest is marked `rolled_back: true` on completion.
-
-This is complementary to the shipped single-op undo:
-- single-path `write` / `edit` / `delete` / `move` / `rename` / `copy` stay owned by the existing change journal
-- bulk file transforms gain a manifest-backed reversible recipe so "undo that" remains mechanical instead of inferential
-
-Limitations accepted at first build: only the most recent bulk operation is undoable; deletions are unrecoverable; no UI to browse history.
-
-**Files (when specced):** `core/executor.py` (write manifest pre-mutation, mark committed post-success, link it to the journal entry); `core/engines/change_journal.py` (store manifest reference on the task entry); `core/engines/rollback_engine.py` (new — read manifest, invert the batch mechanically); `core/orchestrator_phases.py` (`phase_undo()` uses the manifest path when present); `data/rollback/` (manifest store)
+**Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
 
 ---
 
@@ -260,9 +231,11 @@ After browser-only computer use is stable and boring, extend `ComputerUseEngine`
 
 ---
 
-**Voice-based user identification + owner-private speaker separation** *(merged foundation; voice unlock follow-up remains)*
+**Voice-based user identification + owner-private speaker separation** *(foundation shipped — voice embedding follow-up remains)*
 
 Speaker embedding runs as a separate inference process alongside Whisper (e.g. `pyannote.audio`). On each turn, the detected voice is matched against registered profiles in `data/users.json`.
+
+**Foundation shipped:** `memory/user_runtime.py` (ActiveUserRuntime, per-user isolated brain/knowledge/memory/style/conversation summary), `data/users.json` + `data/users/` per-user state directories, `/users` / `/user` / `/adminpass` UI commands, typed identity hint observer, and PBKDF2 admin password gate are all live. The remaining work is the voice embedding inference path itself.
 
 The current merged foundation now assumes a local owner-first model:
 - `admin_baris` is the only protected profile.

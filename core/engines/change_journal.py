@@ -156,9 +156,11 @@ class ChangeJournal:
         task_goal: str,
         task_success: bool,
         operations: list[dict[str, Any]],
+        rollback_manifests: list[str] | None = None,
     ) -> dict[str, Any] | None:
         cleaned_ops = [dict(item) for item in (operations or []) if isinstance(item, dict) and (item.get("snapshots") or [])]
-        if not cleaned_ops:
+        manifests = [str(p) for p in (rollback_manifests or []) if str(p).strip()]
+        if not cleaned_ops and not manifests:
             return None
         entry = {
             "turn_id": str(turn_id or "").strip() or _utc_now_iso(),
@@ -167,6 +169,7 @@ class ChangeJournal:
             "task_goal": str(task_goal or "").strip(),
             "task_success": bool(task_success),
             "operations": cleaned_ops,
+            "rollback_manifests": manifests,
             "primary_paths": self._primary_paths_from_operations(cleaned_ops),
             "undone_at": "",
             "undo_last_status": "",
@@ -176,6 +179,22 @@ class ChangeJournal:
         entries.append(entry)
         self.save_entries(entries)
         return entry
+
+    def mark_entry_undone(self, turn_id: str, *, status: str = "VERIFIED", detail: str = "") -> None:
+        """Mark a specific journal entry (by turn_id) as undone.
+
+        Called by phase_undo after a manifest-based rollback so a second
+        'undo' attempt is correctly refused.
+        """
+        entries = self.load_entries()
+        for i, entry in enumerate(entries):
+            if str(entry.get("turn_id") or "") == str(turn_id or "").strip():
+                entry["undone_at"] = _utc_now_iso()
+                entry["undo_last_status"] = str(status or "VERIFIED")
+                entry["undo_last_error"] = str(detail or "")
+                entries[i] = entry
+                self.save_entries(entries)
+                return
 
     def has_pending_undo(self) -> bool:
         latest = self.peek_latest_entry()

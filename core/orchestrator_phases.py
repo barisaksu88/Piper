@@ -17,6 +17,7 @@ from core.file_target_confirmation import (
 )
 from core.feature_hooks import fire_hooks, register_hook
 from core.engines.followup_resolution import FollowupResolutionEngine
+from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.engines.proactive_monitor import (
     PROACTIVE_TRIGGER_PREFIX,
     ReminderStore,
@@ -1478,11 +1479,13 @@ def _hook_record_change_journal(
     orc,
     *,
     completed_change_operations: list[dict[str, Any]] | None = None,
+    completed_rollback_manifests: list[str] | None = None,
     completed_all_stages: bool = False,
     task_failed: bool = False,
     task_paused: bool = False,
 ) -> None:
     operations = [dict(item) for item in (completed_change_operations or []) if isinstance(item, dict)]
+    manifests = [str(p) for p in (completed_rollback_manifests or []) if str(p).strip()]
     task_success = bool(completed_all_stages and not task_failed and not task_paused)
     orc.last_change_journal_entry = orc.change_journal.record_turn(
         turn_id=str(getattr(getattr(orc, "turn_stats", None), "turn_id", "") or ""),
@@ -1490,6 +1493,7 @@ def _hook_record_change_journal(
         task_goal=str((orc.context_card or {}).get("goal") or ""),
         task_success=task_success,
         operations=operations,
+        rollback_manifests=manifests,
     )
     orc.undo_notice_pending = bool(orc.last_change_journal_entry) and task_success
 
@@ -1530,11 +1534,13 @@ def phase_manager(orc) -> None:
         stats_collector=orc.stats_collector,
         operational_state_service=getattr(orc.prompt_context, "operational_state_service", None),
     )
+    executor._current_turn_id = str(getattr(getattr(orc, "turn_stats", None), "turn_id", "") or "")
     # Capture the parent objective once so every stage can reference it.
     objective = str(orc.context_card.get("goal", "") or "").strip()
 
     total_stages = len(stages)
     completed_change_operations: list[dict[str, Any]] = []
+    completed_rollback_manifests: list[str] = []
     task_failed = False
     task_paused = False
     completed_all_stages = False
@@ -1555,6 +1561,9 @@ def phase_manager(orc) -> None:
         success, stage_log = executor.run(stage, stage_num, total_stages)
         completed_change_operations.extend(
             [dict(item) for item in getattr(executor, "completed_change_operations", []) if isinstance(item, dict)]
+        )
+        completed_rollback_manifests.extend(
+            [str(p) for p in getattr(executor, "completed_rollback_manifests", []) if str(p).strip()]
         )
         # Surface the typed VerificationResult so phase_persona uses the
         # authoritative verdict rather than re-inferring from scratchpad text.
@@ -1679,6 +1688,7 @@ def phase_manager(orc) -> None:
         "on_task_verified",
         orc,
         completed_change_operations=completed_change_operations,
+        completed_rollback_manifests=completed_rollback_manifests,
         completed_all_stages=completed_all_stages,
         task_failed=task_failed,
         task_paused=task_paused,
@@ -1711,7 +1721,29 @@ def phase_undo(orc) -> None:
     orc.undo_notice_pending = False
     orc.scratchpad = [ScratchpadFormatter.format_stage_header(1, stage)]
 
-    result = orc.change_journal.undo_latest(Path(getattr(orc.brain, "workspace", ".")))
+    workspace = Path(getattr(orc.brain, "workspace", "."))
+    # If the latest journal entry has a rollback manifest (written for bulk
+    # ops like consolidate_by_extension or move_many), use the manifest-based
+    # inversion path.  It inverts every move in the recipe mechanically
+    # instead of restoring binary file-content snapshots.
+    latest_entry = orc.change_journal.peek_latest_entry()
+    manifest_paths = [
+        str(p) for p in (latest_entry or {}).get("rollback_manifests") or []
+        if str(p).strip()
+    ] if latest_entry and not str(latest_entry.get("undone_at") or "").strip() else []
+
+    if manifest_paths:
+        result = invert_rollback_manifest(Path(manifest_paths[-1]), workspace)
+        if result.get("status") in ("VERIFIED", "PARTIAL"):
+            # Mark the journal entry as undone so a second undo attempt is
+            # correctly refused.
+            orc.change_journal.mark_entry_undone(
+                str(latest_entry.get("turn_id") or ""),
+                status=str(result.get("status") or "VERIFIED"),
+                detail=str(result.get("detail") or ""),
+            )
+    else:
+        result = orc.change_journal.undo_latest(workspace)
     summary = str(result.get("summary") or "").strip()
     detail = str(result.get("detail") or summary).strip()
     status = str(result.get("status") or "FAILED").strip().upper()

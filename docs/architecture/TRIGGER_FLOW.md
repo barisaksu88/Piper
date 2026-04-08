@@ -955,3 +955,38 @@ A file could be deleted while an active Task held a reference to it. `phase_mana
 
 **Files:** `core/file_reference_matcher.py` (shared normalized file-reference matcher); `core/operational_state_service.py` (`find_references`); `core/engines/file_work.py` (`_check_active_dependency`, extended `should_block`); `core/contracts.py` (`FileWorkBlock.fatal`); `core/executor.py` (fatal-block path, new init params); `core/orchestrator_phases.py` (wire params to StageExecutor); `data/prompts/secretary.txt` (staging rules 10–11 enforce no-auto-resolution at router level)
 
+---
+
+### 13.18 Bulk Mutation Rollback Manifests ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+**Problem:**
+
+Bulk FILE_OP tools (`consolidate_by_extension`, `move_many`, `copy_many`, `delete_many`) can touch many files in one operation. The existing single-op change journal (§13.9) snapshots file content per-path, but bulk operations are too wide to reconstruct after the fact. When the user says "undo that" after a large consolidation, the prior undo path fell back to planner guesswork and could loop.
+
+**Design:**
+
+After any supported bulk FILE_OP completes with `status=EXECUTED` and `workspace_changed=True`, the executor writes a rollback manifest to `data/rollback/rollback_<turn_id>.json`:
+
+```json
+{
+  "turn_id": "...",
+  "timestamp": "...",
+  "action": "consolidate_by_extension",
+  "committed": true,
+  "rolled_back": false,
+  "moves": [{"from": "report.txt", "to": "docs/report.txt"}, …],
+  "deletions": [],
+  "created_dirs": ["docs"]
+}
+```
+
+The manifest is written post-execution (the full recipe is only known after `consolidate_by_extension` runs). At most 5 manifests are kept on disk; older ones are pruned on each write.
+
+The manifest path is stored on the change-journal entry for that turn (`rollback_manifests` field). On "undo", `phase_undo()` checks the latest journal entry first: if it holds an uncommitted manifest path, `invert_manifest()` replays each move in reverse order and removes any empty auto-created directories. The manifest is marked `rolled_back=True` on success. A second undo attempt is refused (guard check). If no manifest path is present the existing single-op snapshot undo runs as before.
+
+**Limitations (v1):** Only the most recent bulk operation is reversible via manifest. `delete_many` deletions are recorded but cannot be restored (no content snapshot); `invert_manifest` reports them as non-recoverable. `RUN_CODE` operations are excluded entirely.
+
+**Files:** `core/engines/rollback_engine.py` (new — `record_manifest`, `invert_manifest`, `is_bulk_action`, `_prune_old_manifests`); `core/executor.py` (post-bulk-op manifest write, `completed_rollback_manifests` list, `_current_turn_id` propagated from phase); `core/engines/change_journal.py` (`rollback_manifests` field on entry, `mark_entry_undone` method); `core/orchestrator_phases.py` (manifest collection, hook args, `phase_undo` manifest-first path); `data/rollback/` (manifest store); `scripts/bulk_rollback_manifest_smoke_test.py` (11-case smoke test)
+
