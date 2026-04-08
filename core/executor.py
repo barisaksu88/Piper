@@ -20,6 +20,7 @@ from core.json_utils import parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
 from core.engines.change_journal import ChangeJournal
+from core.engines.rollback_engine import is_bulk_action, record_manifest as record_rollback_manifest
 from core.engines.computer_use_verifier import (
     build_verified_payload as build_verified_computer_use_payload,
     evaluate_stage as evaluate_computer_use_stage,
@@ -89,6 +90,7 @@ class StageExecutor:
         self._last_stage_metrics: dict[str, float | int] = {}
         self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)
         self.completed_change_operations: list[dict[str, Any]] = []
+        self.completed_rollback_manifests: list[str] = []
         self.terminal_missing_file_target = ""
         self._stage_all_mutated_paths: list[str] = []
         self._computer_use_stage_evidence: dict[str, Any] = {}
@@ -277,6 +279,7 @@ class StageExecutor:
         self._last_blocked_action = ""
         self._blocked_action_count = 0
         self.completed_change_operations = []
+        self.completed_rollback_manifests = []
         self.terminal_missing_file_target = ""
         # Accumulates all paths mutated during this stage (created + updated).
         # Used by _append_verified_file_work_result_note so the LAST_LOG covers
@@ -928,6 +931,22 @@ class StageExecutor:
                     )
                     if journal_operation is not None:
                         self.completed_change_operations.append(journal_operation)
+                    if (
+                        isinstance(tool_result, dict)
+                        and str(tool_result.get("status") or "").upper() == "EXECUTED"
+                        and bool(tool_result.get("workspace_changed"))
+                        and is_bulk_action(str(tool_result.get("action") or ""))
+                    ):
+                        _turn_id = str(getattr(self, "_current_turn_id", "") or "")
+                        _data_dir = Path(str(getattr(CFG, "DATA_DIR", "data")))
+                        _manifest_path = record_rollback_manifest(
+                            _turn_id,
+                            str(tool_result.get("action") or ""),
+                            tool_result,
+                            _data_dir,
+                        )
+                        if _manifest_path is not None:
+                            self.completed_rollback_manifests.append(str(_manifest_path))
                 self._maybe_launch_code_session(tool_result)
                 if (
                     FileStagePolicy.stage_is_interactive_runtime_verification(stage)
