@@ -67,6 +67,7 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
     TAG_RESTART_BUTTON = tags["TAG_RESTART_BUTTON"]
     TAG_INGEST_BUTTON = tags["TAG_INGEST_BUTTON"]
     TAG_CODE_TAB = tags["TAG_CODE_TAB"]
+    TAG_STATS_TAB = tags["TAG_STATS_TAB"]
     TAG_CODE_VIEW_CHILD = tags["TAG_CODE_VIEW_CHILD"]
     TAG_CODE_VIEW_TEXT = tags["TAG_CODE_VIEW_TEXT"]
     TAG_CODE_STATUS_TEXT = tags["TAG_CODE_STATUS_TEXT"]
@@ -77,6 +78,28 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
     TAG_CODE_STOP_BUTTON = tags["TAG_CODE_STOP_BUTTON"]
     TAG_DOCUMENTS_VIEW_CHILD = tags["TAG_DOCUMENTS_VIEW_CHILD"]
     TAG_DOCUMENTS_VIEW_TEXT = tags["TAG_DOCUMENTS_VIEW_TEXT"]
+    TAG_STATS_VIEW_CHILD = tags["TAG_STATS_VIEW_CHILD"]
+    TAG_STATS_VIEW_TEXT = tags["TAG_STATS_VIEW_TEXT"]
+    TAG_STATS_LATENCY_PLOT = tags["TAG_STATS_LATENCY_PLOT"]
+    TAG_STATS_LATENCY_X_AXIS = tags["TAG_STATS_LATENCY_X_AXIS"]
+    TAG_STATS_LATENCY_Y_AXIS = tags["TAG_STATS_LATENCY_Y_AXIS"]
+    TAG_STATS_TOTAL_SERIES = tags["TAG_STATS_TOTAL_SERIES"]
+    TAG_STATS_TOTAL_UPPER_SERIES = tags["TAG_STATS_TOTAL_UPPER_SERIES"]
+    TAG_STATS_TOTAL_OUTLIER_SERIES = tags["TAG_STATS_TOTAL_OUTLIER_SERIES"]
+    TAG_STATS_PHASE_PLOT = tags["TAG_STATS_PHASE_PLOT"]
+    TAG_STATS_PHASE_X_AXIS = tags["TAG_STATS_PHASE_X_AXIS"]
+    TAG_STATS_PHASE_Y_AXIS = tags["TAG_STATS_PHASE_Y_AXIS"]
+    TAG_STATS_ROUTE_SERIES = tags["TAG_STATS_ROUTE_SERIES"]
+    TAG_STATS_MANAGER_SERIES = tags["TAG_STATS_MANAGER_SERIES"]
+    TAG_STATS_REPORTER_SERIES = tags["TAG_STATS_REPORTER_SERIES"]
+    TAG_STATS_PERSONA_SERIES = tags["TAG_STATS_PERSONA_SERIES"]
+    TAG_STATS_TTS_SERIES = tags["TAG_STATS_TTS_SERIES"]
+    TAG_STATS_WORKLOAD_GROUP = tags["TAG_STATS_WORKLOAD_GROUP"]
+    TAG_STATS_WORKLOAD_PLOT = tags["TAG_STATS_WORKLOAD_PLOT"]
+    TAG_STATS_WORKLOAD_X_AXIS = tags["TAG_STATS_WORKLOAD_X_AXIS"]
+    TAG_STATS_WORKLOAD_Y_AXIS = tags["TAG_STATS_WORKLOAD_Y_AXIS"]
+    TAG_STATS_PLANNER_SERIES = tags["TAG_STATS_PLANNER_SERIES"]
+    TAG_STATS_EXECUTOR_SERIES = tags["TAG_STATS_EXECUTOR_SERIES"]
     chat_wrap = max(620, w - RIGHT_PANE_WIDTH - 180)
 
     on_send = callbacks["on_send"]
@@ -355,6 +378,83 @@ def build_ui(*, callbacks: Dict[str, Callable[..., Any]], tags: Dict[str, Any], 
                     dpg.add_button(tag=TAG_CODE_STOP_BUTTON, label="Stop Process", width=100, callback=lambda sender=None, app_data=None, user_data=None: on_stop())
                 with dpg.group(horizontal=True):
                     dpg.add_button(tag=TAG_CODE_CLEAR_BUTTON, label="Clear Console", width=120, callback=on_code_clear)
+
+            # === TAB 4: STATS ===
+            with dpg.tab(label="Stats", tag=TAG_STATS_TAB):
+                dpg.add_text("Turn Statistics", color=(175, 215, 255, 255))
+                dpg.add_separator()
+                with dpg.child_window(
+                    tag=TAG_STATS_VIEW_CHILD,
+                    width=-1,
+                    height=-1,
+                    border=True,
+                    horizontal_scrollbar=True,
+                ):
+                    dpg.bind_item_theme(dpg.last_item(), text_pane_theme)
+                    dpg.add_text("Latency Trend", color=(140, 190, 255, 255))
+                    with dpg.plot(label="Recent Turn Total", tag=TAG_STATS_LATENCY_PLOT, height=220, width=-1):
+                        dpg.add_plot_legend()
+                        dpg.add_plot_axis(dpg.mvXAxis, label="Recent turns", tag=TAG_STATS_LATENCY_X_AXIS)
+                        dpg.add_plot_axis(dpg.mvYAxis, label="Milliseconds", tag=TAG_STATS_LATENCY_Y_AXIS)
+                        dpg.add_line_series([], [], label="Total", parent=TAG_STATS_LATENCY_Y_AXIS, tag=TAG_STATS_TOTAL_SERIES)
+                        dpg.add_line_series(
+                            [],
+                            [],
+                            label="Expected ceiling",
+                            parent=TAG_STATS_LATENCY_Y_AXIS,
+                            tag=TAG_STATS_TOTAL_UPPER_SERIES,
+                        )
+                        dpg.add_scatter_series(
+                            [],
+                            [],
+                            label="Above ceiling",
+                            parent=TAG_STATS_LATENCY_Y_AXIS,
+                            tag=TAG_STATS_TOTAL_OUTLIER_SERIES,
+                        )
+                    dpg.add_spacer(height=8)
+                    dpg.add_text("Phase Breakdown", color=(140, 190, 255, 255))
+                    with dpg.plot(label="Recent Turn Phases", tag=TAG_STATS_PHASE_PLOT, height=220, width=-1):
+                        dpg.add_plot_legend()
+                        dpg.add_plot_axis(dpg.mvXAxis, label="Recent turns", tag=TAG_STATS_PHASE_X_AXIS)
+                        dpg.add_plot_axis(dpg.mvYAxis, label="Milliseconds", tag=TAG_STATS_PHASE_Y_AXIS)
+                        dpg.add_line_series([], [], label="Route", parent=TAG_STATS_PHASE_Y_AXIS, tag=TAG_STATS_ROUTE_SERIES)
+                        dpg.add_line_series([], [], label="Manager", parent=TAG_STATS_PHASE_Y_AXIS, tag=TAG_STATS_MANAGER_SERIES)
+                        dpg.add_line_series([], [], label="Reporter", parent=TAG_STATS_PHASE_Y_AXIS, tag=TAG_STATS_REPORTER_SERIES)
+                        dpg.add_line_series([], [], label="Persona", parent=TAG_STATS_PHASE_Y_AXIS, tag=TAG_STATS_PERSONA_SERIES)
+                        dpg.add_line_series([], [], label="TTS", parent=TAG_STATS_PHASE_Y_AXIS, tag=TAG_STATS_TTS_SERIES)
+                    dpg.add_spacer(height=8)
+                    with dpg.group(tag=TAG_STATS_WORKLOAD_GROUP, show=False):
+                        dpg.add_text("Task Workload", color=(140, 190, 255, 255))
+                        with dpg.plot(label="Planner vs Executor", tag=TAG_STATS_WORKLOAD_PLOT, height=200, width=-1):
+                            dpg.add_plot_legend()
+                            dpg.add_plot_axis(dpg.mvXAxis, label="Recent turns", tag=TAG_STATS_WORKLOAD_X_AXIS)
+                            dpg.add_plot_axis(dpg.mvYAxis, label="Milliseconds", tag=TAG_STATS_WORKLOAD_Y_AXIS)
+                            dpg.add_line_series(
+                                [],
+                                [],
+                                label="Planner total",
+                                parent=TAG_STATS_WORKLOAD_Y_AXIS,
+                                tag=TAG_STATS_PLANNER_SERIES,
+                            )
+                            dpg.add_line_series(
+                                [],
+                                [],
+                                label="Executor total",
+                                parent=TAG_STATS_WORKLOAD_Y_AXIS,
+                                tag=TAG_STATS_EXECUTOR_SERIES,
+                            )
+                        dpg.add_spacer(height=8)
+                    dpg.add_text("Summary & Alerts", color=(140, 190, 255, 255))
+                    dpg.add_input_text(
+                        tag=TAG_STATS_VIEW_TEXT,
+                        multiline=True,
+                        readonly=True,
+                        tab_input=False,
+                        width=-1,
+                        height=_estimate_text_view_height("No stats recorded yet.", min_height=160),
+                        default_value="No stats recorded yet.",
+                    )
+                    dpg.bind_item_theme(TAG_STATS_VIEW_TEXT, selectable_text_theme)
 
         # Key Handlers
         enter_armed = {"armed": True}

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "root_entity_id": "person:user",
+  "nodes": {
+    "person:user": {
+      "id": "person:user",
+      "type": "person",
+      "label": "ekin_friend",
+      "aliases": [
+        "user",
+        "me",
+        "ekin_friend"
+      ],
+      "attributes": {},
+      "updated_at": 1775426789
+    }
+  },
+  "edges": [],
+  "metadata": {
+    "created_at": 1775426789,
+    "updated_at": 1775426789,
+    "migrated_from_legacy_knowledge": false
+  }
+}

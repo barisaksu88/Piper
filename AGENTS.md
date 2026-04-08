@@ -1,6 +1,6 @@
 
 # PIPER AGENT ARCHITECTURE DOCTRINE
-Version: 2.4
+Version: 2.5
 Status: Active
 
 This file defines architectural boundaries and behavioral rules that **AI agents must respect when modifying this repository**.
@@ -209,6 +209,16 @@ Schemas prevent silent breakage between modules.
 
 ---
 
+# 8A. TRIGGER FLOW REFERENCE
+
+Before adding logic to any file, consult `docs/architecture/TRIGGER_FLOW.md`.
+
+It maps the full turn lifecycle — what triggers what, which engine is called at each point, where memory is read and written, and which layer owns each decision. Use it to confirm the correct placement for new logic before writing any code.
+
+If a fix or feature does not have a clear home in the trigger flow, the architecture needs discussion before implementation.
+
+---
+
 # 9. CODE ORGANIZATION GOALS
 
 Piper should evolve toward:
@@ -339,6 +349,7 @@ Rules:
 - If the checker returns PARTIAL, the planner may continue only if progress remains possible
 - If the checker returns FAILED, the failure must remain visible to the system
 - Local deterministic checker rules should verify FILE_OP path operations from real state whenever possible instead of delegating everything back to the model
+- An explicit read, edit, or delete request that targets a file which does not exist is a **terminal honest failure** — the stage must not succeed, invent a fallback target, or silently skip. The only exceptions are stages that explicitly allow absence confirmation (confirming the file is already gone) or creation (the goal is to create a new file). This rule is enforced in `file_stage_policy.py` and `executor.py`.
 
 Preferred FILE_WORK flow:
 
@@ -407,7 +418,7 @@ Variants:
 - agents should keep working until the targeted sweep is materially complete or a real blocker appears
 - agents should validate behavior after each substantial pass using the strongest available regression surfaces
 - minimum validation for a substantial sweep pass should include:
-- `python -m compileall app.py config.py core ui memory tools llm harness scripts`
+- `python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts`
 - `scripts/code_session_smoke_test.py --json`
 - `scripts/file_edit_smoke_test.py --json`
 - `scripts/file_lookup_smoke_test.py --json`
@@ -506,6 +517,7 @@ Preferred files:
 - notes/known-good.md
 - notes/known-issues.md
 - notes/coder-log.md
+- notes/debug-protocol.md
 
 When an agent discovers:
 
@@ -515,3 +527,5 @@ When an agent discovers:
 - a fix that worked after repeated failures
 
 it should update the relevant note file in the same turn if practical.
+
+When starting a fix or debug session, read `notes/debug-protocol.md` first. It contains the symptom-to-file lookup table, the fix prompt template, scope rules, and known failure modes. Do not skip it.

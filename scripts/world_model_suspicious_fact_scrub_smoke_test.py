@@ -24,6 +24,8 @@ class WorldModelSuspiciousFactScrubSmokeReport:
     success: bool
     world_contains_suspicious_key: bool
     knowledge_contains_suspicious_key: bool
+    world_contains_questionish_value: bool
+    knowledge_contains_questionish_value: bool
 
 
 def run_smoke() -> WorldModelSuspiciousFactScrubSmokeReport:
@@ -34,6 +36,9 @@ def run_smoke() -> WorldModelSuspiciousFactScrubSmokeReport:
         root = graph["nodes"][graph["root_entity_id"]]
         root["attributes"]["i'm_working_on_improving_piper,_which"] = [
             {"value": "you", "expires_at": None, "updated_at": 1773443771}
+        ]
+        root["attributes"]["personality_trait"] = [
+            {"value": "max, what is yours", "expires_at": None, "updated_at": 1775358423}
         ]
         owner.world_model_store.save_graph(graph)
 
@@ -53,9 +58,13 @@ def run_smoke() -> WorldModelSuspiciousFactScrubSmokeReport:
             success=(
                 "i'm_working_on_improving_piper,_which" not in world_blob
                 and "working on improving piper, which" not in knowledge_blob
+                and "max, what is yours" not in world_blob
+                and "max, what is yours" not in knowledge_blob
             ),
             world_contains_suspicious_key="i'm_working_on_improving_piper,_which" in world_blob,
             knowledge_contains_suspicious_key="working on improving piper, which" in knowledge_blob,
+            world_contains_questionish_value="max, what is yours" in world_blob,
+            knowledge_contains_questionish_value="max, what is yours" in knowledge_blob,
         )
         return report
 

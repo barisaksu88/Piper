@@ -8,10 +8,13 @@ import dearpygui.dearpygui as dpg
 
 from config import CFG
 from core.commands import handle_command
+from core.engines.proactive_monitor import (
+    build_proactive_consumed_message,
+    build_proactive_trigger_message,
+)
 from core.orchestrator import run_agent_loop
 from core.runtime_control import CancellationToken, OperationCancelled
 from tools.screen_capture import ScreenCaptureError
-from tools.stt import get_stt_engine
 from tools.vision import VisionError, VisionRequest, analyze_image, resolve_vision_request
 from ui.event_speech import normalize_event_speech_mode
 
@@ -24,6 +27,122 @@ LIVE_SCREEN_MODE_LABELS = {
 LIVE_SCREEN_INTERVAL_OPTIONS = (2.0, 5.0, 10.0, 15.0)
 
 
+def _clear_conversation_summary_file() -> None:
+    _clear_conversation_summary_file_at()
+
+
+def _clear_conversation_summary_file_at(path: Path | None = None) -> None:
+    target = Path(path) if path is not None else CFG.CONVERSATION_SUMMARY_PATH
+    try:
+        target.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _current_conversation_summary_path(controller) -> Path:
+    try:
+        return Path(controller.user_runtime.current_conversation_summary_path())
+    except Exception:
+        return CFG.CONVERSATION_SUMMARY_PATH
+
+
+def _refresh_active_user_style(controller) -> None:
+    try:
+        style_filename = str(controller.user_runtime.current_style_filename() or "").strip()
+    except Exception:
+        style_filename = ""
+    if style_filename:
+        controller.style_mgr.active_filename = style_filename
+    style_state = controller.load_style_state()
+    mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
+    controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
+
+
+def _render_user_list_message(controller) -> str:
+    active_id = ""
+    active_profile = None
+    try:
+        active_profile = controller.user_runtime.active_profile()
+        active_id = active_profile.user_id
+    except Exception:
+        active_id = ""
+    lines = ["[UI] Users:"]
+    if getattr(active_profile, "is_unknown", False):
+        lines.append("* Current speaker: Unknown [unknown; unknown] (not a saved profile)")
+    try:
+        profiles = controller.user_runtime.list_profiles()
+    except Exception:
+        profiles = []
+    for profile in profiles:
+        marker = "*" if profile.user_id == active_id else "-"
+        role = str(controller.user_runtime.profile_role_label(profile) or "user")
+        lines.append(f"{marker} {profile.name} [{profile.user_id}; {role}]")
+    if len(lines) == 1:
+        lines.append("- (none)")
+    return "\n".join(lines)
+
+
+def _render_active_user_message(controller) -> str:
+    try:
+        profile = controller.user_runtime.active_profile()
+    except Exception:
+        return "[UI] Active user unavailable."
+    role = str(controller.user_runtime.profile_role_label(profile) or "user")
+    return f"[UI] Active user: {profile.name} [{profile.user_id}; {role}]"
+
+
+def _apply_active_user_switch(controller) -> None:
+    try:
+        controller.tts.stop()
+    except Exception:
+        pass
+    try:
+        controller.agent_brain.suspend_runtime_sessions()
+    except Exception:
+        pass
+    controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
+    controller.chat_state.begin_fresh_session(wipe_persistent=False)
+    controller.session_meta = "Session: fresh"
+    controller.stage_meta = ""
+    controller.runtime_mode = "IDLE"
+    controller.refresh_active_user_meta()
+    _refresh_active_user_style(controller)
+    controller.refresh_documents_view()
+    controller._refresh_chat_ui()
+    controller.refresh_interaction_state()
+
+
+def _switch_active_user(controller, target: str) -> str:
+    result = controller.user_runtime.request_typed_user_switch(target)
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(controller)
+    return str(getattr(result, "message", "") or "[UI] User switch failed.")
+
+
+def _submit_admin_password(controller, raw_text: str) -> str:
+    text = str(raw_text or "")
+    lowered = text.strip().lower()
+    if lowered in {"/cancel", "cancel"}:
+        return controller.user_runtime.cancel_pending_admin_password()
+    result = controller.user_runtime.submit_admin_password(text)
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(controller)
+    return str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
+
+
+def _observe_typed_speaker_identity(controller, raw_text: str) -> tuple[bool, str]:
+    result = controller.user_runtime.observe_typed_identity_hint(raw_text)
+    if result is None:
+        return False, ""
+    if getattr(result, "requires_password", False):
+        return True, str(getattr(result, "message", "") or "[UI] Password required.")
+    if getattr(result, "requires_identity_clarification", False):
+        return True, str(getattr(result, "message", "") or "[UI] I need one more detail to identify who is speaking.")
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(controller)
+    return False, ""
+
+
 def reset_mic_ui(controller) -> None:
     controller.mic_state = "idle"
     if dpg.does_item_exist(controller.tags.mic_button):
@@ -32,6 +151,8 @@ def reset_mic_ui(controller) -> None:
 
 
 def on_mic_toggle(controller) -> None:
+    from tools.stt import get_stt_engine
+
     if not controller.boot_ready and controller.mic_state == "idle":
         return
     if controller.mic_state == "idle":
@@ -96,9 +217,14 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
             img_gen=controller.img_gen,
             prompt_context_service=controller.prompt_context_service,
             live_screen=controller.live_screen,
+            conversation_summary_path=_current_conversation_summary_path(controller),
             cancel_token=token,
             retain_cancel_token_fn=controller.retain_cancel_token,
             release_cancel_token_fn=controller.release_cancel_token,
+            is_search_in_flight_fn=controller.is_search_in_flight,
+            retain_search_in_flight_fn=controller.retain_search_in_flight,
+            release_search_in_flight_fn=controller.release_search_in_flight,
+            current_search_query_fn=controller.current_search_query,
         )
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "Stop completed."))
@@ -108,6 +234,7 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
         traceback.print_exc()
         controller.ui_queue.put(("error", f"Orchestrator Error: {exc}"))
     finally:
+        controller.agent_brain.suspend_runtime_sessions()
         controller.ui_queue.put(("clear_thinking", ""))
         _finalize_operation(controller, token)
         controller.gen_lock.release()
@@ -125,7 +252,7 @@ def do_vision_query(
         return
     token = cancel_token or controller.create_cancel_token()
     controller.retain_cancel_token(token)
-    style_state = controller.style_mgr.load(0.7, "af_heart", 0.9)
+    style_state = controller.load_style_state()
     try:
         token.raise_if_cancelled()
         resolved = resolve_vision_request(
@@ -396,17 +523,19 @@ def on_new_session(controller) -> None:
         controller.tts.stop()
     except Exception:
         pass
+    _clear_conversation_summary_file_at(_current_conversation_summary_path(controller))
     controller.chat_state.new_session()
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
     controller._refresh_chat_ui()
-    style_state = controller.style_mgr.load(0.7, "af_heart", 0.9)
+    style_state = controller.load_style_state()
     mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
     controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
     controller.refresh_interaction_state()
 
 
 def on_clear(controller) -> None:
+    _clear_conversation_summary_file_at(_current_conversation_summary_path(controller))
     controller.chat_state.clear()
     controller.session_meta = "Session: active"
     controller.stage_meta = ""
@@ -444,12 +573,23 @@ def on_send(controller) -> None:
 
     user_text = input_text.strip()
 
+    if controller.user_runtime.is_waiting_for_admin_password():
+        controller.chat_append("system", _submit_admin_password(controller, input_text))
+        dpg.set_value(controller.tags.input_box, "")
+        return
+
     res = handle_command(user_text, style_mgr=controller.style_mgr)
     if res.handled:
         if res.action == "clear":
             controller.on_clear()
         elif res.action == "new_session":
             controller.on_new_session()
+        elif res.action == "list_users":
+            controller.chat_append("system", _render_user_list_message(controller))
+        elif res.action == "show_active_user":
+            controller.chat_append("system", _render_active_user_message(controller))
+        elif res.action == "switch_user" and res.user_query:
+            controller.chat_append("system", _switch_active_user(controller, res.user_query))
         elif res.action == "ingest_document" and res.document_path:
             _start_document_ingest(controller, [res.document_path])
         elif res.action == "vision_query" and res.vision_path and res.vision_prompt:
@@ -472,12 +612,27 @@ def on_send(controller) -> None:
             return
         elif res.action == "codex_support":
             controller.export_codex_support_snapshot(res.support_note or "")
+        elif res.action == "set_admin_password" and res.password_value is not None:
+            outcome = controller.user_runtime.set_admin_password(res.password_value)
+            controller.chat_append("system", outcome.message)
+            dpg.set_value(controller.tags.input_box, "")
+            return
         if res.style_filename:
-            style_state = controller.style_mgr.load(0.7, "af_heart", 0.9)
+            try:
+                controller.user_runtime.set_active_style_filename(res.style_filename)
+            except Exception:
+                pass
+            style_state = controller.load_style_state()
             mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
             controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
         if res.ui_message:
             controller.chat_append("system", res.ui_message)
+        dpg.set_value(controller.tags.input_box, "")
+        return
+
+    handled_identity, identity_message = _observe_typed_speaker_identity(controller, user_text)
+    if handled_identity:
+        controller.chat_append("system", identity_message)
         dpg.set_value(controller.tags.input_box, "")
         return
 
@@ -755,10 +910,10 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
         }
     )
     controller._refresh_chat_ui()
+    if isinstance(cancel_token, CancellationToken):
+        controller.retain_cancel_token(cancel_token)
 
     def report_findings() -> None:
-        if isinstance(cancel_token, CancellationToken):
-            controller.retain_cancel_token(cancel_token)
         acquired_lock = False
         try:
             while not controller.gen_lock.acquire(timeout=0.1):
@@ -783,6 +938,10 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
                 cancel_token=cancel_token,
                 retain_cancel_token_fn=controller.retain_cancel_token,
                 release_cancel_token_fn=controller.release_cancel_token,
+                is_search_in_flight_fn=controller.is_search_in_flight,
+                retain_search_in_flight_fn=controller.retain_search_in_flight,
+                release_search_in_flight_fn=controller.release_search_in_flight,
+                current_search_query_fn=controller.current_search_query,
             )
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
@@ -794,4 +953,90 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
             if acquired_lock:
                 controller.gen_lock.release()
 
-    threading.Thread(target=report_findings, daemon=True).start()
+    worker = threading.Thread(target=report_findings, daemon=True)
+    try:
+        worker.start()
+    except Exception:
+        if isinstance(cancel_token, CancellationToken):
+            controller.release_cancel_token(cancel_token)
+        raise
+
+
+def trigger_proactive_reminder(controller, reminder: Dict[str, object]) -> bool:
+    reminder_id = str(reminder.get("id") or "").strip()
+    if not reminder_id or not controller.can_dispatch_proactive_reminder():
+        return False
+    raw_message = build_proactive_trigger_message(reminder)
+    token = controller.create_cancel_token()
+    controller.retain_cancel_token(token)
+    controller.retain_proactive_reminder_inflight(reminder_id)
+    controller.ui_queue.put(("status_widget_dashboard_activity", "Scheduled reminder firing..."))
+    controller.chat_state.append_message(
+        {
+            "role": "system",
+            "content": raw_message,
+            "hidden": True,
+        }
+    )
+
+    def _run_trigger() -> None:
+        acquired_lock = False
+        completed_normally = False
+        try:
+            while not controller.gen_lock.acquire(timeout=0.1):
+                token.raise_if_cancelled()
+            acquired_lock = True
+            token.raise_if_cancelled()
+            run_agent_loop(
+                llm_client=controller.llm,
+                agent_brain=controller.agent_brain,
+                knowledge_mgr=controller.knowledge_mgr,
+                style_mgr=controller.style_mgr,
+                chat_state=controller.chat_state,
+                pipeline=controller.pipeline,
+                ui_queue=controller.ui_queue,
+                get_current_context_fn=controller._messages_for_model,
+                boot_mgr=controller.boot_mgr,
+                img_gen=controller.img_gen,
+                prompt_context_service=controller.prompt_context_service,
+                live_screen=controller.live_screen,
+                cancel_token=token,
+                retain_cancel_token_fn=controller.retain_cancel_token,
+                release_cancel_token_fn=controller.release_cancel_token,
+                is_search_in_flight_fn=controller.is_search_in_flight,
+                retain_search_in_flight_fn=controller.retain_search_in_flight,
+                release_search_in_flight_fn=controller.release_search_in_flight,
+                current_search_query_fn=controller.current_search_query,
+            )
+            completed_normally = True
+        except OperationCancelled:
+            controller.ui_queue.put(("status_widget_dashboard_activity", "Reminder canceled."))
+        except Exception as exc:
+            controller.ui_queue.put(("error", f"Proactive Reminder Error: {exc}"))
+        finally:
+            if not completed_normally:
+                consumed = {
+                    "role": "system",
+                    "content": build_proactive_consumed_message(reminder),
+                    "hidden": True,
+                }
+                controller.chat_state.replace_last_system_message(raw_message, consumed)
+            controller.release_proactive_reminder_inflight(reminder_id)
+            _finalize_operation(controller, token)
+            if acquired_lock:
+                controller.gen_lock.release()
+
+    worker = threading.Thread(target=_run_trigger, daemon=True)
+    try:
+        worker.start()
+    except Exception:
+        controller.release_proactive_reminder_inflight(reminder_id)
+        controller.release_cancel_token(token)
+        consumed = {
+            "role": "system",
+            "content": build_proactive_consumed_message(reminder),
+            "hidden": True,
+        }
+        controller.chat_state.replace_last_system_message(raw_message, consumed)
+        raise
+    return True

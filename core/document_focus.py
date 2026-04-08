@@ -294,7 +294,7 @@ def _extract_visual_answer_for_page(
         )
         if CFG.DEBUG_LLM_PROMPTS:
             log_prompt_debug(
-                CFG.LLM_PROMPT_DEBUG_PATH,
+                CFG.DOC_FOCUS_DEBUG_PATH,
                 [
                     {"role": "system", "content": _load_document_vision_prompt()},
                     {"role": "user", "content": f"{messages[1]['content']}\n\n[ATTACHMENT]\n{attachment_text}"},

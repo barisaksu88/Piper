@@ -9,6 +9,7 @@ Chat pipeline:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -196,12 +197,14 @@ class ChatPipeline:
         chat_upsert_fn: Callable[[str, str], None],
         persist_turn_fn: Callable[[str, str], None],
         set_status_fn: Callable[[str], None],
+        finalize_stream_fn: Optional[Callable[[], None]] = None,
     ):
         self.tts = tts
         self.chat_append = chat_append_fn
         self.chat_upsert = chat_upsert_fn
         self.persist_turn = persist_turn_fn
         self.set_status = set_status_fn
+        self.finalize_stream = finalize_stream_fn
 
         self._stream_buffer: str = ""
         self._clean_stream_buffer: str = ""
@@ -211,6 +214,33 @@ class ChatPipeline:
         self._tts_speed: Optional[float] = None
         self._stage = StageDirectionProcessor()
         self._tag_scrubber = TagScrubber()
+        self._stream_started_at: float | None = None
+        self._tts_started_at: float | None = None
+        self._completed_stream_metrics: List[dict[str, float | str]] = []
+
+    def consume_completed_stream_metrics(self) -> List[dict[str, float | str]]:
+        metrics = list(self._completed_stream_metrics)
+        self._completed_stream_metrics.clear()
+        return metrics
+
+    def _finalize_stream_metrics(self, ended_kind: str) -> None:
+        if self._stream_started_at is None:
+            self._tts_started_at = None
+            return
+        ended_at = time.perf_counter()
+        stream_ms = round(max(0.0, ended_at - self._stream_started_at) * 1000.0, 3)
+        tts_ms = 0.0
+        if self._tts_started_at is not None:
+            tts_ms = round(max(0.0, ended_at - self._tts_started_at) * 1000.0, 3)
+        self._completed_stream_metrics.append(
+            {
+                "ended_kind": str(ended_kind or ""),
+                "stream_ms": stream_ms,
+                "tts_ms": tts_ms,
+            }
+        )
+        self._stream_started_at = None
+        self._tts_started_at = None
 
     @staticmethod
     def _clean_numbers_for_tts(text: str) -> str:
@@ -243,6 +273,8 @@ class ChatPipeline:
             self._tts_speed = tts_speed
             self._stage.reset()
             self._tag_scrubber.reset()
+            self._stream_started_at = time.perf_counter()
+            self._tts_started_at = None
             self.set_status("Generating…")
             # tts.stream_start() is deferred to the first delta so a long
             # <think>…</think> preamble does not leave the TTS connection stale.
@@ -258,6 +290,7 @@ class ChatPipeline:
             # the connection is fresh even after a long thinking phase.
             if not self._tts_started:
                 self._tts_started = True
+                self._tts_started_at = time.perf_counter()
                 try:
                     self.tts.stream_start(voice=self._tts_voice, speed=self._tts_speed)
                 except Exception as exc:
@@ -304,11 +337,17 @@ class ChatPipeline:
                 except Exception as exc:
                     _log_stream_tts_error("stream_end", exc)
             self._tts_started = False
+            self._finalize_stream_metrics("end")
 
             if final_text:
                 self.chat_upsert(final_text)
                 try: self.persist_turn("assistant", final_text)
                 except Exception: pass
+            if self.finalize_stream is not None:
+                try:
+                    self.finalize_stream()
+                except Exception:
+                    pass
 
             self.set_status("Ready")
             return
@@ -323,6 +362,7 @@ class ChatPipeline:
                 except Exception as exc:
                     _log_stream_tts_error("stream_end_error", exc)
             self._tts_started = False
+            self._finalize_stream_metrics("error")
             return
 
         if kind == "cancel":
@@ -340,6 +380,7 @@ class ChatPipeline:
                 except Exception as exc:
                     _log_stream_tts_error("stop", exc)
             self._tts_started = False
+            self._finalize_stream_metrics("cancel")
 
             partial_text = self._clean_stream_buffer.strip()
             if partial_text:

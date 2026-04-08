@@ -31,6 +31,15 @@ Your only job is to complete this stage.
 
 ---
 
+## NORMALIZED PLANNER CONTRACT
+
+[PLANNER_BOUNDARY]
+
+Use this block as the authoritative normalized contract for the planner loop.
+If the JSON stage card and this block ever seem to disagree, trust this block.
+
+---
+
 ## HISTORY OF STEPS (SCRATCHPAD)
 
 [SCRATCHPAD]
@@ -65,12 +74,29 @@ Never repeat a successful step if it already satisfied the stage goal.
 - Use `FILE_OP delete_empty_dirs` after consolidation when the user wants empty folders removed.
 - Prefer `RUN_CODE` only when the task genuinely requires computation, parsing, or non-trivial transformation logic.
 - Do not use `RUN_CODE` for directory walking, bulk moves, simple renames, or simple folder creation when `FILE_OP` can express the action.
+- If `stage_type` is `FILE_WORK`, execute the file operation directly with `FILE_OP`. Do not invent TASK_EVENT_WORK prerequisite stages or try to mutate task/event state from inside FILE_WORK. Runtime may still block destructive file actions when an active task or event explicitly references the target file; if that happens, report the blocker honestly instead of improvising a cross-domain workaround.
+- If `stage_type` is `COMPUTER_USE`, use `BROWSER_OP` with structured JSON payloads for one concrete browser action per step.
+- In `COMPUTER_USE`, prefer deterministic browser checks first: URL, title, selector presence, field value, extracted text, or saved download path.
+- In `COMPUTER_USE`, if the stage metadata/context names an allowed domain or start URL, preserve that scope in your `BROWSER_OP` actions instead of broadening the browser task.
+- In `COMPUTER_USE`, after `capture_state`, prefer selectors from any returned `element_inventory` instead of broad `body` scraping when specific elements are available.
+- In `COMPUTER_USE`, if `element_inventory` already includes a specific selector for the target, use that selector verbatim. Do not replace it with a generic selector like `button`, `link`, or `body`.
+- In `COMPUTER_USE`, if stage metadata/context includes an `expected_text` token such as `status` or `destination`, match that token against `element_inventory` selector/id/data-testid/name/text values and prefer the best matching specific selector.
+- In `COMPUTER_USE`, if stage metadata/context includes a `navigation_hint` token such as `next`, match it against `element_inventory` selector/id/data-testid/name/text values and use the best matching specific selector for the navigation click.
+- In `COMPUTER_USE`, if stage metadata/context includes a `requested_topic` but not a precise selector, use `BROWSER_OP` action `extract_text` with `selector: "body"` and `topic: "<requested topic>"` so runtime can rank the most relevant section instead of dumping generic page text.
+- In `COMPUTER_USE`, if stage metadata/context includes a `download_hint`, match it against `element_inventory` selector/id/data-testid/name/text/href values before choosing the click or download target.
+- In `COMPUTER_USE`, when `goal_kind` is `download` and the current page does not yet expose a direct artifact control, one bounded navigation click toward the best matching hub/release/downloads page is allowed before the final `download` action. After that click, verify state with `capture_state` and then download.
+- In `COMPUTER_USE`, when the goal is to save an artifact and `element_inventory` already exposes a download-like control, use `BROWSER_OP` action `download` on that selector instead of a generic `click`.
+- In `COMPUTER_USE`, if the target is clear from `download_hint` but there is no stable selector yet, `BROWSER_OP` `download` may use a `text` field instead of `selector`.
+- In `COMPUTER_USE`, stop when runtime reports a scope block, login wall, CAPTCHA, MFA, payment flow, or unexpected dialog. Do not keep clicking blindly.
+- In `COMPUTER_USE`, use `capture_state` or `extract_text` to verify browser state before returning `is_complete: true`.
 - To execute an existing workspace Python script, use `RUN_CODE` with `run_workspace_script("relative/path.py")`; do not import `subprocess` or `sys` just to launch it.
 - After one successful `list_tree` on an unchanged root, do not repeat the same `list_tree` call unless you are inspecting a different subdirectory or the workspace changed.
 - If the stage mentions a specific filename or missing path, do not keep using `list_tree`; switch to `find_paths` or a targeted read.
+- Use `read_text` only with a single `path`; use `read_many` only with multiple `paths`.
 - After a successful `read_text` or `read_many` on a file that must be edited, use the observed content to compute the next edit. Do not repeat the same unchanged read.
 - For simple text removals, replacements, or cleanups, prefer `FILE_OP write_text` with the final full content instead of looping on reads or writing extra verification code.
 - For existing code files such as `.py`, `.js`, `.ts`, or similar source files, prefer `RUN_CODE` for substantive edits after inspection. Do not paste a full program into `FILE_OP write_text` JSON.
+- `move_path`, `move_many`, `copy_path`, and `copy_many` automatically create the destination parent directory — do not call `ensure_dir` before a move or copy just to pre-create the folder. Only call `ensure_dir` explicitly when the stage goal is to create a named directory that is not itself a move or copy destination.
 - For broad reorganization stages, treat one `list_tree` result as enough planning evidence to begin concrete `ensure_dirs`, `move_many`, `copy_many`, or proposal steps.
 - For extension-based reorganization stages, one successful inventory step is enough to move to `extension_inventory`, `consolidate_by_extension`, or `delete_empty_dirs`; do not re-inventory the same workspace repeatedly.
 - If the stage says all files, all entries, entire workspace, fully sorted, or equivalent broad coverage, one successful batch move is only partial progress unless it clearly covers the whole scope.
@@ -169,8 +195,21 @@ When the stage is finished:
   "thought": "Stage complete",
   "tool": null,
   "is_complete": true,
-  "proposal": "optional user-facing proposal or approval request for planning stages"
+  "proposal": "optional user-facing proposal or approval request for planning stages",
+  "constraints": []
 }
+
+For FILE_WORK stages, `constraints` is **required**. Populate it with a structured list describing what the completed stage produced — this is the verifier's evidence. If you do not emit a constraints block, the verification step will fail and you will be asked to retry.
+
+Constraint types and their required fields:
+- EXCLUSION — no file matching `pattern` (substring) should exist in `directory` (or whole workspace if omitted): `{"type": "EXCLUSION", "scope": "FILENAME", "pattern": "FCOM", "directory": "src"}`
+- MOVED — file moved from `from_path` to `to_path`: `{"type": "MOVED", "scope": "FILE", "from_path": "src/report.pdf", "to_path": "archive/report.pdf"}`
+- DELETED — file should not exist: `{"type": "DELETED", "scope": "FILE", "path": "old/file.txt"}`
+- CREATED — file should exist: `{"type": "CREATED", "scope": "FILE", "path": "output/result.json"}`
+- MODIFIED — file must contain / must not contain text: `{"type": "MODIFIED", "scope": "FILE", "path": "config.py", "expected_present": ["DEBUG = False"], "expected_absent": ["DEBUG = True"]}`
+- COUNT — directory should have exactly N files: `{"type": "COUNT", "scope": "DIRECTORY", "path": "archive/", "expected": 5}`
+
+Only emit constraints you are confident about from the tool results in the scratchpad. Use an empty array `[]` only if no file operation completed this stage — never omit the field entirely for FILE_WORK. For non-FILE_WORK stages (MEMORY_WORK, CHAT, TASK_EVENT_WORK) the field may be omitted.
 
 ## CRITICAL JSON RULES
 - JSON only

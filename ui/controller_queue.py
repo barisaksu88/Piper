@@ -5,6 +5,7 @@ import time
 
 import dearpygui.dearpygui as dpg
 
+from config import CFG
 from ui.controller_actions import handle_search_result, handle_show_image, refresh_live_screen_ui
 from ui.controller_render import append_bounded_line_block
 from ui.controller_status import classify_runtime_mode
@@ -14,6 +15,17 @@ from ui.controller_status import classify_runtime_mode
 # or the render loop runs very fast.
 _MIN_DELTA_INTERVAL = 0.016  # ~60 fps cap for streaming
 _last_delta_time: float = 0.0
+
+
+def _activate_boot_ready_ui(controller, payload: object) -> None:
+    if dpg.does_item_exist("boot_group"):
+        dpg.configure_item("boot_group", show=False)
+    if dpg.does_item_exist("status_group"):
+        dpg.configure_item("status_group", show=True)
+    controller.set_boot_ready(True)
+    controller._refresh_chat_ui()
+    controller.refresh_stats_view()
+    controller.maybe_speak_ui_event("boot_ready", payload)
 
 
 def pump_ui_queue(controller) -> None:
@@ -49,13 +61,11 @@ def pump_ui_queue(controller) -> None:
             controller.maybe_speak_ui_event(kind, payload)
             continue
         if kind == "boot_ready":
-            if dpg.does_item_exist("boot_group"):
-                dpg.configure_item("boot_group", show=False)
-            if dpg.does_item_exist("status_group"):
-                dpg.configure_item("status_group", show=True)
-            controller.set_boot_ready(True)
-            controller._refresh_chat_ui()
-            controller.maybe_speak_ui_event(kind, payload)
+            if time.perf_counter() < float(getattr(controller, "_boot_ui_min_visible_until", 0.0)):
+                controller._pending_boot_ready = True
+                controller._pending_boot_ready_payload = payload
+            else:
+                _activate_boot_ready_ui(controller, payload)
             continue
 
         if kind == "ui_controls_refresh":
@@ -195,6 +205,9 @@ def pump_ui_queue(controller) -> None:
                 controller.refresh_text_view_height(controller.tags.documents_view_text)
                 controller.request_autoscroll(controller.tags.documents_view_child)
             continue
+        if kind == "stats_view_refresh":
+            controller.refresh_stats_view()
+            continue
         if kind == "search_result":
             controller.maybe_speak_ui_event(kind, payload)
             handle_search_result(controller, payload)
@@ -219,3 +232,13 @@ def pump_ui_queue(controller) -> None:
             if speak:
                 controller.maybe_speak_ui_event(kind, note_text)
             continue
+
+    if (
+        getattr(controller, "_pending_boot_ready", False)
+        and not getattr(controller, "boot_ready", False)
+        and time.perf_counter() >= float(getattr(controller, "_boot_ui_min_visible_until", 0.0))
+    ):
+        payload = getattr(controller, "_pending_boot_ready_payload", "")
+        controller._pending_boot_ready = False
+        controller._pending_boot_ready_payload = ""
+        _activate_boot_ready_ui(controller, payload)

@@ -75,6 +75,14 @@ class FileWorkChecker:
                 "requested_root": ".",
                 "destinations": inventory.get("destination_hints", {}),
             }
+            # Carry exclusion info from the original tool_result so files that were
+            # intentionally skipped (e.g. exclude_files: ["keep*"]) are not flagged
+            # as off-target when the rule checker re-evaluates current state.
+            if isinstance(tool_result, dict):
+                if tool_result.get("excluded_names"):
+                    synthetic["excluded_names"] = tool_result["excluded_names"]
+                if tool_result.get("excluded_prefixes"):
+                    synthetic["excluded_prefixes"] = tool_result["excluded_prefixes"]
         return self.run_local_file_op_checker(stage, synthetic)
 
     def build_current_file_stage_read_result(self, stage: StageCard, tool_result: Any | None = None) -> dict[str, Any] | None:
@@ -217,7 +225,12 @@ class FileWorkChecker:
         try:
             if self.cancel_token is not None:
                 self.cancel_token.raise_if_cancelled()
-            raw = self.llm.generate(messages, temperature=0.0, cancel_token=self.cancel_token)
+            raw = self.llm.generate(
+                messages,
+                temperature=0.0,
+                max_tokens=int(getattr(CFG, "FILE_CHECKER_MAX_TOKENS", 220)),
+                cancel_token=self.cancel_token,
+            )
             if self.cancel_token is not None:
                 self.cancel_token.raise_if_cancelled()
             self.ui.put(("agent_log", f"[FILE_CHECKER] {raw.strip()}"))

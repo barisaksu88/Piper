@@ -121,7 +121,6 @@ def resolve_date_phrase(text: str) -> str:
         delta = (target - today.weekday()) % 7
         if delta == 0:
             delta = 7
-        delta += 7
         return (today + datetime.timedelta(days=delta)).strftime("%Y-%m-%d")
     if raw.startswith("this ") and raw[5:] in weekday_map:
         target = weekday_map[raw[5:]]

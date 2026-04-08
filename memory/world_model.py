@@ -39,8 +39,11 @@ _ROOT_ATTRIBUTE_LABELS = {
     "likes_interests": "Likes/Interests",
     "future plans": "Future Plans",
     "future_plans": "Future Plans",
-    "date of birth": "Date of Birth",
-    "date_of_birth": "Date of Birth",
+    "date of birth": "Birthday",
+    "date_of_birth": "Birthday",
+    # canonical storage key — label is "Birthday" not "Date of Birth" to avoid the model
+    # confusing it with today's date when the user asks "what's the date?"
+    "birth_date": "Birthday",
     "vehicle": "Vehicle",
     "gender": "Gender",
 }
@@ -266,6 +269,7 @@ class WorldModelManager:
         *,
         world_model_store: WorldModelStore,
         knowledge_store: Optional[KnowledgeStore] = None,
+        memory_brain: Any | None = None,
     ):
         self.data_dir = Path(data_dir)
         self.llm = llm_client
@@ -273,8 +277,10 @@ class WorldModelManager:
         self.world_model_path = self.store.path
         self.knowledge_store = knowledge_store
         self.knowledge_path = self.knowledge_store.path if self.knowledge_store is not None else None
+        self.memory_brain = memory_brain
         self._lock = threading.Lock()
         self.log_callback = None
+        self._graph_saved_callback = None
         self._profile_refresh_counter = 0
         self._last_profile_digest = ""
 
@@ -286,6 +292,9 @@ class WorldModelManager:
 
     def set_logger(self, callback) -> None:
         self.log_callback = callback
+
+    def set_graph_saved_callback(self, callback) -> None:
+        self._graph_saved_callback = callback
 
     def _log(self, text: str) -> None:
         if self.log_callback:
@@ -1171,6 +1180,12 @@ class WorldModelManager:
         metadata["updated_at"] = int(time.time())
         self.store.save_graph(graph)
         self._sync_legacy_knowledge_mirror(graph)
+        callback = self._graph_saved_callback
+        if callback is not None:
+            try:
+                callback(json.loads(json.dumps(graph)))
+            except Exception as exc:
+                self._log(f"[WorldModel] Graph save callback failed: {exc}")
 
     def _flatten_legacy_knowledge(self, graph: Dict[str, Any]) -> Dict[str, Any]:
         nodes = graph.get("nodes") or {}
@@ -1421,7 +1436,7 @@ class WorldModelManager:
 
             from .brain import get_brain
 
-            brain = get_brain(self.data_dir)
+            brain = self.memory_brain or get_brain(self.data_dir)
             date_str = time.strftime("%b %d, %Y")
             for fact in facts:
                 if not isinstance(fact, str) or not fact:

@@ -375,13 +375,13 @@ def _extract_recent_path_hint(context: SkillSelectionContext) -> str:
 
 
 def _lookup_query_hint(context: SkillSelectionContext) -> str:
-    recent_path = _extract_recent_path_hint(context)
-    if recent_path:
-        return recent_path
     for stage in context.stages:
         terms = FileStagePolicy.stage_target_terms(stage)
         if terms:
             return str(terms[0]).strip()
+    recent_path = _extract_recent_path_hint(context)
+    if recent_path:
+        return recent_path
     return "the target file"
 
 

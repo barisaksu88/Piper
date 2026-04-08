@@ -25,6 +25,7 @@ class OperationalStateReadonlySmokeReport:
     any_event_answer: str
     tomorrow_event_answer: str
     tomorrow_confirmation_answer: str
+    appointment_when_answer: str
     no_tasks_or_events_answer: str
     there_should_be_events_answer: str
     countdown_answer: str
@@ -50,6 +51,7 @@ def run_smoke() -> OperationalStateReadonlySmokeReport:
         any_event_answer = service.build_readonly_answer("Any events?")
         tomorrow_event_answer = service.build_readonly_answer("What's on my schedules for tomorrow?")
         tomorrow_confirmation_answer = service.build_readonly_answer("Do I have an event or no for tomorrow?")
+        appointment_when_answer = service.build_readonly_answer("When is my appointment tomorrow?")
         no_tasks_or_events_answer = service.build_readonly_answer("No tasks or events.")
         there_should_be_events_answer = service.build_readonly_answer("There should be events now.")
         countdown_answer = service.build_readonly_answer("Tell me how many days my first upcoming event.")
@@ -65,6 +67,7 @@ def run_smoke() -> OperationalStateReadonlySmokeReport:
         and any_event_answer == f"Upcoming events: dentist appointment on {tomorrow}; house purchase fund on {later}."
         and tomorrow_event_answer == f"Upcoming events: dentist appointment on {tomorrow}."
         and tomorrow_confirmation_answer == f"Upcoming events: dentist appointment on {tomorrow}."
+        and appointment_when_answer == f"Upcoming events: dentist appointment on {tomorrow}."
         and no_tasks_or_events_answer == f"Pending tasks: buy milk.\nUpcoming events: dentist appointment on {tomorrow}; house purchase fund on {later}."
         and there_should_be_events_answer == f"Upcoming events: dentist appointment on {tomorrow}; house purchase fund on {later}."
         and f"house purchase fund on {later}" in event_answer
@@ -83,6 +86,7 @@ def run_smoke() -> OperationalStateReadonlySmokeReport:
         any_event_answer=any_event_answer,
         tomorrow_event_answer=tomorrow_event_answer,
         tomorrow_confirmation_answer=tomorrow_confirmation_answer,
+        appointment_when_answer=appointment_when_answer,
         no_tasks_or_events_answer=no_tasks_or_events_answer,
         there_should_be_events_answer=there_should_be_events_answer,
         countdown_answer=countdown_answer,

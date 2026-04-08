@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any, Dict, Iterable
 
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.summary import SummaryEngine
+from core.file_stage_policy import FileStagePolicy
 
 
 _STATE_MUTATION_ENGINE = StateMutationEngine()
@@ -17,6 +20,7 @@ class ScratchpadFormatter:
     _FILE_READ_OBSERVATION_LIMIT = 1800
     _FILE_MULTI_READ_OBSERVATION_LIMIT = 1400
     _FILE_MUTATION_OBSERVATION_LIMIT = 2200
+    _BROWSER_OBSERVATION_LIMIT = 1800
 
     @staticmethod
     def format_stage_header(stage_num: int, stage: Dict) -> str:
@@ -147,6 +151,64 @@ OBSERVATION_TEXT: {obs_text}"""
                     return json.dumps(safe, ensure_ascii=False)
                 except Exception:
                     pass
+            if tool == "BROWSER_OP":
+                safe: Dict[str, Any] = {}
+                for key in (
+                    "tool",
+                    "status",
+                    "summary",
+                    "action",
+                    "backend",
+                    "current_url",
+                    "title",
+                    "selector",
+                    "selector_strategy",
+                    "extracted_text",
+                    "field_value",
+                    "saved_path",
+                ):
+                    if key in observation:
+                        safe[key] = observation.get(key)
+                inventory = observation.get("element_inventory")
+                if isinstance(inventory, list) and inventory:
+                    compact_inventory = []
+                    for item in inventory[:10]:
+                        if not isinstance(item, dict):
+                            continue
+                        compact_item: Dict[str, Any] = {}
+                        for field_name in (
+                            "selector",
+                            "tag",
+                            "id",
+                            "data_testid",
+                            "name",
+                            "href",
+                            "type",
+                            "text",
+                        ):
+                            if field_name in item:
+                                compact_item[field_name] = item.get(field_name)
+                        if compact_item:
+                            compact_inventory.append(compact_item)
+                    if compact_inventory:
+                        safe["element_inventory"] = compact_inventory
+                field_values = observation.get("field_values")
+                if isinstance(field_values, dict) and field_values:
+                    safe["field_values"] = {
+                        str(key): value
+                        for key, value in list(field_values.items())[:8]
+                        if str(key).strip()
+                    }
+                text_preview = str(observation.get("text_preview") or "").strip()
+                if text_preview:
+                    safe["text_preview"] = SummaryEngine.truncate_text(text_preview, 320)
+                verification = observation.get("verification")
+                if isinstance(verification, dict) and verification:
+                    safe["verification"] = verification
+                try:
+                    return json.dumps(safe, ensure_ascii=False)
+                except Exception:
+                    pass
         if isinstance(observation, str):
             return observation
         try:
@@ -166,6 +228,8 @@ OBSERVATION_TEXT: {obs_text}"""
                 return ScratchpadFormatter._FILE_READ_OBSERVATION_LIMIT
             if tool == "FILE_OP" and action == "read_many":
                 return ScratchpadFormatter._FILE_MULTI_READ_OBSERVATION_LIMIT
+            if tool == "BROWSER_OP":
+                return ScratchpadFormatter._BROWSER_OBSERVATION_LIMIT
         return ScratchpadFormatter._DEFAULT_OBSERVATION_LIMIT
 
     @staticmethod
@@ -198,6 +262,7 @@ RESULT: {pack.status}{detail}"""
         last_observation: str = "",
         status_override: str = "",
         stage_entries: Iterable[str] | None = None,
+        stage: Dict[str, Any] | None = None,
     ):
         stage_type_upper = str(stage_type or "").upper()
         if stage_type_upper in {"TASK_EVENT_WORK", "MEMORY_WORK"}:
@@ -207,6 +272,7 @@ RESULT: {pack.status}{detail}"""
                 fallback_observation=last_observation,
                 status_override=status_override,
                 stage_entries=stage_entries,
+                stage=stage,
             )
 
         if status_override:
@@ -228,10 +294,134 @@ RESULT: {pack.status}{detail}"""
         )
         from core.contracts import StageOutcomePack
 
+        allow_persona_reroute = True
+        if stage_type_upper == "FILE_WORK":
+            allow_persona_reroute = not ScratchpadFormatter._has_terminal_missing_named_file_target_failure(
+                stage=stage,
+                stage_entries=list(stage_entries) if stage_entries is not None else None,
+            )
+
         return StageOutcomePack(
             status=status,
             detail=extracted,
             effective_success=bool(success or status_override),
+            allow_persona_reroute=allow_persona_reroute,
+        )
+
+    @staticmethod
+    def _has_terminal_missing_named_file_target_failure(
+        *,
+        stage: Dict[str, Any] | None,
+        stage_entries: list[str] | None,
+    ) -> bool:
+        if not stage or not FileStagePolicy.stage_is_file_work(stage):
+            return False
+        if FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return False
+        if ScratchpadFormatter._stage_may_create_missing_target(stage):
+            return False
+
+        target_terms = {
+            str(term).strip().lower()
+            for term in FileStagePolicy.stage_target_terms(stage)
+            if str(term).strip()
+        }
+        if not target_terms:
+            return False
+
+        entries = [str(entry or "") for entry in (stage_entries or []) if str(entry or "").strip()]
+        if any("FILE_WORK_VERIFIED_RESULT:" in entry for entry in entries):
+            return False
+
+        target_terms |= {
+            Path(term).stem.lower()
+            for term in list(target_terms)
+            if str(term).strip()
+        }
+        for entry in entries:
+            missing_target = ScratchpadFormatter._extract_missing_named_target(entry)
+            if missing_target and ScratchpadFormatter._term_matches_target(missing_target, target_terms):
+                return True
+            missing_query = ScratchpadFormatter._extract_failed_find_query(entry)
+            if missing_query and ScratchpadFormatter._term_matches_target(missing_query, target_terms):
+                return True
+        return False
+
+    @staticmethod
+    def _stage_may_create_missing_target(stage: Dict[str, Any]) -> bool:
+        return FileStagePolicy.stage_may_create_missing_target(stage)
+
+    @staticmethod
+    def _extract_missing_named_target(entry: str) -> str:
+        for candidate_text in (
+            ScratchpadFormatter._extract_file_op_summary(entry),
+            str(entry or ""),
+        ):
+            candidate = ScratchpadFormatter._extract_missing_named_target_from_text(candidate_text)
+            if candidate:
+                return candidate
+        return ""
+
+    @staticmethod
+    def _extract_file_op_summary(entry: str) -> str:
+        text = str(entry or "")
+        if "OBSERVATION_TEXT:" not in text:
+            return ""
+        _, _, payload = text.partition("OBSERVATION_TEXT:")
+        try:
+            data = json.loads(payload.strip())
+        except Exception:
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        if str(data.get("tool", "")).upper() != "FILE_OP":
+            return ""
+        return str(data.get("summary") or "").strip()
+
+    @staticmethod
+    def _extract_missing_named_target_from_text(text: str) -> str:
+        raw = str(text or "").strip()
+        if not raw:
+            return ""
+        match = re.search(
+            r"file_op (?:target|source) not found:\s*`?(.+?)`?(?:\",|\n|$)",
+            raw,
+            re.IGNORECASE,
+        )
+        if not match:
+            return ""
+        return str(match.group(1) or "").strip().strip("`'\"").lower()
+
+    @staticmethod
+    def _extract_failed_find_query(entry: str) -> str:
+        text = str(entry or "")
+        if "OBSERVATION_TEXT:" not in text or '"action": "find_paths"' not in text or '"match_count": 0' not in text:
+            return ""
+        _, _, payload = text.partition("OBSERVATION_TEXT:")
+        try:
+            data = json.loads(payload.strip())
+        except Exception:
+            return ""
+        if str(data.get("action", "")).lower() != "find_paths":
+            return ""
+        try:
+            if int(data.get("match_count", 0) or 0) != 0:
+                return ""
+        except (TypeError, ValueError):
+            return ""
+        return str(data.get("requested_query") or "").strip().strip("`'\"").lower()
+
+    @staticmethod
+    def _term_matches_target(term: str, targets: set[str]) -> bool:
+        candidate = str(term or "").strip().lower()
+        if not candidate:
+            return False
+        return any(
+            candidate == target
+            or candidate.endswith(target)
+            or target.endswith(candidate)
+            for target in targets
+            if target
         )
 
     # _select_outcome_detail, _extract_observation_detail, _is_generic_file_work_summary,

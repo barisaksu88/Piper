@@ -12,6 +12,8 @@ import dearpygui.dearpygui as dpg
 from config import CFG
 from core.codex_bridge import CodexRepairCoordinator
 from core.code_session import EmbeddedCodeSession
+from core.engines.proactive_monitor import ProactiveMonitor
+from core.engines.stats_collector import StatsCollector
 from core.engineering_support import build_manual_codex_snapshot
 from core.pipeline import ChatPipeline
 from core.runtime_control import CancellationToken
@@ -47,6 +49,7 @@ from ui.controller_actions import (
     on_stop as on_stop_action,
     refresh_live_screen_ui as refresh_live_screen_ui_action,
     reset_mic_ui as reset_mic_ui_action,
+    trigger_proactive_reminder as trigger_proactive_reminder_action,
 )
 from ui.controller_queue import pump_ui_queue as pump_ui_queue_action
 from ui.controller_render import format_chat_message_block, renderable_chat_messages
@@ -92,6 +95,7 @@ class UiTags:
     ingest_button: str = "ingest_button"
     main_tab_bar: str = "main_tab_bar"
     code_tab: str = "code_tab"
+    stats_tab: str = "stats_tab"
     code_view_child: str = "code_view_child"
     code_view_text: str = "code_view_text"
     code_status_text: str = "code_status_text"
@@ -102,6 +106,28 @@ class UiTags:
     code_stop_button: str = "code_stop_button"
     documents_view_child: str = "documents_view_child"
     documents_view_text: str = "documents_view_text"
+    stats_view_child: str = "stats_view_child"
+    stats_view_text: str = "stats_view_text"
+    stats_latency_plot: str = "stats_latency_plot"
+    stats_latency_x_axis: str = "stats_latency_x_axis"
+    stats_latency_y_axis: str = "stats_latency_y_axis"
+    stats_total_series: str = "stats_total_series"
+    stats_total_upper_series: str = "stats_total_upper_series"
+    stats_total_outlier_series: str = "stats_total_outlier_series"
+    stats_phase_plot: str = "stats_phase_plot"
+    stats_phase_x_axis: str = "stats_phase_x_axis"
+    stats_phase_y_axis: str = "stats_phase_y_axis"
+    stats_route_series: str = "stats_route_series"
+    stats_manager_series: str = "stats_manager_series"
+    stats_reporter_series: str = "stats_reporter_series"
+    stats_persona_series: str = "stats_persona_series"
+    stats_tts_series: str = "stats_tts_series"
+    stats_workload_group: str = "stats_workload_group"
+    stats_workload_plot: str = "stats_workload_plot"
+    stats_workload_x_axis: str = "stats_workload_x_axis"
+    stats_workload_y_axis: str = "stats_workload_y_axis"
+    stats_planner_series: str = "stats_planner_series"
+    stats_executor_series: str = "stats_executor_series"
 
     def for_layout(self) -> Dict[str, str]:
         return {
@@ -129,6 +155,7 @@ class UiTags:
             "TAG_INGEST_BUTTON": self.ingest_button,
             "TAG_MAIN_TAB_BAR": self.main_tab_bar,
             "TAG_CODE_TAB": self.code_tab,
+            "TAG_STATS_TAB": self.stats_tab,
             "TAG_CODE_VIEW_CHILD": self.code_view_child,
             "TAG_CODE_VIEW_TEXT": self.code_view_text,
             "TAG_CODE_STATUS_TEXT": self.code_status_text,
@@ -139,6 +166,28 @@ class UiTags:
             "TAG_CODE_STOP_BUTTON": self.code_stop_button,
             "TAG_DOCUMENTS_VIEW_CHILD": self.documents_view_child,
             "TAG_DOCUMENTS_VIEW_TEXT": self.documents_view_text,
+            "TAG_STATS_VIEW_CHILD": self.stats_view_child,
+            "TAG_STATS_VIEW_TEXT": self.stats_view_text,
+            "TAG_STATS_LATENCY_PLOT": self.stats_latency_plot,
+            "TAG_STATS_LATENCY_X_AXIS": self.stats_latency_x_axis,
+            "TAG_STATS_LATENCY_Y_AXIS": self.stats_latency_y_axis,
+            "TAG_STATS_TOTAL_SERIES": self.stats_total_series,
+            "TAG_STATS_TOTAL_UPPER_SERIES": self.stats_total_upper_series,
+            "TAG_STATS_TOTAL_OUTLIER_SERIES": self.stats_total_outlier_series,
+            "TAG_STATS_PHASE_PLOT": self.stats_phase_plot,
+            "TAG_STATS_PHASE_X_AXIS": self.stats_phase_x_axis,
+            "TAG_STATS_PHASE_Y_AXIS": self.stats_phase_y_axis,
+            "TAG_STATS_ROUTE_SERIES": self.stats_route_series,
+            "TAG_STATS_MANAGER_SERIES": self.stats_manager_series,
+            "TAG_STATS_REPORTER_SERIES": self.stats_reporter_series,
+            "TAG_STATS_PERSONA_SERIES": self.stats_persona_series,
+            "TAG_STATS_TTS_SERIES": self.stats_tts_series,
+            "TAG_STATS_WORKLOAD_GROUP": self.stats_workload_group,
+            "TAG_STATS_WORKLOAD_PLOT": self.stats_workload_plot,
+            "TAG_STATS_WORKLOAD_X_AXIS": self.stats_workload_x_axis,
+            "TAG_STATS_WORKLOAD_Y_AXIS": self.stats_workload_y_axis,
+            "TAG_STATS_PLANNER_SERIES": self.stats_planner_series,
+            "TAG_STATS_EXECUTOR_SERIES": self.stats_executor_series,
         }
 
 
@@ -158,6 +207,7 @@ class PiperController:
         document_mgr,
         agent_brain,
         prompt_context_service,
+        user_runtime,
         boot_mgr,
         img_gen,
         live_screen,
@@ -178,6 +228,7 @@ class PiperController:
         self.document_mgr = document_mgr
         self.agent_brain = agent_brain
         self.prompt_context_service = prompt_context_service
+        self.user_runtime = user_runtime
         self.boot_mgr = boot_mgr
         self.img_gen = img_gen
         self.live_screen = live_screen
@@ -192,16 +243,21 @@ class PiperController:
             auto_enabled=CFG.CODEX_AUTO_REPAIR_ENABLED,
             poll_interval_s=CFG.CODEX_REPAIR_POLL_INTERVAL_S,
         )
+        self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
 
         self.gen_lock = threading.Lock()
         self.cancel_lock = threading.Lock()
         self.cancel_tokens: dict[CancellationToken, int] = {}
+        self._search_in_flight_count = 0
+        self._active_search_query = ""
+        self._proactive_reminder_inflight_ids: set[str] = set()
         self.pending_autoscrolls: dict[str, int] = {}
         self.mic_state = "idle"
         self.restart_requested = False
         self.boot_ready = False
         self.runtime_mode = "IDLE"
         self.session_meta = "Session: active"
+        self.user_meta = ""
         self.stage_meta = ""
         self.code_session_meta = ""
         self.style_meta = "Style: DEFAULT"
@@ -224,6 +280,10 @@ class PiperController:
         self._vision_note_lock = threading.Lock()
         self._vision_note_active = False
         self._last_vision_note_signature = ""
+        self._boot_ui_min_visible_until = 0.0
+        self._pending_boot_ready = False
+        self._pending_boot_ready_payload: object = ""
+        self.refresh_active_user_meta(update_ui=False)
 
         self.pipeline = ChatPipeline(
             tts=self.tts,
@@ -231,6 +291,14 @@ class PiperController:
             chat_upsert_fn=self.chat_upsert_streaming_assistant,
             persist_turn_fn=self.persist_turn,
             set_status_fn=self.set_status,
+            finalize_stream_fn=self.chat_state.finalize_streaming_assistant,
+        )
+        self.proactive_monitor = ProactiveMonitor(
+            CFG.REMINDERS_PATH,
+            can_dispatch=self.can_dispatch_proactive_reminder,
+            is_inflight=self.is_proactive_reminder_inflight,
+            dispatch_callback=lambda reminder: trigger_proactive_reminder_action(self, reminder),
+            log_callback=self.safe_log,
         )
 
     def _text_view_min_height(self, text_tag: str) -> int:
@@ -240,6 +308,8 @@ class PiperController:
             return 72
         if text_tag == self.tags.documents_view_text:
             return 72
+        if text_tag == self.tags.stats_view_text:
+            return 96
         if text_tag == self.tags.agent_log_text:
             return 64
         if text_tag == self.tags.code_view_text:
@@ -258,6 +328,118 @@ class PiperController:
             dpg.configure_item(text_tag, height=height)
         except Exception:
             pass
+
+    def refresh_stats_view(self) -> None:
+        if not dpg.does_item_exist(self.tags.stats_view_text):
+            return
+        snapshot = self.stats_collector.build_dashboard_snapshot()
+        dpg.set_value(self.tags.stats_view_text, str(snapshot.get("summary_text") or "No stats recorded yet."))
+        self.refresh_text_view_height(self.tags.stats_view_text)
+        x_values = [float(value) for value in snapshot.get("turn_numbers") or []]
+        self._set_stats_series(
+            self.tags.stats_total_series,
+            x_values,
+            snapshot.get("total_ms") or [],
+            show=bool(x_values),
+        )
+        self._set_stats_series(
+            self.tags.stats_total_upper_series,
+            x_values,
+            snapshot.get("total_upper_ms") or [],
+            show=bool(x_values),
+        )
+        self._set_stats_series(
+            self.tags.stats_total_outlier_series,
+            snapshot.get("total_outlier_x") or [],
+            snapshot.get("total_outlier_y") or [],
+            show=bool(snapshot.get("total_outlier_x") or []),
+        )
+
+        self._set_stats_series(
+            self.tags.stats_route_series,
+            x_values,
+            snapshot.get("route_ms") or [],
+            show=self._has_nonzero_values(snapshot.get("route_ms") or []),
+        )
+        self._set_stats_series(
+            self.tags.stats_manager_series,
+            x_values,
+            snapshot.get("manager_ms") or [],
+            show=self._has_nonzero_values(snapshot.get("manager_ms") or []),
+        )
+        self._set_stats_series(
+            self.tags.stats_reporter_series,
+            x_values,
+            snapshot.get("reporter_ms") or [],
+            show=self._has_nonzero_values(snapshot.get("reporter_ms") or []),
+        )
+        self._set_stats_series(
+            self.tags.stats_persona_series,
+            x_values,
+            snapshot.get("persona_ms") or [],
+            show=self._has_nonzero_values(snapshot.get("persona_ms") or []),
+        )
+        self._set_stats_series(
+            self.tags.stats_tts_series,
+            x_values,
+            snapshot.get("tts_ms") or [],
+            show=self._has_nonzero_values(snapshot.get("tts_ms") or []),
+        )
+
+        planner_values = snapshot.get("planner_total_ms") or []
+        executor_values = snapshot.get("executor_total_ms") or []
+        has_workload = self._has_nonzero_values(planner_values) or self._has_nonzero_values(executor_values)
+        if dpg.does_item_exist(self.tags.stats_workload_group):
+            dpg.configure_item(self.tags.stats_workload_group, show=has_workload)
+        self._set_stats_series(
+            self.tags.stats_planner_series,
+            x_values,
+            planner_values,
+            show=self._has_nonzero_values(planner_values),
+        )
+        self._set_stats_series(
+            self.tags.stats_executor_series,
+            x_values,
+            executor_values,
+            show=self._has_nonzero_values(executor_values),
+        )
+
+        for axis_tag in (
+            self.tags.stats_latency_x_axis,
+            self.tags.stats_latency_y_axis,
+            self.tags.stats_phase_x_axis,
+            self.tags.stats_phase_y_axis,
+            self.tags.stats_workload_x_axis,
+            self.tags.stats_workload_y_axis,
+        ):
+            if not dpg.does_item_exist(axis_tag):
+                continue
+            try:
+                dpg.fit_axis_data(axis_tag)
+            except Exception:
+                continue
+
+    @staticmethod
+    def _has_nonzero_values(values: List[float] | Tuple[float, ...]) -> bool:
+        return any(float(value or 0.0) > 0.0 for value in values)
+
+    def _set_stats_series(
+        self,
+        series_tag: str,
+        x_values: List[float] | Tuple[float, ...],
+        y_values: List[float] | Tuple[float, ...],
+        *,
+        show: bool,
+    ) -> None:
+        if not dpg.does_item_exist(series_tag):
+            return
+        xs = [float(value or 0.0) for value in x_values]
+        ys = [float(value or 0.0) for value in y_values]
+        try:
+            dpg.set_value(series_tag, [xs, ys])
+            dpg.configure_item(series_tag, show=bool(show))
+        except Exception:
+            return
 
     @staticmethod
     def _chat_message_height(text: str) -> int:
@@ -284,10 +466,17 @@ class PiperController:
 
     def _event_tts_profile(self) -> tuple[str | None, float | None]:
         try:
-            style_state = self.style_mgr.load(0.7, "af_heart", 0.9)
+            style_state = self.load_style_state()
             return style_state.tts_voice, style_state.tts_speed
         except Exception:
             return None, None
+
+    def load_style_state(self):
+        return self.style_mgr.load(
+            float(getattr(CFG, "TEMPERATURE", 0.7)),
+            str(getattr(CFG, "TTS_VOICE", "af_heart")),
+            float(getattr(CFG, "TTS_SPEED", 0.85)),
+        )
 
     def _speak_event_notification(self, text: str, *, key: str = "", force: bool = False) -> None:
         if not force and self.event_speech_mode == EVENT_SPEECH_OFF:
@@ -354,7 +543,7 @@ class PiperController:
                 deadline = time.monotonic() + 5.0
                 while self.has_active_operations() and time.monotonic() < deadline:
                     time.sleep(0.15)
-                style_state = self.style_mgr.load(0.7, "af_heart", 0.9)
+                style_state = self.load_style_state()
                 recent_notes = self.vision_session_memory.recent_notes(limit=4)
                 recent_user_messages = recent_user_vision_context(
                     self.chat_state.get_messages_snapshot(),
@@ -596,9 +785,70 @@ class PiperController:
                 self.cancel_tokens[token] = current - 1
         self.ui_queue.put(("ui_controls_refresh", ""))
 
+    def retain_search_in_flight(self, query: str = "") -> None:
+        with self.cancel_lock:
+            self._search_in_flight_count += 1
+            clean_query = str(query or "").strip()
+            if clean_query:
+                self._active_search_query = clean_query
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def release_search_in_flight(self) -> None:
+        with self.cancel_lock:
+            if self._search_in_flight_count > 0:
+                self._search_in_flight_count -= 1
+            if self._search_in_flight_count <= 0:
+                self._search_in_flight_count = 0
+                self._active_search_query = ""
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def is_search_in_flight(self) -> bool:
+        with self.cancel_lock:
+            return self._search_in_flight_count > 0
+
+    def current_search_query(self) -> str:
+        with self.cancel_lock:
+            if self._search_in_flight_count <= 0:
+                return ""
+            return self._active_search_query
+
+    def retain_proactive_reminder_inflight(self, reminder_id: str) -> None:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return
+        with self.cancel_lock:
+            self._proactive_reminder_inflight_ids.add(clean_id)
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def release_proactive_reminder_inflight(self, reminder_id: str) -> None:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return
+        with self.cancel_lock:
+            self._proactive_reminder_inflight_ids.discard(clean_id)
+        self.ui_queue.put(("ui_controls_refresh", ""))
+
+    def is_proactive_reminder_inflight(self, reminder_id: str) -> bool:
+        clean_id = str(reminder_id or "").strip()
+        if not clean_id:
+            return False
+        with self.cancel_lock:
+            return clean_id in self._proactive_reminder_inflight_ids
+
+    def can_dispatch_proactive_reminder(self) -> bool:
+        if not self.boot_ready:
+            return False
+        if self.has_active_operations() or self.has_active_code_session():
+            return False
+        if self.document_ingest_active or self.live_screen_pending:
+            return False
+        if self.is_tts_active():
+            return False
+        return True
+
     def has_active_operations(self) -> bool:
         with self.cancel_lock:
-            return bool(self.cancel_tokens)
+            return bool(self.cancel_tokens) or self._search_in_flight_count > 0
 
     def has_active_code_session(self) -> bool:
         return self.code_session_active or self.code_session.is_active()
@@ -902,6 +1152,16 @@ class PiperController:
     def load_memory_into_chat(self) -> None:
         self.chat_state.load_recent_memory(limit=50)
 
+    def refresh_active_user_meta(self, *, update_ui: bool = True) -> None:
+        label = ""
+        try:
+            label = str(self.user_runtime.active_user_label() or "").strip()
+        except Exception:
+            label = ""
+        self.user_meta = f"User: {label}" if label else ""
+        if update_ui:
+            self._refresh_top_bar()
+
     def run(self) -> int:
         CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.agent_brain.cleanup_old_events()
@@ -933,7 +1193,8 @@ class PiperController:
             h=self.height,
         )
 
-        style_state = self.style_mgr.load(0.7, "af_heart", 0.9)
+        self.refresh_active_user_meta()
+        style_state = self.load_style_state()
         if dpg.does_item_exist(self.tags.mode_indicator):
             mode_name = style_state.name.upper() if style_state.name.lower() != "default" else ""
             self.set_mode_indicator(f"MODE: {mode_name}" if mode_name else "")
@@ -941,19 +1202,28 @@ class PiperController:
         self._refresh_top_bar()
         self.refresh_documents_view()
         self.refresh_interaction_state()
+        self.proactive_monitor.start()
+        self._boot_ui_min_visible_until = time.perf_counter() + float(
+            getattr(CFG, "BOOT_SCREEN_MIN_VISIBLE_S", 0.75)
+        )
+        self._pending_boot_ready = False
+        self._pending_boot_ready_payload = ""
 
         boot_thread = threading.Thread(target=self.boot_mgr.run_sequence, daemon=True)
         boot_thread.start()
 
-        while dpg.is_dearpygui_running():
-            self.pump_ui_queue()
-            self.poll_codex_repair()
-            tts_busy = self.is_tts_active()
-            if tts_busy != self._last_tts_busy:
-                self.refresh_interaction_state()
-            dpg.render_dearpygui_frame()
-            self._flush_autoscrolls()
-
-        dpg.destroy_context()
-        self.code_session.shutdown()
+        try:
+            while dpg.is_dearpygui_running():
+                self.pump_ui_queue()
+                self.poll_codex_repair()
+                tts_busy = self.is_tts_active()
+                if tts_busy != self._last_tts_busy:
+                    self.refresh_interaction_state()
+                dpg.render_dearpygui_frame()
+                self._flush_autoscrolls()
+        finally:
+            self.proactive_monitor.stop()
+            dpg.destroy_context()
+            self.agent_brain.shutdown()
+            self.code_session.shutdown()
         return RESTART_EXIT_CODE if self.restart_requested else 0

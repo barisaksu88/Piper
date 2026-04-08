@@ -25,16 +25,117 @@ from core.prompt_context import PromptContextService
 from core.style import StyleManager
 from llm.boot import BootManager
 from llm.llm_server_client import LlamaServerClient, LlamaServerConfig
-from memory.brain import get_brain
 from memory.chat_state import ChatState
-from memory.documents import DocumentMemoryManager
-from memory import KnowledgeManager
-from memory.state_owner import SharedStateOwner
-from memory.transient_state import TransientStateManager
+from memory.user_runtime import (
+    ActiveUserBrainProxy,
+    ActiveUserDocumentMemoryProxy,
+    ActiveUserKnowledgeManagerProxy,
+    ActiveUserRuntime,
+    ActiveUserStateOwnerProxy,
+    ActiveUserTransientStateManagerProxy,
+)
 from tools.image_gen import ImageGenerator
 from tools.vision import VisionError, VisionRequest, analyze_image, resolve_vision_request
 
 from .tts_probe import RecordingTTS
+
+
+def _clear_conversation_summary_file(path: Path | None = None) -> None:
+    target = Path(path) if path is not None else CFG.CONVERSATION_SUMMARY_PATH
+    try:
+        target.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _current_conversation_summary_path(harness: "PiperHarness") -> Path:
+    try:
+        return Path(harness.user_runtime.current_conversation_summary_path())
+    except Exception:
+        return CFG.CONVERSATION_SUMMARY_PATH
+
+
+def _refresh_active_user_style(harness: "PiperHarness") -> None:
+    try:
+        style_filename = str(harness.user_runtime.current_style_filename() or "").strip()
+    except Exception:
+        style_filename = ""
+    if style_filename:
+        harness.style_mgr.active_filename = style_filename
+
+
+def _render_user_list_message(harness: "PiperHarness") -> str:
+    active_id = ""
+    active_profile = None
+    try:
+        active_profile = harness.user_runtime.active_profile()
+        active_id = active_profile.user_id
+    except Exception:
+        active_id = ""
+    lines = ["[UI] Users:"]
+    if getattr(active_profile, "is_unknown", False):
+        lines.append("* Current speaker: Unknown [unknown; unknown] (not a saved profile)")
+    try:
+        profiles = harness.user_runtime.list_profiles()
+    except Exception:
+        profiles = []
+    for profile in profiles:
+        marker = "*" if profile.user_id == active_id else "-"
+        role = str(harness.user_runtime.profile_role_label(profile) or "user")
+        lines.append(f"{marker} {profile.name} [{profile.user_id}; {role}]")
+    if len(lines) == 1:
+        lines.append("- (none)")
+    return "\n".join(lines)
+
+
+def _render_active_user_message(harness: "PiperHarness") -> str:
+    try:
+        profile = harness.user_runtime.active_profile()
+    except Exception:
+        return "[UI] Active user unavailable."
+    role = str(harness.user_runtime.profile_role_label(profile) or "user")
+    return f"[UI] Active user: {profile.name} [{profile.user_id}; {role}]"
+
+
+def _apply_active_user_switch(harness: "PiperHarness") -> None:
+    try:
+        harness.agent_brain.suspend_runtime_sessions()
+    except Exception:
+        pass
+    harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
+    harness.chat_state.begin_fresh_session(wipe_persistent=False)
+    _refresh_active_user_style(harness)
+
+
+def _switch_active_user(harness: "PiperHarness", target: str) -> str:
+    result = harness.user_runtime.request_typed_user_switch(target)
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(harness)
+    return str(getattr(result, "message", "") or "[UI] User switch failed.")
+
+
+def _submit_admin_password(harness: "PiperHarness", raw_text: str) -> str:
+    text = str(raw_text or "")
+    lowered = text.strip().lower()
+    if lowered in {"/cancel", "cancel"}:
+        return harness.user_runtime.cancel_pending_admin_password()
+    result = harness.user_runtime.submit_admin_password(text)
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(harness)
+    return str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
+
+
+def _observe_typed_speaker_identity(harness: "PiperHarness", raw_text: str) -> tuple[bool, str]:
+    result = harness.user_runtime.observe_typed_identity_hint(raw_text)
+    if result is None:
+        return False, ""
+    if getattr(result, "requires_password", False):
+        return True, str(getattr(result, "message", "") or "[UI] Password required.")
+    if getattr(result, "requires_identity_clarification", False):
+        return True, str(getattr(result, "message", "") or "[UI] I need one more detail to identify who is speaking.")
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(harness)
+    return False, ""
 
 
 @dataclass(frozen=True)
@@ -122,14 +223,27 @@ class _HarnessDataOverlay:
 
     def _clear_debug_files(self) -> None:
         for rel_path in (
+            # per-layer debug files (current)
+            "router_debug.txt",
+            "persona_debug.txt",
+            "planner_debug.txt",
+            "doc_focus_debug.txt",
+            # legacy combined file — kept so old copies are cleaned up too
             "llm_prompt_debug.txt",
             "llm_http_payload_debug.txt",
             "manager_debug.txt",
             "tts_debug.txt",
+            "stats_alerts.log",
         ):
             path = data_debug_path(self.data_dir, rel_path)
             if path.exists():
                 path.unlink()
+        stats_path = self.data_dir / "stats.jsonl"
+        if stats_path.exists():
+            stats_path.unlink()
+        change_journal_path = self.data_dir / "change_journal.json"
+        if change_journal_path.exists():
+            change_journal_path.unlink()
         for rel_path in (
             self.data_dir / "state" / "codex_repair_request.json",
             self.data_dir / "state" / "codex_repair_status.json",
@@ -140,7 +254,7 @@ class _HarnessDataOverlay:
 
     @staticmethod
     def _reset_runtime_caches() -> None:
-        brain_module._brain = None
+        brain_module._brains = {}
 
 
 class PiperHarness:
@@ -188,24 +302,29 @@ class PiperHarness:
                 else None,
             )
         )
-        self.state_owner = SharedStateOwner.for_data_dir(self.data_dir)
-        self.knowledge_mgr = KnowledgeManager(
+        self.user_runtime = ActiveUserRuntime(
             self.data_dir,
             self.llm,
-            world_model_store=self.state_owner.world_model_store,
-            knowledge_store=self.state_owner.knowledge_store,
+            admin_user_id="admin_baris",
+            admin_name="Baris",
+            default_style_filename=self.style_mgr.active_filename,
         )
-        self.document_mgr = DocumentMemoryManager(self.data_dir)
-        self.transient_state_mgr = TransientStateManager(
-            situational_store=self.state_owner.situational_state_store,
-            intent_store=self.state_owner.intent_state_store,
-            knowledge_mgr=self.knowledge_mgr,
-        )
+        active_user_style = self.user_runtime.current_style_filename()
+        if active_user_style:
+            self.style_mgr.active_filename = active_user_style
+        self.chat_state.bind_memory_path(self.user_runtime.current_memory_path())
+        self.state_owner = ActiveUserStateOwnerProxy(self.user_runtime)
+        self.knowledge_mgr = ActiveUserKnowledgeManagerProxy(self.user_runtime)
+        self.document_mgr = ActiveUserDocumentMemoryProxy(self.user_runtime)
+        self.transient_state_mgr = ActiveUserTransientStateManagerProxy(self.user_runtime)
+        self.memory_brain = ActiveUserBrainProxy(self.user_runtime)
         self.agent_brain = AgentBrain(
             self.data_dir,
+            workspace_root=self.data_dir / "workspace",
             state_owner=self.state_owner,
             knowledge_manager=self.knowledge_mgr,
             transient_state_manager=self.transient_state_mgr,
+            memory_brain=self.memory_brain,
         )
         self.prompt_context_service = PromptContextService(
             instruction_loader=InstructionLoader(CFG.INSTRUCTIONS_PATH),
@@ -213,8 +332,9 @@ class PiperHarness:
             operational_state_service=OperationalStateService(self.state_owner),
             knowledge_mgr=self.knowledge_mgr,
             transient_state_mgr=self.transient_state_mgr,
-            brain=get_brain(self.data_dir),
+            brain=self.memory_brain,
             document_memory=self.document_mgr,
+            user_runtime=self.user_runtime,
         )
         self.boot_mgr = BootManager(self.ui_queue)
         self.img_gen = ImageGenerator(self.data_dir)
@@ -224,6 +344,7 @@ class PiperHarness:
             chat_upsert_fn=self.chat_state.upsert_streaming_assistant,
             persist_turn_fn=self._persist_turn,
             set_status_fn=self._set_status,
+            finalize_stream_fn=self.chat_state.finalize_streaming_assistant,
         )
         self.code_session = EmbeddedCodeSession(
             self.data_dir / "workspace",
@@ -235,6 +356,8 @@ class PiperHarness:
         self._images: List[str] = []
         self._active_runs = 0
         self._active_lock = threading.Lock()
+        self._search_in_flight_count = 0
+        self._active_search_query = ""
         self._last_activity = time.monotonic()
         self._started = False
         self._boot_report: Optional[HarnessBootReport] = None
@@ -253,7 +376,7 @@ class PiperHarness:
         if self._server_healthy():
             self.boot_mgr.server_ready = True
             try:
-                get_brain(self.data_dir)
+                self.user_runtime.current_brain()
                 self.boot_mgr.brain_ready = True
             except Exception as exc:
                 self._record_event("boot_error", f"Brain init failed: {exc}")
@@ -281,6 +404,7 @@ class PiperHarness:
     def close(self) -> None:
         try:
             self.code_session.shutdown()
+            self.agent_brain.shutdown()
             self.boot_mgr.shutdown()
         finally:
             self.tts.shutdown()
@@ -305,7 +429,35 @@ class PiperHarness:
         status_start = len(self._statuses)
         image_start = len(self._images)
 
-        if not self._handle_command(text):
+        if self.user_runtime.is_waiting_for_admin_password():
+            self.chat_state.append("system", _submit_admin_password(self, text))
+        elif not self._handle_command(text):
+            handled_identity, identity_message = _observe_typed_speaker_identity(self, text)
+            if handled_identity:
+                self.chat_state.append("system", identity_message)
+                timed_out = not self._wait_for_idle(timeout_s=timeout_s, idle_grace_s=idle_grace_s)
+                snapshot = self.chat_state.get_messages_snapshot()
+                new_messages = snapshot[msg_start:]
+                assistant_messages = [m for m in new_messages if m.get("role") == "assistant"]
+                assistant_text = assistant_messages[-1]["content"] if assistant_messages else ""
+                system_messages = [
+                    str(m.get("content", ""))
+                    for m in new_messages
+                    if m.get("role") == "system" and not m.get("hidden")
+                ]
+                return HarnessTurnResult(
+                    user_text=text,
+                    assistant_text=assistant_text,
+                    messages=new_messages,
+                    system_messages=system_messages,
+                    tts_utterances=self.tts.snapshot_utterances(utterance_start),
+                    tts_events=self.tts.snapshot_events(tts_event_start),
+                    ui_events=[asdict(event) for event in self._events[event_start:]],
+                    status_history=list(self._statuses[status_start:]),
+                    images=list(self._images[image_start:]),
+                    timed_out=timed_out,
+                    duration_s=round(time.monotonic() - start_time, 3),
+                )
             self.chat_state.append("user", text)
             self._persist_turn("user", text)
             self._start_generation()
@@ -314,6 +466,19 @@ class PiperHarness:
         snapshot = self.chat_state.get_messages_snapshot()
         new_messages = snapshot[msg_start:]
         assistant_messages = [m for m in new_messages if m.get("role") == "assistant"]
+        if not assistant_messages:
+            # Hidden system upserts/removals can shrink the snapshot during a turn,
+            # which makes a raw msg_start slice miss the assistant reply even
+            # though it was actually appended after the latest user turn.
+            latest_user_idx = -1
+            for idx in range(len(snapshot) - 1, -1, -1):
+                message = snapshot[idx]
+                if message.get("role") == "user" and str(message.get("content") or "") == text:
+                    latest_user_idx = idx
+                    break
+            if latest_user_idx >= 0:
+                new_messages = snapshot[latest_user_idx + 1 :]
+                assistant_messages = [m for m in new_messages if m.get("role") == "assistant"]
         assistant_text = assistant_messages[-1]["content"] if assistant_messages else ""
         system_messages = [
             str(m.get("content", ""))
@@ -346,11 +511,16 @@ class PiperHarness:
                 "kept_data_dir": str(self.kept_data_dir) if self.kept_data_dir else None,
             },
             "debug_files": {
-                "llm_prompt": str(data_debug_path(self.data_dir, "llm_prompt_debug.txt")),
+                "router": str(data_debug_path(self.data_dir, "router_debug.txt")),
+                "persona": str(data_debug_path(self.data_dir, "persona_debug.txt")),
+                "planner": str(data_debug_path(self.data_dir, "planner_debug.txt")),
+                "doc_focus": str(data_debug_path(self.data_dir, "doc_focus_debug.txt")),
                 "llm_http": str(data_debug_path(self.data_dir, "llm_http_payload_debug.txt")),
                 "manager": str(data_debug_path(self.data_dir, "manager_debug.txt")),
                 "tts": str(data_debug_path(self.data_dir, "tts_debug.txt")),
+                "stats_alerts": str(data_debug_path(self.data_dir, "stats_alerts.log")),
             },
+            "stats": str(self.data_dir / "stats.jsonl"),
             "messages": self.chat_state.get_messages_snapshot(),
             "events": [asdict(event) for event in self._events],
             "statuses": list(self._statuses),
@@ -364,9 +534,20 @@ class PiperHarness:
         if not res.handled:
             return False
         if res.action == "clear":
+            _clear_conversation_summary_file(_current_conversation_summary_path(self))
             self.chat_state.clear()
         elif res.action == "new_session":
+            _clear_conversation_summary_file(_current_conversation_summary_path(self))
             self.chat_state.new_session()
+        elif res.action == "list_users":
+            self.chat_state.append("system", _render_user_list_message(self))
+        elif res.action == "show_active_user":
+            self.chat_state.append("system", _render_active_user_message(self))
+        elif res.action == "switch_user" and res.user_query:
+            self.chat_state.append("system", _switch_active_user(self, res.user_query))
+        elif res.action == "set_admin_password" and res.password_value is not None:
+            outcome = self.user_runtime.set_admin_password(res.password_value)
+            self.chat_state.append("system", outcome.message)
         elif res.action == "codex_support":
             messages = self.chat_state.get_messages_snapshot()
             user_msg = ""
@@ -391,6 +572,11 @@ class PiperHarness:
             self._persist_turn("user", user_text)
             self._start_vision_query(res.vision_path, res.vision_prompt)
             return True
+        if res.style_filename:
+            try:
+                self.user_runtime.set_active_style_filename(res.style_filename)
+            except Exception:
+                pass
         if res.ui_message:
             self.chat_state.append("system", res.ui_message)
         return True
@@ -425,10 +611,16 @@ class PiperHarness:
                 boot_mgr=self.boot_mgr,
                 img_gen=self.img_gen,
                 prompt_context_service=self.prompt_context_service,
+                conversation_summary_path=_current_conversation_summary_path(self),
+                is_search_in_flight_fn=self.is_search_in_flight,
+                retain_search_in_flight_fn=self.retain_search_in_flight,
+                release_search_in_flight_fn=self.release_search_in_flight,
+                current_search_query_fn=self.current_search_query,
             )
         except Exception as exc:
             self.ui_queue.put(("error", f"Harness Orchestrator Error: {exc}"))
         finally:
+            self.agent_brain.suspend_runtime_sessions()
             self.ui_queue.put(("status", "IDLE"))
             with self._active_lock:
                 self._active_runs -= 1
@@ -488,8 +680,10 @@ class PiperHarness:
             self._pump_ui_queue()
             with self._active_lock:
                 active_runs = self._active_runs
+                search_in_flight = self._search_in_flight_count > 0
             if (
                 active_runs == 0
+                and not search_in_flight
                 and self.ui_queue.empty()
                 and (time.monotonic() - self._last_activity) >= idle_grace_s
             ):
@@ -547,6 +741,33 @@ class PiperHarness:
             if kind == "search_result":
                 self._handle_search_result(payload)
                 continue
+
+    def retain_search_in_flight(self, query: str = "") -> None:
+        with self._active_lock:
+            self._search_in_flight_count += 1
+            clean_query = str(query or "").strip()
+            if clean_query:
+                self._active_search_query = clean_query
+        self._last_activity = time.monotonic()
+
+    def release_search_in_flight(self) -> None:
+        with self._active_lock:
+            if self._search_in_flight_count > 0:
+                self._search_in_flight_count -= 1
+            if self._search_in_flight_count <= 0:
+                self._search_in_flight_count = 0
+                self._active_search_query = ""
+        self._last_activity = time.monotonic()
+
+    def is_search_in_flight(self) -> bool:
+        with self._active_lock:
+            return self._search_in_flight_count > 0
+
+    def current_search_query(self) -> str:
+        with self._active_lock:
+            if self._search_in_flight_count <= 0:
+                return ""
+            return self._active_search_query
 
     def _handle_search_result(self, payload: Any) -> None:
         if not isinstance(payload, dict):

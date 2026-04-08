@@ -16,6 +16,8 @@ class CommandResult:
     action: Optional[str] = None
     ui_message: Optional[str] = None
     style_filename: Optional[str] = None
+    password_value: Optional[str] = None
+    user_query: Optional[str] = None
     document_path: Optional[str] = None
     vision_path: Optional[str] = None
     vision_prompt: Optional[str] = None
@@ -85,6 +87,27 @@ def handle_command(user_text: str, *, style_mgr: StyleManager) -> CommandResult:
 
     if low in ("/new", "new"):
         return CommandResult(True, action="new_session")
+
+    if low == "/users":
+        return CommandResult(True, action="list_users")
+
+    if low in ("/user", "/whoami"):
+        return CommandResult(True, action="show_active_user")
+
+    if low.startswith("/user "):
+        target = txt.split(maxsplit=1)[1].strip()
+        if not target:
+            return CommandResult(True, ui_message="[UI] Usage: /user <name-or-id>")
+        return CommandResult(True, action="switch_user", user_query=target)
+
+    if low == "/adminpass":
+        return CommandResult(True, ui_message="[UI] Usage: /adminpass <password>")
+
+    if low.startswith("/adminpass "):
+        password = txt.split(maxsplit=1)[1]
+        if not str(password).strip():
+            return CommandResult(True, ui_message="[UI] Usage: /adminpass <password>")
+        return CommandResult(True, action="set_admin_password", password_value=password)
 
     if low == "/styles":
         opts = available_style_files(style_mgr)

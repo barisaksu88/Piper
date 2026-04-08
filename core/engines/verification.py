@@ -159,6 +159,16 @@ class VerificationEngine:
         Returns a VerificationResult with verdict + recommendation.
         The executor uses recommendation to decide continue / stop.
         """
+        # Constraint-first path: derive typed constraints from stage + tool result,
+        # check each against the actual filesystem.  No LLM call needed.
+        # Falls through to RULES → LLM when no constraints are derivable.
+        from core.engines.file_work import FileWorkEngine as _FileWorkEngine
+        _constraints = _FileWorkEngine.derive_constraints(stage, tool_result)
+        if _constraints:
+            _constraint_result = self.evaluate_with_constraints(_constraints, workspace)
+            if _constraint_result is not None:
+                return _constraint_result
+
         if self._file_checker is None:
             return VerificationResult.failed(
                 "VerificationEngine has no file_checker configured.",
@@ -248,3 +258,158 @@ class VerificationEngine:
         if verdict == "PARTIAL":
             return VerificationResult.partial(reason, retry_budget=retry_budget, checker_path=checker_path)
         return VerificationResult.failed(reason, checker_path=checker_path)
+
+    # ------------------------------------------------------------------
+    # Constraint-based verification
+    # ------------------------------------------------------------------
+
+    def evaluate_with_constraints(
+        self,
+        constraints: list[dict],
+        workspace: "Path",
+    ) -> "VerificationResult | None":
+        """Evaluate a PlanConstraint list against actual filesystem state.
+
+        Returns None when the list is empty or contains only unknown/skipped
+        constraint types — caller should fall through to RULES → LLM path.
+        Returns a VerificationResult when at least one constraint is evaluable.
+        A single failed constraint produces FAILED with a specific reason.
+        """
+        if not constraints:
+            return None
+
+        failures: list[str] = []
+        passed: list[str] = []
+
+        for constraint in constraints:
+            if not isinstance(constraint, dict):
+                continue
+            ctype = str(constraint.get("type") or "").upper()
+            if ctype == "EXCLUSION":
+                r = self._check_exclusion(constraint, workspace)
+            elif ctype == "MOVED":
+                r = self._check_moved(constraint, workspace)
+            elif ctype == "DELETED":
+                r = self._check_deleted(constraint, workspace)
+            elif ctype == "CREATED":
+                r = self._check_created(constraint, workspace)
+            elif ctype == "MODIFIED":
+                r = self._check_modified(constraint, workspace)
+            elif ctype == "COUNT":
+                r = self._check_count(constraint, workspace)
+            else:
+                continue  # unknown type — skip, don't count as passed or failed
+            if r["passed"]:
+                passed.append(r["reason"])
+            else:
+                failures.append(r["reason"])
+
+        if not passed and not failures:
+            return None  # nothing evaluable — fall through
+
+        if failures:
+            evidence = "; ".join(failures[:3])
+            if len(failures) > 3:
+                evidence += f" (and {len(failures) - 3} more)"
+            return VerificationResult.failed(evidence, checker_path="RULES")
+
+        evidence = f"All {len(passed)} constraint(s) satisfied: " + "; ".join(passed[:3])
+        return VerificationResult.verified(evidence, checker_path="RULES")
+
+    @staticmethod
+    def _check_exclusion(constraint: dict, workspace: "Path") -> dict:
+        pattern = str(constraint.get("pattern") or "").strip()
+        directory = str(constraint.get("directory") or "").strip()
+        if not pattern:
+            return {"passed": True, "reason": "EXCLUSION: no pattern — skipped"}
+        search_root = (workspace / directory) if directory else workspace
+        if not search_root.exists():
+            return {"passed": True, "reason": f"EXCLUSION: '{directory or '.'}' absent — treated as empty"}
+        matches = [
+            str(p.relative_to(workspace).as_posix())
+            for p in search_root.rglob("*")
+            if p.is_file() and pattern.lower() in p.name.lower()
+        ]
+        if matches:
+            sample = ", ".join(f"'{m}'" for m in matches[:3])
+            return {"passed": False, "reason": f"EXCLUSION failed: {len(matches)} file(s) matching '{pattern}' still present: {sample}"}
+        scope_label = f"'{directory}'" if directory else "workspace"
+        return {"passed": True, "reason": f"EXCLUSION: no files matching '{pattern}' in {scope_label}"}
+
+    @staticmethod
+    def _check_moved(constraint: dict, workspace: "Path") -> dict:
+        from_path = str(constraint.get("from_path") or "").strip()
+        to_path = str(constraint.get("to_path") or "").strip()
+        if not from_path or not to_path:
+            return {"passed": True, "reason": "MOVED: incomplete paths — skipped"}
+        src = workspace / from_path
+        dst = workspace / to_path
+        dst_ok = dst.exists()
+        src_gone = not src.exists()
+        if dst_ok and src_gone:
+            return {"passed": True, "reason": f"MOVED: '{from_path}' → '{to_path}' verified"}
+        reasons = []
+        if not dst_ok:
+            reasons.append(f"'{to_path}' missing at destination")
+        if not src_gone:
+            reasons.append(f"'{from_path}' still present at source")
+        return {"passed": False, "reason": "MOVED failed: " + "; ".join(reasons)}
+
+    @staticmethod
+    def _check_deleted(constraint: dict, workspace: "Path") -> dict:
+        path = str(constraint.get("path") or "").strip()
+        if not path:
+            return {"passed": True, "reason": "DELETED: no path — skipped"}
+        if (workspace / path).exists():
+            return {"passed": False, "reason": f"DELETED failed: '{path}' still exists"}
+        return {"passed": True, "reason": f"DELETED: '{path}' confirmed absent"}
+
+    @staticmethod
+    def _check_created(constraint: dict, workspace: "Path") -> dict:
+        path = str(constraint.get("path") or "").strip()
+        if not path:
+            return {"passed": True, "reason": "CREATED: no path — skipped"}
+        if not (workspace / path).exists():
+            return {"passed": False, "reason": f"CREATED failed: '{path}' not found"}
+        return {"passed": True, "reason": f"CREATED: '{path}' confirmed present"}
+
+    @staticmethod
+    def _check_modified(constraint: dict, workspace: "Path") -> dict:
+        path = str(constraint.get("path") or "").strip()
+        if not path:
+            return {"passed": True, "reason": "MODIFIED: no path — skipped"}
+        target = workspace / path
+        if not target.is_file():
+            return {"passed": False, "reason": f"MODIFIED failed: '{path}' not found"}
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            return {"passed": False, "reason": f"MODIFIED failed: could not read '{path}': {exc}"}
+        for text in [str(t) for t in (constraint.get("expected_present") or []) if str(t).strip()]:
+            if text not in content:
+                return {"passed": False, "reason": f"MODIFIED failed: '{path}' missing expected text '{text[:60]}'"}
+        for text in [str(t) for t in (constraint.get("expected_absent") or []) if str(t).strip()]:
+            if text in content:
+                return {"passed": False, "reason": f"MODIFIED failed: '{path}' still contains '{text[:60]}'"}
+        return {"passed": True, "reason": f"MODIFIED: '{path}' content verified"}
+
+    @staticmethod
+    def _check_count(constraint: dict, workspace: "Path") -> dict:
+        path = str(constraint.get("path") or "").strip()
+        expected = constraint.get("expected")
+        if not path or expected is None:
+            return {"passed": True, "reason": "COUNT: incomplete — skipped"}
+        target = workspace / path
+        if not target.exists():
+            actual = 0
+        elif target.is_dir():
+            actual = sum(1 for _ in target.iterdir() if _.is_file())
+        else:
+            actual = 1 if target.is_file() else 0
+        try:
+            expected_int = int(expected)
+        except (TypeError, ValueError):
+            return {"passed": True, "reason": "COUNT: non-integer expected — skipped"}
+        if actual == expected_int:
+            return {"passed": True, "reason": f"COUNT: '{path}' has {actual} file(s) as expected"}
+        return {"passed": False, "reason": f"COUNT failed: '{path}' has {actual} file(s), expected {expected_int}"}

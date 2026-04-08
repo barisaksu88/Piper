@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import sys
 import tempfile
@@ -61,6 +62,8 @@ class KnowledgeReadonlySmokeReport:
     knowledge_answer: str
     forgotten_answer: str
     unrelated_answer: str
+    live_date_answer: str
+    remembered_date_answer: str
     todo_answer: str
     profile_summary_answer: str
 
@@ -73,7 +76,8 @@ def run_smoke() -> KnowledgeReadonlySmokeReport:
         owner = SharedStateOwner.for_data_dir(data_dir)
         knowledge = _DummyKnowledge()
         knowledge.upsert_fact("favorite drink", "coffee")
-        owner.event_store.add("dentist appointment", "2026-03-24")
+        _tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        owner.event_store.add("dentist appointment", _tomorrow)
         owner.task_store.add("buy milk", "pending")
 
         service = PromptContextService(
@@ -85,18 +89,23 @@ def run_smoke() -> KnowledgeReadonlySmokeReport:
             document_memory=DocumentMemoryManager(data_dir),
         )
 
-        knowledge_answer = service.build_readonly_state_answer("What do you know about my favorite drink?")
+        knowledge_answer = service.build_readonly_knowledge_answer("What do you know about my favorite drink?")
         todo_answer = service.build_readonly_state_answer("What's on my to-do list?")
-        profile_summary_answer = service.build_readonly_state_answer("Tell me everything you know about me.")
+        profile_summary_answer = service.build_readonly_knowledge_answer("Tell me everything you know about me.")
+        live_date_answer = service.build_readonly_state_answer("What's today's date?")
+        remembered_date_answer = service.build_readonly_state_answer("Do you remember today's date?")
         knowledge.remove_fact("favorite drink")
-        forgotten_answer = service.build_readonly_state_answer("Do you remember my favorite drink now?")
-        unrelated_answer = service.build_readonly_state_answer("What do you know about my favorite drink?")
+        forgotten_answer = service.build_readonly_knowledge_answer("Do you remember my favorite drink now?")
+        unrelated_answer = service.build_readonly_knowledge_answer("What do you know about my favorite drink?")
 
+    _tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     success = (
         knowledge_answer == "Your favorite drink is coffee."
         and todo_answer == "Pending tasks: buy milk."
         and "- favorite drink: coffee" in profile_summary_answer
-        and "Upcoming events: dentist appointment on 2026-03-24." in profile_summary_answer
+        and f"Upcoming events: dentist appointment on {_tomorrow}." in profile_summary_answer
+        and live_date_answer == ""
+        and remembered_date_answer == ""
         and forgotten_answer == "I do not have a stored favorite drink."
         and unrelated_answer == "I do not have a stored favorite drink."
     )
@@ -105,6 +114,8 @@ def run_smoke() -> KnowledgeReadonlySmokeReport:
         knowledge_answer=knowledge_answer,
         forgotten_answer=forgotten_answer,
         unrelated_answer=unrelated_answer,
+        live_date_answer=live_date_answer,
+        remembered_date_answer=remembered_date_answer,
         todo_answer=todo_answer,
         profile_summary_answer=profile_summary_answer,
     )

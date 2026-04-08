@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "root_entity_id": "person:user",
+  "nodes": {
+    "person:user": {
+      "id": "person:user",
+      "type": "person",
+      "label": "his friend",
+      "aliases": [
+        "user",
+        "me",
+        "his friend"
+      ],
+      "attributes": {
+        "personality_trait": [
+          {
+            "value": "his friend, do you know baris",
+            "expires_at": null,
+            "updated_at": 1775356563
+          }
+        ]
+      },
+      "updated_at": 1775356563
+    }
+  },
+  "edges": [],
+  "metadata": {
+    "created_at": 1775356563,
+    "updated_at": 1775356563,
+    "migrated_from_legacy_knowledge": false
+  }
+}

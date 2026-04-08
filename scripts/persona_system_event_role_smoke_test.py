@@ -48,7 +48,7 @@ def main() -> int:
         and latest_system_idx > current_user_placeholder_idx
         and "Please test the controls." not in system_content
         and user_content == "Please test the controls."
-        and "[LATEST_SYSTEM_EVENT]\n[NO_MUTATION_RULE]" in system_content
+        and "[NO_MUTATION_RULE]\nDo not claim a mutation." in system_content
         and "[LATEST_SYSTEM_EVENT]\n[FINAL_STAGE_OUTCOME]\n=== STAGE 1 OUTCOME ===\nRESULT: SUCCESS" in system_content
     )
     print(

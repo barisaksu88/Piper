@@ -195,8 +195,14 @@ class EngineeringEscalationDetector:
             reason = kind
             summary = f"Planner is looping without progress for stage: {stage_goal or 'unknown stage'}."
         elif kind == "file_checker_failed" and self._recent_count(kind, stage_goal=stage_goal) >= 2:
-            reason = kind
-            summary = f"FILE_CHECKER is failing repeatedly for stage: {stage_goal or 'unknown stage'}."
+            # Terminal "file not found" failures are not recoverable by retrying —
+            # escalating would only confuse the user.  Skip escalation if the checker
+            # details indicate the target file simply doesn't exist.
+            details_lower = str(signal.get("details", "")).lower()
+            _terminal_missing = ("is missing at", "does not exist at", "not found", "was not found", "no such file")
+            if not any(phrase in details_lower for phrase in _terminal_missing):
+                reason = kind
+                summary = f"FILE_CHECKER is failing repeatedly for stage: {stage_goal or 'unknown stage'}."
         elif kind == "mutation_no_effect" and self._recent_count(kind, stage_goal=stage_goal) >= 2:
             reason = kind
             summary = f"Mutating file operations are not changing workspace state for stage: {stage_goal or 'unknown stage'}."

@@ -16,6 +16,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
 from memory.brain import get_brain
+from core.engines.computer_use_engine import ComputerUseEngine
 from memory.state_owner import SharedStateOwner
 from core.runtime_control import CancellationToken, OperationCancelled
 from tools.registry import get_tool_spec
@@ -34,20 +35,46 @@ class AgentBrain:
         self,
         data_dir: Path,
         *,
+        workspace_root: Path | None = None,
         state_owner: SharedStateOwner,
         knowledge_manager: Any | None = None,
         transient_state_manager: Any | None = None,
+        memory_brain: Any | None = None,
     ):
         self.data_dir = Path(data_dir)
-        self.workspace = data_dir / "workspace"
+        self.workspace = Path(workspace_root or (self.data_dir / "workspace"))
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.state_owner = state_owner
-        self.task_store = self.state_owner.task_store
-        self.event_store = self.state_owner.event_store
-        self.knowledge_store = self.state_owner.knowledge_store
         self.knowledge_manager = knowledge_manager
         self.transient_state_manager = transient_state_manager
+        self.memory_brain = memory_brain
         self.workspace_runtime = WorkspaceToolRuntime(self.workspace)
+        self.computer_use_engine = ComputerUseEngine(data_dir=self.data_dir, workspace=self.workspace)
+
+    @property
+    def task_store(self):
+        return self.state_owner.task_store
+
+    @property
+    def event_store(self):
+        return self.state_owner.event_store
+
+    @property
+    def knowledge_store(self):
+        return self.state_owner.knowledge_store
+
+    def shutdown(self) -> None:
+        try:
+            self.computer_use_engine.shutdown()
+        except Exception:
+            pass
+
+    def suspend_runtime_sessions(self) -> None:
+        try:
+            self.computer_use_engine.suspend()
+        except Exception:
+            pass
+
     @staticmethod
     def _normalize_lookup(text: str) -> str:
         cleaned = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
@@ -101,7 +128,7 @@ class AgentBrain:
         if outcome_note:
             text += f" Outcome: {outcome_note}."
         try:
-            brain = get_brain(self.data_dir)
+            brain = self.memory_brain or get_brain(self.data_dir)
             brain.remember(
                 text=text,
                 metadata={
@@ -219,6 +246,36 @@ class AgentBrain:
                 action_type="TOOL", tag="FILE_OP", payload=payload_text, content=llm_output, execute_result=result
             )
 
+        browser_op_match = re.search(r'\[BROWSER_OP\](.*?)\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
+        if browser_op_match:
+            payload_text = browser_op_match.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+        if re.search(r'\[BROWSER_OP\]', text, re.IGNORECASE):
+            parts = re.split(r'\[BROWSER_OP\]', text, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2 and parts[1].strip():
+                payload_text = parts[1].replace("[/BROWSER_OP]", "").strip()
+                result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+                return AgentAction(
+                    action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+                )
+        malformed_browser_op_match = re.search(r'\[BROWSER_OP\s+(.*?)\s*\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
+        if malformed_browser_op_match:
+            payload_text = malformed_browser_op_match.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+        malformed_browser_op_inline = re.search(r'\[BROWSER_OP\s+(.+)\]\s*$', text, re.DOTALL | re.IGNORECASE)
+        if malformed_browser_op_inline:
+            payload_text = malformed_browser_op_inline.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+
         # 2. CHECK SINGLE TAGS
         # FIX: Added re.DOTALL to allow matching tags that contain newlines (like code blocks)
         match = re.search(r'\[([A-Za-z_]+)(?::\s*(.*?))?\]', text, re.DOTALL)
@@ -279,6 +336,9 @@ class AgentBrain:
 
     def exec_file_op(self, payload_text: str, *, cancel_token: CancellationToken | None = None) -> Dict[str, Any]:
         return self.workspace_runtime.exec_file_op(payload_text, cancel_token=cancel_token)
+
+    def exec_browser_op(self, payload_text: str, *, cancel_token: CancellationToken | None = None) -> Dict[str, Any]:
+        return self.computer_use_engine.exec_browser_op(payload_text, cancel_token=cancel_token)
 
     def exec_run_code(self, code: str, *, cancel_token: CancellationToken | None = None) -> Dict[str, Any]:
         return self.workspace_runtime.exec_run_code(code, cancel_token=cancel_token)
@@ -372,16 +432,40 @@ class AgentBrain:
         if not pending:
             return "No pending tasks."
         return "Pending Tasks:\n- " + "\n- ".join(pending)
+    @staticmethod
+    def _extract_event_time(text: str) -> Optional[str]:
+        """Parse an 'at HH:MM' / 'at 3pm' style time from a date phrase.
+
+        Returns a normalised 'HH:MM' string, or None if no time is found.
+        """
+        m = re.search(
+            r"(?i)\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?",
+            text,
+        )
+        if not m:
+            return None
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        meridiem = (m.group(3) or "").lower().replace(".", "")
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
     def exec_add_event(self, args: str) -> str:
         try:
             parts = args.rsplit(" on ", 1)
             if len(parts) != 2:
                 return "Invalid format. Use: [ADD_EVENT: Name on <date phrase>]"
             name, date_text = parts[0].strip(), parts[1].strip()
+            time_str = self._extract_event_time(date_text)
             resolved_date = self._resolve_event_date(date_text)
             if not resolved_date:
                 return f"Invalid event date: {date_text}. Use YYYY-MM-DD or a simple phrase like tomorrow."
-            self.event_store.add(name, resolved_date)
+            self.event_store.add(name, resolved_date, time_str)
             self._reconcile_transient_operational_change(
                 kind="event",
                 action="add",
@@ -389,9 +473,36 @@ class AgentBrain:
                 source_text=args,
                 scheduled_date=resolved_date,
             )
-            return f"Event scheduled: {name} on {resolved_date}"
+            time_label = f" at {time_str}" if time_str else ""
+            return f"Event scheduled: {name} on {resolved_date}{time_label}"
         except Exception as e:
             return f"Error adding event: {e}"
+
+    def exec_reschedule_event(self, args: str) -> str:
+        try:
+            parts = re.split(r"\s+to\s+", str(args or "").strip(), maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) != 2:
+                return "Invalid format. Use: [RESCHEDULE_EVENT: Event name to <new date phrase>]"
+            name_raw, date_text = parts[0].strip(), parts[1].strip()
+            target = self._resolve_existing_name(name_raw, self.event_store.load().keys()) or name_raw
+            time_str = self._extract_event_time(date_text)
+            resolved_date = self._resolve_event_date(date_text)
+            if not resolved_date:
+                return f"Invalid date: {date_text}. Use YYYY-MM-DD or a phrase like 'next Friday'."
+            self.event_store.remove(target)
+            self.event_store.add(target, resolved_date, time_str)
+            self._reconcile_transient_operational_change(
+                kind="event",
+                action="add",
+                name=target,
+                source_text=args,
+                scheduled_date=resolved_date,
+            )
+            time_label = f" at {time_str}" if time_str else ""
+            return f"Event rescheduled: {target} to {resolved_date}{time_label}"
+        except Exception as e:
+            return f"Error rescheduling event: {e}"
+
     def exec_remove_event(self, name: str) -> str:
         target = self._resolve_existing_name(name, self.event_store.load().keys()) or name
         if self.event_store.remove(target):
@@ -439,7 +550,7 @@ class AgentBrain:
 
         raw = re.sub(r"\b(on|by)\b", "", raw).strip()
         today = datetime.date.today()
-        raw = re.sub(r"(?i)\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\.?", "", raw).strip(" ,.-")
+        raw = re.sub(r"(?i)\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\.?", "", raw).strip(" ,.-")
 
         try:
             return datetime.datetime.strptime(raw, "%Y-%m-%d").strftime("%Y-%m-%d")
@@ -539,7 +650,6 @@ class AgentBrain:
             delta = (target - today.weekday()) % 7
             if delta == 0:
                 delta = 7
-            delta += 7
             return (today + datetime.timedelta(days=delta)).strftime("%Y-%m-%d")
         if raw.startswith("this ") and raw[5:] in weekday_map:
             target = weekday_map[raw[5:]]

@@ -143,7 +143,7 @@ def _reminder_flow_eval(turns: list[dict[str, Any]]) -> dict[str, Any]:
     )
     target_name, target_date = target_entry
     return {
-        "pass": bool(target_name) and target_date == "2026-03-25" and not errors,
+        "pass": bool(target_name) and target_date == "2027-04-15" and not errors,
         "signals": {
             "events": events,
             "reply_2": turns[-1].get("assistant_text"),
@@ -250,7 +250,7 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "name": "event_flow_vague_reminder",
         "turns": [
-            "My insurance company told me that my cars insurance will end on the 25th, so remind me to get a new yearly insurance for that.",
+            "My insurance company told me that my car's insurance will end on 2027-04-15, so remind me to get a new yearly insurance for that.",
             "What events do I have scheduled?",
         ],
         "evaluator": _reminder_flow_eval,

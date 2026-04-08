@@ -11,13 +11,24 @@
 - Semantic dedup in vector memory refreshes metadata on very similar memories.
 - That means repeated memories can become "new" again instead of aging out naturally.
 - This may be desirable for reinforced truths, but it weakens strict memory aging.
+- On the Windows runtime, Chroma + sentence-transformer vector warm-up can still be very slow.
+- Piper now boots on fallback memory immediately, but vector warm-up may continue in the background for quite a while.
 - PDF ingestion currently depends on text extraction from `pypdf`.
 - Image-only or poorly encoded PDFs will still ingest weakly or return little text until an OCR path is added.
+
+## Audio
+
+- Kokoro ONNX on the Windows runtime can still time out and fall back.
+- Piper now forces `ONNX_PROVIDER=CPUExecutionProvider` before loading `kokoro_onnx`, and if Kokoro ONNX still times out it falls back to a pure Kokoro-torch worker before using Windows system speech.
+- The pure Kokoro-torch worker now bypasses the Windows `platform` WMI calls that were hanging `import torch`, and it decodes `espeak-ng` IPA output as UTF-8 instead of the local ANSI code page.
+- Native Quinn probes are green again, but the live GUI path still needs one direct user confirmation after restart.
+- If both Kokoro paths fail, Piper still falls back to Windows system speech instead of staying silent forever.
 
 ## Prompting
 
 - Age labels help the model understand memory freshness, but they do not fully solve stale memory retrieval by themselves.
 - If stale memories still intrude, retrieval thresholds or domain-aware recall gating may need tightening.
+- On the current `Qwen3.5-9B-Q6_K` + `llama-server` b8241 path, enabling global reasoning (`--reasoning-budget -1`) is not a safe replacement for per-phase thinking. Plain reasoning-enabled prompts can 500 with `Failed to parse input`, and `/no_think` does not reliably suppress `reasoning_content`.
 
 ## FILE_WORK
 

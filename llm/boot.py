@@ -4,16 +4,21 @@ Handles initialization of the LLM server.
 """
 
 import os
+import re
 import subprocess
 import time
 import threading
 from collections.abc import Callable, Sequence
-import psutil
 import urllib.request
 import urllib.error
 from pathlib import Path
 from urllib.parse import urlparse
 from config import CFG, data_debug_path
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 
 PostBootTask = tuple[str, Callable[[], object]]
@@ -67,6 +72,20 @@ class BootManager:
         return str(parsed.port or 8080)
 
     @staticmethod
+    def _runtime_path_arg(path_value: object, *, executable: object) -> str:
+        raw = str(path_value or "").strip()
+        if not raw:
+            return ""
+        exe_text = str(executable or "").strip().lower()
+        if os.name != "nt" and exe_text.endswith(".exe"):
+            match = re.match(r"^/mnt/([a-z])/(.*)$", raw)
+            if match:
+                drive = match.group(1).upper()
+                suffix = match.group(2).replace("/", "\\")
+                return f"{drive}:\\{suffix}"
+        return raw
+
+    @staticmethod
     def _cmdline_value(cmdline: list[str], flag: str) -> str:
         lowered = [str(part or "").strip().lower() for part in cmdline]
         try:
@@ -104,6 +123,9 @@ class BootManager:
 
     def _kill_orphans(self):
         self.log("[Boot] Checking for orphan server processes...")
+        if psutil is None:
+            self.log("[Boot] psutil missing; skipping orphan process scan.")
+            return
         killed_any = False
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
@@ -141,20 +163,23 @@ class BootManager:
             self.server_ready = False
             return False
 
+        server_exe = str(CFG.LLAMA_SERVER_EXE)
+        model_arg = self._runtime_path_arg(CFG.MODEL_PATH, executable=server_exe)
         cmd = [
-            str(CFG.LLAMA_SERVER_EXE),
-            "-m", str(CFG.MODEL_PATH),
+            server_exe,
+            "-m", model_arg,
             "--port", "8080",
             "--ctx-size", str(CFG.CONTEXT_SIZE),
             "-ngl", str(getattr(CFG, "LLAMA_SERVER_GPU_LAYERS", 99)),
-            "--host", "127.0.0.1"
+            "--host", str(getattr(CFG, "LLAMA_SERVER_BIND_HOST", "127.0.0.1")),
         ]
         reasoning_budget = getattr(CFG, "LLAMA_SERVER_REASONING_BUDGET", -1)
         if reasoning_budget is not None:
             cmd.extend(["--reasoning-budget", str(reasoning_budget)])
         mmproj_path = getattr(CFG, "MMPROJ_PATH", None)
         if mmproj_path and Path(mmproj_path).exists():
-            cmd.extend(["--mmproj", str(mmproj_path)])
+            mmproj_arg = self._runtime_path_arg(mmproj_path, executable=server_exe)
+            cmd.extend(["--mmproj", mmproj_arg])
             self.log(f"Using multimodal projector: {mmproj_path}")
 
         try:
@@ -220,8 +245,13 @@ class BootManager:
         self.log("Initializing Vector Brain...")
         try:
             from memory.brain import get_brain
-            get_brain(CFG.DATA_DIR)
-            self.log("Brain Model Loaded.")
+            brain = get_brain(CFG.DATA_DIR)
+            if getattr(brain, "vector_ready", False):
+                self.log("Brain Model Loaded.")
+            elif getattr(brain, "vector_warmup_pending", False):
+                self.log("Brain Ready (fallback active; vector warm-up continues).")
+            else:
+                self.log("Brain Ready.")
             self.brain_ready = True
             return True
         except Exception as e:
