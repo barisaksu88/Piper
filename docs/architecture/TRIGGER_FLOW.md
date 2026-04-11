@@ -1116,6 +1116,19 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ---
 
+### 13.24 Test Visibility (Pre-roadmap #6) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- Unified smoke test runner: `scripts/run_smoke_tests.py`
+- Discovers all `*_smoke_test.py` files in `scripts/` automatically.
+- Supports `--category`, `--list`, `--fail-fast`, `--verbose`, `--timeout`, and positional `fnmatch` patterns.
+- Categorizes tests by filename prefix so targeted runs stay simple and consistent.
+
+**Files:** `scripts/run_smoke_tests.py`; `docs/architecture/TRIGGER_FLOW.md`
+
+---
+
 ## 14. TTS Pipeline
 
 Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.

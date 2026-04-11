@@ -5480,3 +5480,10 @@ Four structural problems fixed across a single session:
   - removed `DEBUG_STREAMING_PIPELINE` branching from `core/`; debug level is now the filter for stream trace logs
   - added `config.LOG_LEVEL` (`PIPER_LOG_LEVEL`, default `INFO`)
   - configured `logging.basicConfig()` at the top of `app.py`
+
+2026-04-12
+
+- Test visibility pass:
+  - added `scripts/run_smoke_tests.py` as a unified smoke runner for `scripts/*_smoke_test.py`
+  - supports discovery, category filtering, fnmatch pattern filtering, fail-fast mode, verbose streaming, and per-test timeouts
+  - added `TRIGGER_FLOW.md` §13.24 to document the unified smoke runner
