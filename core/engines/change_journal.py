@@ -8,40 +8,17 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from memory.storage import ensure_parent
-from tools.file_ops import FileOpError, parse_payload as parse_file_op_payload, resolve_workspace_path
+from tools.file_ops import (
+    FileOpError,
+    extract_tag_payload_text,
+    normalize_action as normalize_file_op_action,
+    parse_normalized_payload as parse_file_op_payload,
+    resolve_workspace_path,
+)
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-
-
-def _normalize_file_op_action(action: str) -> str:
-    normalized = str(action or "").strip().lower()
-    aliases = {
-        "mkdir": "ensure_dir",
-        "mkdirs": "ensure_dirs",
-        "make_dir": "ensure_dir",
-        "create_dir": "ensure_dir",
-        "create_directory": "ensure_dir",
-        "make_directory": "ensure_dir",
-        "make_directories": "ensure_dirs",
-        "create_directories": "ensure_dirs",
-        "create_json": "write_json",
-        "modify_json": "update_json",
-        "patch_json": "update_json",
-        "move_file": "move_path",
-        "move_files": "move_many",
-        "rename_path": "move_path",
-        "rename_file": "move_path",
-        "rename_files": "move_many",
-        "copy_file": "copy_path",
-        "copy_files": "copy_many",
-        "delete_file": "delete_path",
-        "delete_files": "delete_many",
-        "remove_file": "delete_path",
-        "remove_files": "delete_many",
-    }
-    return aliases.get(normalized, normalized)
 
 
 def _remove_path(path: Path) -> None:
@@ -114,7 +91,7 @@ class ChangeJournal:
             payload = parse_file_op_payload(str(payload_text or "").strip())
         except Exception:
             return None
-        action = _normalize_file_op_action(str(payload.get("action") or ""))
+        action = normalize_file_op_action(str(payload.get("action") or ""))
         if action not in self._SUPPORTED_MUTATING_ACTIONS:
             return None
         snapshot_paths = self._capture_snapshot_paths(Path(workspace), action, payload)
@@ -130,7 +107,7 @@ class ChangeJournal:
     def finalize_file_op_capture(self, prepared: dict[str, Any] | None, tool_result: Any) -> dict[str, Any] | None:
         if not prepared or not isinstance(prepared, dict) or not isinstance(tool_result, dict):
             return None
-        action = _normalize_file_op_action(str(tool_result.get("action") or prepared.get("action") or ""))
+        action = normalize_file_op_action(str(tool_result.get("action") or prepared.get("action") or ""))
         if action not in self._SUPPORTED_MUTATING_ACTIONS:
             return None
         if str(tool_result.get("status") or "").strip().upper() != "EXECUTED":
@@ -283,22 +260,7 @@ class ChangeJournal:
 
     @staticmethod
     def _extract_file_op_payload_text(tool_tag: str) -> str:
-        text = str(tool_tag or "").strip()
-        if not text:
-            return ""
-        block_match = json_block = None
-        import re
-
-        block_match = re.search(r"\[FILE_OP\](.*?)\[/FILE_OP\]", text, re.DOTALL | re.IGNORECASE)
-        if block_match:
-            return str(block_match.group(1) or "").strip()
-        inline_match = re.search(r"\[FILE_OP:\s*(.*?)\]$", text, re.DOTALL | re.IGNORECASE)
-        if inline_match:
-            return str(inline_match.group(1) or "").strip()
-        malformed_inline_match = re.search(r"\[FILE_OP\s+(.+)\]$", text, re.DOTALL | re.IGNORECASE)
-        if malformed_inline_match:
-            return str(malformed_inline_match.group(1) or "").strip()
-        return ""
+        return extract_tag_payload_text(tool_tag, tag="FILE_OP")
 
     @classmethod
     def _capture_snapshot_paths(cls, workspace: Path, action: str, payload: dict[str, Any]) -> list[str]:

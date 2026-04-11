@@ -206,15 +206,27 @@ For each stage in StageCard:
     │   │       enforces 7 required PlannerInput fields          │
     │   │       injects parent objective into every stage        │
     │   │       resolves allowed_tools from registry             │
+    │   │       fills declared_scope_root (protected)            │
+    │   │       fills declared_exact_targets (protected)         │
     │   │       validation failure → return False immediately    │
-    │       │                                                    │
-    │       │  Per-step loop:                                    │
+    │   │                                                        │
+    │   │   declared_scope_root and declared_exact_targets are   │
+    │   │   protected fields — once set by the boundary, later   │
+    │   │   layers (file_stage_policy, file_target_confirmation) │
+    │   │   must not broaden or reinterpret them from prose.     │
+    │   │                                                        │
+    │   │  Per-step loop:                                        │
     │       │                                                    │
     │       ├── Planner LLM call                                 │
     │       │       └── PlannerDecision → tool + args            │
     │       │                                                    │
     │       ├── Tool execution  (domain-restricted by stage_type)│
     │       │       ├── FILE_WORK       → FILE_OP / RUN_CODE     │
+    │       │       │   All FILE_OP payloads pass through        │
+    │       │       │   tools/file_ops.py (single contract owner)│
+    │       │       │   before execution — action aliases, path  │
+    │       │       │   aliases, field normalization all happen  │
+    │       │       │   here and nowhere else.                   │
     │       │       │   FileWorkEngine.candidate_paths()         │
     │       │       │   FileWorkEngine.recovery_hint()           │
     │       │       ├── MEMORY_WORK     → knowledge/world stores │

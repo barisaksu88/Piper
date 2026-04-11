@@ -33,6 +33,7 @@ from typing import List, Optional
 
 from core.contracts import PlannerDecision, StageCard
 from core.engines.file_work import FileWorkEngine
+from core.file_stage_policy import FileStagePolicy
 from core.stage_policy import stage_is_chat
 from tools.registry import resolve_domain_tools
 
@@ -84,6 +85,8 @@ class PlannerInput:
     success_condition: str  # What proves the stage is done (required)
     allowed_tools: List[str] = field(default_factory=list)
     active_targets: List[str] = field(default_factory=list)
+    declared_scope_root: str = ""
+    declared_exact_targets: List[str] = field(default_factory=list)
     evidence_required: str = ""  # Defaults to success_condition when absent
 
 
@@ -162,11 +165,6 @@ class PlannerBoundary:
             target_text = stage_goal + " " + success_condition
             active_targets = _extract_targets(target_text)
 
-        # --- Evidence required: explicit or defaults to success_condition ---
-        evidence_required = str(stage.get("evidence_required", "") or "").strip()
-        if not evidence_required:
-            evidence_required = success_condition
-
         objective_text = str(objective or stage.get("objective", "") or "").strip()
 
         # Write the normalized contract back into the stage card so every
@@ -174,6 +172,10 @@ class PlannerBoundary:
         stage["objective"] = objective_text
         stage["stage_type"] = stage_type
         stage["active_targets"] = list(active_targets)
+        # --- Evidence required: explicit or defaults to success_condition ---
+        evidence_required = str(stage.get("evidence_required", "") or "").strip()
+        if not evidence_required:
+            evidence_required = success_condition
         stage["evidence_required"] = evidence_required
         if stage_type == "FILE_WORK":
             file_stage_kind = str(stage.get("file_stage_kind", "") or "").strip().upper()
@@ -186,7 +188,39 @@ class PlannerBoundary:
                 "DEPENDENCY_RECOVERY",
                 "UNKNOWN",
             }:
-                stage["file_stage_kind"] = FileWorkEngine.classify(stage)
+                file_stage_kind = FileWorkEngine.classify(stage)
+                stage["file_stage_kind"] = file_stage_kind
+            declared_exact_targets = [
+                str(item).strip()
+                for item in (stage.get("declared_exact_targets") or [])
+                if str(item).strip()
+            ]
+            if not declared_exact_targets:
+                declared_exact_targets = FileStagePolicy.stage_named_file_targets(stage)
+            stage["declared_exact_targets"] = list(declared_exact_targets)
+
+            declared_scope_root = str(stage.get("declared_scope_root", "") or "").strip()
+            if not declared_scope_root:
+                declared_scope_root = FileStagePolicy.stage_scope_root(stage)
+            if declared_scope_root:
+                stage["declared_scope_root"] = declared_scope_root
+            elif "declared_scope_root" in stage:
+                stage.pop("declared_scope_root", None)
+        else:
+            declared_exact_targets = [
+                str(item).strip()
+                for item in (stage.get("declared_exact_targets") or [])
+                if str(item).strip()
+            ]
+            declared_scope_root = str(stage.get("declared_scope_root", "") or "").strip()
+            if declared_exact_targets:
+                stage["declared_exact_targets"] = list(declared_exact_targets)
+            elif "declared_exact_targets" in stage:
+                stage.pop("declared_exact_targets", None)
+            if declared_scope_root:
+                stage["declared_scope_root"] = declared_scope_root
+            elif "declared_scope_root" in stage:
+                stage.pop("declared_scope_root", None)
 
         return PlannerInput(
             objective=objective_text,
@@ -195,6 +229,8 @@ class PlannerBoundary:
             success_condition=success_condition,
             allowed_tools=allowed_tools,
             active_targets=active_targets,
+            declared_scope_root=declared_scope_root,
+            declared_exact_targets=declared_exact_targets,
             evidence_required=evidence_required,
         )
 

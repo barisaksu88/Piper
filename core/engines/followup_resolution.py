@@ -29,6 +29,35 @@ _READONLY_SHORT_RE = re.compile(
 _TASK_WORD_RE = re.compile(r"(?i)\b(task|tasks|to-?do|to-?do list|pending)\b")
 _EVENT_WORD_RE = re.compile(r"(?i)\b(event|events|calendar|schedule|schedules|scheduled)\b")
 _MEMORY_WORD_RE = re.compile(r"(?i)\b(memory|knowledge|world state|world model)\b")
+
+# Words that are completion signals or stopwords with no content value for matching.
+_MATCH_SKIP_WORDS: frozenset[str] = frozenset({
+    "i", "a", "an", "the", "is", "it", "to", "and", "or", "my", "me", "we",
+    "do", "did", "that", "this", "with", "out", "today", "just", "already",
+    "done", "completed", "complete", "finished", "went", "attended", "handled",
+    "bought", "some", "have", "had", "was", "been", "also", "now", "then",
+    "so", "up", "as", "at", "by", "on", "in", "of", "for", "from", "about",
+})
+
+
+def _is_pure_completion_signal(text: str) -> bool:
+    """True when the message has no content words beyond completion/ack signals.
+
+    e.g. "done", "finished it", "yeah I handled it" → True
+         "I went out with friends" → False  (has "friends" as a content word)
+    """
+    content = set(re.findall(r"[a-z]+", text.lower())) - _MATCH_SKIP_WORDS
+    return len(content) == 0
+
+
+def _has_name_keyword_overlap(text: str, target_name: str) -> bool:
+    """True when the user message shares at least one non-trivial word with the target name.
+
+    Prevents auto-completing an unrelated event just because it is the only one active.
+    """
+    user_words = set(re.findall(r"[a-z]+", text.lower())) - _MATCH_SKIP_WORDS
+    target_words = set(re.findall(r"[a-z]+", target_name.lower())) - _MATCH_SKIP_WORDS
+    return bool(user_words & target_words)
 _ACK_ONLY_RE = re.compile(
     r"(?is)^\s*(?:great|okay|ok|alright|all right|sure|thanks|thank you|nice|perfect|good)\s*[.!?]*\s*$"
 )
@@ -422,10 +451,17 @@ class FollowupResolutionEngine:
             return self._build_task_event_completion_card(recent_tasks[0], is_event=False) if wants_complete else self._build_task_event_delete_card(recent_tasks[0], is_event=False)
         if recent_events and not recent_tasks and len(recent_events) == 1:
             return self._build_task_event_completion_card(recent_events[0], is_event=True) if wants_complete else self._build_task_event_delete_card(recent_events[0], is_event=True)
+        # Last-resort fallback: only one active task/event exists.
+        # Guard: require either a pure completion signal ("done", "finished") or
+        # keyword overlap between the message and the target name.  Without this,
+        # a casual update like "I went out with friends" would silently complete
+        # the only active event (e.g. "House Purchase Fund") with no real match.
         if len(task_targets) == 1 and len(event_targets) == 0:
-            return self._build_task_event_completion_card(task_targets[0], is_event=False) if wants_complete else self._build_task_event_delete_card(task_targets[0], is_event=False)
+            if recent_tasks or _is_pure_completion_signal(text) or _has_name_keyword_overlap(text, task_targets[0]):
+                return self._build_task_event_completion_card(task_targets[0], is_event=False) if wants_complete else self._build_task_event_delete_card(task_targets[0], is_event=False)
         if len(event_targets) == 1 and len(task_targets) == 0:
-            return self._build_task_event_completion_card(event_targets[0], is_event=True) if wants_complete else self._build_task_event_delete_card(event_targets[0], is_event=True)
+            if recent_events or _is_pure_completion_signal(text) or _has_name_keyword_overlap(text, event_targets[0]):
+                return self._build_task_event_completion_card(event_targets[0], is_event=True) if wants_complete else self._build_task_event_delete_card(event_targets[0], is_event=True)
         return None
 
     def _should_prefer_fallback_route(

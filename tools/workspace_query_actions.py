@@ -42,7 +42,7 @@ def _token_prefix_match(query_norm: str, candidate_norm: str) -> bool:
 
 
 def handle_list_tree(runtime: Any, payload: dict[str, Any], action: str, file_op_error, *, cancel_token=None) -> dict[str, Any]:
-    root_raw = payload.get("root", ".")
+    root_raw = payload.get("root", payload.get("path", "."))
     root_path, root_rel = resolve_workspace_path(runtime.workspace, root_raw)
     if not root_path.exists():
         return file_op_error(f"FILE_OP target not found: {root_rel}")

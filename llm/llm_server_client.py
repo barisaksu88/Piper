@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
+import time
 import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,6 +134,29 @@ class LlamaServerClient:
 
     def __init__(self, cfg: LlamaServerConfig):
         self.cfg = cfg
+        self._request_lock = threading.Lock()
+
+    def _acquire_request_lock(self, cancel_token: CancellationToken | None = None) -> None:
+        # llama.cpp shares KV/cache state across slots; overlapping Piper requests
+        # can trip "Context size has been exceeded" even when each prompt is valid.
+        while True:
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+            if self._request_lock.acquire(timeout=0.1):
+                return
+
+    @staticmethod
+    def _messages_with_no_think_suffix(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        updated = [dict(item) for item in (messages or [])]
+        for idx in range(len(updated) - 1, -1, -1):
+            if str(updated[idx].get("role") or "").strip().lower() != "user":
+                continue
+            content = str(updated[idx].get("content") or "")
+            if "/no_think" in content:
+                return updated
+            updated[idx]["content"] = content.rstrip() + " /no_think"
+            return updated
+        return updated
 
     @staticmethod
     def _set_read_timeout(resp, timeout_s: float) -> None:
@@ -159,7 +184,23 @@ class LlamaServerClient:
             cancel_token=cancel_token,
         ):
             out.append(d)
-        return "".join(out).strip()
+        result = "".join(out).strip()
+        if result:
+            return result
+
+        retry_messages = self._messages_with_no_think_suffix(messages)
+        if retry_messages == list(messages or []):
+            return result
+
+        retry_out = []
+        for d in self.generate_stream(
+            retry_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            cancel_token=cancel_token,
+        ):
+            retry_out.append(d)
+        return "".join(retry_out).strip()
 
     def generate_stream(
         self,
@@ -207,10 +248,12 @@ class LlamaServerClient:
             method="POST",
         )
 
+        self._acquire_request_lock(cancel_token)
         try:
             with urllib.request.urlopen(req, timeout=self.cfg.timeout_s) as resp:
                 if self.cfg.stream_read_timeout_s and self.cfg.stream_read_timeout_s > 0:
                     self._set_read_timeout(resp, float(self.cfg.stream_read_timeout_s))
+                last_progress_at = time.monotonic()
                 # Expect SSE
                 while True:
                     if cancel_token is not None:
@@ -218,7 +261,10 @@ class LlamaServerClient:
                     try:
                         line = resp.readline()
                     except socket.timeout:
-                        continue
+                        idle_for = time.monotonic() - last_progress_at
+                        raise LLMClientError(
+                            f"llama-server stream stalled for {idle_for:.1f}s waiting for the next chunk"
+                        )
                     if not line:
                         break
 
@@ -230,6 +276,7 @@ class LlamaServerClient:
                     if not s or (not s.startswith("data:")):
                         continue
 
+                    last_progress_at = time.monotonic()
                     chunk = s[5:].strip()
 
                     if chunk == "[DONE]":
@@ -269,3 +316,5 @@ class LlamaServerClient:
             raise LLMClientError(f"llama-server request failed: {detail}")
         except Exception as e:
             raise LLMClientError(f"llama-server request failed: {e}")
+        finally:
+            self._request_lock.release()

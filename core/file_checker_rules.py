@@ -164,9 +164,11 @@ class LocalFileOpRuleChecker:
         )
 
     def _directories_only_are_partial(self) -> bool:
+        if FileStagePolicy.stage_is_extension_file_reorg(self.stage) or FileStagePolicy.stage_is_broad_file_reorg(self.stage):
+            return True
         return bool(
             re.search(
-                r"\b(move|relocate|rename|copy|delete|remove|distribute|sort into|organize files|empty|clear out|rewrite|create .* file|write .* file|save .* file)\b",
+                r"\b(move|relocate|rename|copy|delete|remove|distribute|sort into|organize files|organize by|group by|grouping|consolidat\w*|categori[sz]\w*|empty|clear out|rewrite|create .* file|write .* file|save .* file)\b",
                 self.stage_intent_text,
             )
         )

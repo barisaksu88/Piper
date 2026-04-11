@@ -177,6 +177,47 @@ class AgentBrain:
         payload = re.sub(r"\s*</python>\s*$", "", payload, flags=re.IGNORECASE)
         return payload.strip()
 
+    @staticmethod
+    def _extract_inline_json_tag_payload(text: str, tag_name: str) -> Optional[str]:
+        match = re.search(rf"\[{re.escape(tag_name)}\s*:\s*", text, re.IGNORECASE)
+        if not match:
+            return None
+        idx = match.end()
+        while idx < len(text) and text[idx].isspace():
+            idx += 1
+        if idx >= len(text) or text[idx] != "{":
+            return None
+
+        start = idx
+        depth = 0
+        in_string = False
+        escape = False
+        for pos in range(idx, len(text)):
+            ch = text[pos]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch == "{":
+                depth += 1
+                continue
+            if ch == "}":
+                depth -= 1
+                if depth == 0:
+                    payload = text[start : pos + 1].strip()
+                    rest = text[pos + 1 :].strip()
+                    if rest.startswith("]"):
+                        return payload
+                    return None
+        return None
+
     def parse_and_execute(self, llm_output: str, *, cancel_token: CancellationToken | None = None) -> AgentAction:
         """Parses LLM output, executes tools, returns result."""
         
@@ -245,6 +286,16 @@ class AgentBrain:
             return AgentAction(
                 action_type="TOOL", tag="FILE_OP", payload=payload_text, content=llm_output, execute_result=result
             )
+        file_op_inline_payload = self._extract_inline_json_tag_payload(text, "FILE_OP")
+        if file_op_inline_payload is not None:
+            result = self.exec_file_op(file_op_inline_payload, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL",
+                tag="FILE_OP",
+                payload=file_op_inline_payload,
+                content=llm_output,
+                execute_result=result,
+            )
 
         browser_op_match = re.search(r'\[BROWSER_OP\](.*?)\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
         if browser_op_match:
@@ -274,6 +325,16 @@ class AgentBrain:
             result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
             return AgentAction(
                 action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+        browser_op_inline_payload = self._extract_inline_json_tag_payload(text, "BROWSER_OP")
+        if browser_op_inline_payload is not None:
+            result = self.exec_browser_op(browser_op_inline_payload, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL",
+                tag="BROWSER_OP",
+                payload=browser_op_inline_payload,
+                content=llm_output,
+                execute_result=result,
             )
 
         # 2. CHECK SINGLE TAGS

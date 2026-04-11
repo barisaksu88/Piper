@@ -347,8 +347,12 @@ def _should_bridge_wsl_windows_llama(raw_url: str, server_exe: Path | str) -> bo
     return _is_wsl_runtime() and str(server_exe or "").strip().lower().endswith(".exe") and _url_targets_loopback(raw_url)
 
 
+def _should_expose_windows_llama_bind(raw_url: str, server_exe: Path | str) -> bool:
+    return str(server_exe or "").strip().lower().endswith(".exe") and _url_targets_loopback(raw_url)
+
+
 def _resolve_llama_server_bind_host(raw_url: str, server_exe: Path | str) -> str:
-    if _should_bridge_wsl_windows_llama(raw_url, server_exe):
+    if _should_expose_windows_llama_bind(raw_url, server_exe):
         return "0.0.0.0"
     parsed = urlparse(str(raw_url or "").strip())
     return (parsed.hostname or "127.0.0.1").strip() or "127.0.0.1"

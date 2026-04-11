@@ -351,12 +351,37 @@ class FileWorkEngine:
             if _dep_block.blocked:
                 return _dep_block
 
+        planned_action = FileStagePolicy.planned_file_op_action(tool_tag)
+        if FileStagePolicy.stage_is_file_work(stage) and planned_action == "read_many":
+            named_targets = [
+                str(path).strip().replace("\\", "/").lower()
+                for path in FileStagePolicy.stage_named_file_targets(stage)
+                if str(path).strip()
+            ]
+            planned_paths = [
+                str(path).strip().replace("\\", "/")
+                for path in FileStagePolicy.planned_file_op_paths(tool_tag)
+                if str(path).strip()
+            ]
+            if len(named_targets) == 1 and len(planned_paths) > 1:
+                exact_target = named_targets[0]
+                if any(path.lower() == exact_target for path in planned_paths) and any(
+                    path.lower() != exact_target for path in planned_paths
+                ):
+                    return FileWorkBlock(
+                        blocked=True,
+                        reason=(
+                            f"SYSTEM ERROR: This stage already names the exact file '{exact_target}'. "
+                            "Do not read alternate matches in the same step. "
+                            "Use FILE_OP read_text on the exact target only unless the user explicitly asked to compare files."
+                        ),
+                    )
+
         # Guards 2 & 3 only apply to CONTENT_EDIT stages.
         if not FileStagePolicy.stage_is_content_edit_stage(stage):
             return FileWorkBlock()
 
         # Guard 1 (checked first, matches executor priority): redundant exact read
-        planned_action = FileStagePolicy.planned_file_op_action(tool_tag)
         if planned_action in {"read_text", "read_many"}:
             planned_paths = FileStagePolicy.planned_file_op_paths(tool_tag)
             if planned_paths and exact_read_paths:
@@ -567,10 +592,7 @@ class FileWorkEngine:
                 if p and p not in paths_to_check:
                     paths_to_check.append(p)
         else:
-            # move_path and move_many both encode source(s) under "src" keys.
-            import re as _re
-            for m in _re.finditer(r'"src"\s*:\s*"([^"]+)"', tool_tag or ""):
-                p = m.group(1).strip()
+            for p in FileStagePolicy.planned_file_op_source_paths(tool_tag):
                 if p and p not in paths_to_check:
                     paths_to_check.append(p)
 

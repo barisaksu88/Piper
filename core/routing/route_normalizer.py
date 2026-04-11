@@ -61,6 +61,11 @@ _FILE_TARGET_RE = re.compile(r"[\w./\\-]+\.(?=[A-Za-z0-9]{1,8}\b)(?=[A-Za-z0-9]*
 _DELETE_REQUEST_RE = re.compile(
     r"(?is)^(?:in the workspace,\s*)?(?:please\s+)?(?:delete|remove)\s+(?P<body>.+?)[.?!]*$"
 )
+_DIRECT_EMPTY_DIR_DELETE_RE = re.compile(
+    r"(?is)^(?:in the workspace,\s*)?(?:please\s+)?(?:delete|remove|clean up|clear)\s+"
+    r"(?:the\s+)?empty\s+(?:folders|directories)"
+    r"(?:\s+(?:under|in)\s+(?:the\s+)?workspace)?[.?!]*$"
+)
 _GENERIC_LOOKUP_SUBJECTS = {
     "document",
     "doc",
@@ -496,7 +501,6 @@ def _registered_extension_file_work(
     user_msg: str,
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
-    del recent_history
     if not decision or decision.get("decision") != "TASK":
         return None
 
@@ -504,7 +508,7 @@ def _registered_extension_file_work(
     stages = [dict(stage) for stage in card.get("stages") or []]
     if not stages:
         return None
-    return _normalize_extension_file_work(decision, card, stages, user_msg)
+    return _normalize_extension_file_work(decision, card, stages, user_msg, recent_history)
 
 
 @register_route_interceptor
@@ -1780,6 +1784,28 @@ def _build_workspace_file_delete_search_card(subject: str) -> RouteDecision:
     }
 
 
+def _build_empty_directory_cleanup_card() -> RouteDecision:
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": "Delete empty folders under the workspace root.",
+            "context": [
+                "The workspace root is '.'.",
+                "This is a directory-cleanup request, not a filename lookup.",
+                "Delete only directories that are empty at execution time.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": "Delete folders that are currently empty under the workspace root.",
+                    "stage_type": "FILE_WORK",
+                    "success_condition": "No empty folders remain under the workspace root.",
+                    "allowed_tools": ["FILE_OP"],
+                }
+            ],
+        },
+    }
+
+
 def _extract_document_lookup_subject(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
@@ -1982,6 +2008,8 @@ def _subject_looks_like_file_delete_reference(subject: str) -> bool:
     raw_subject = str(subject or "").strip()
     if not raw_subject:
         return False
+    if re.search(r"(?i)\bempty\s+(?:folders|directories)\b", raw_subject):
+        return False
     if re.search(r"[/\\.]", raw_subject) or "_" in raw_subject:
         return True
     return bool(_FILEISH_DELETE_HINT_RE.search(raw_subject))
@@ -2001,6 +2029,9 @@ def _normalize_direct_file_work(user_msg: str) -> RouteDecision | None:
     text = (user_msg or "").strip()
     if not text:
         return None
+
+    if _DIRECT_EMPTY_DIR_DELETE_RE.match(text):
+        return _build_empty_directory_cleanup_card()
 
     compound_sequence = _normalize_compound_file_undo_redo_sequence(text)
     if compound_sequence is not None:
@@ -2645,6 +2676,120 @@ def _clean_route_path(raw_path: str) -> str:
     return str(raw_path or "").strip().rstrip(".,;:!?").replace("\\", "/")
 
 
+def _normalize_workspace_scope_path(raw_path: str) -> str:
+    clean = _clean_route_path(str(raw_path or "").strip().strip("'\""))
+    if not clean:
+        return ""
+    normalized = clean.replace("\\", "/")
+    lower = normalized.lower()
+    workspace_roots = (
+        "c:/projects/piper/data/workspace",
+        "/mnt/c/projects/piper/data/workspace",
+        "/projects/piper/data/workspace",
+        "data/workspace",
+        "./data/workspace",
+        "workspace",
+        "./workspace",
+    )
+    if lower in workspace_roots:
+        return "."
+    for prefix in tuple(f"{root}/" for root in workspace_roots):
+        if lower.startswith(prefix):
+            normalized = normalized[len(prefix):]
+            break
+    normalized = normalized.lstrip("/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized in {"", "."}:
+        return "."
+    normalized = PurePosixPath(normalized).as_posix().rstrip("/")
+    if normalized.startswith("../"):
+        return ""
+    return normalized or "."
+
+
+def _display_workspace_scope_path(scope_path: str) -> str:
+    normalized = _normalize_workspace_scope_path(scope_path)
+    if not normalized or normalized == ".":
+        return "."
+    return f"./{normalized}"
+
+
+def _extract_extension_file_work_scope(
+    user_msg: str,
+    card: Dict,
+    recent_history: Sequence[dict[str, Any]],
+) -> str:
+    generic_names = {"root", "workspace", "folder", "directory", "subfolder", "path"}
+    standalone_path_pattern = re.compile(
+        r"(?i)(?P<path>(?:\./|\.\\|/|[A-Za-z]:[\\/])[\w./\\:-]+)"
+    )
+    path_patterns = (
+        re.compile(r"(?is)\b(?:folder|directory|subfolder|path)\s+(?P<path>(?:[A-Za-z]:)?[\w./\\:-]+)"),
+        re.compile(r"(?is)(?P<path>(?:[A-Za-z]:)?[\w./\\:-]+)\s+(?:folder|directory|subfolder)\b"),
+    )
+    named_folder_pattern = re.compile(
+        r"(?i)\b(?:the\s+)?(?P<name>[a-z0-9][a-z0-9_.-]{1,80})\s+(?:folder|directory|subfolder)\b"
+    )
+
+    def _extract_from_text(text: str) -> str:
+        raw = str(text or "")
+        if not raw:
+            return ""
+        for match in standalone_path_pattern.finditer(raw):
+            candidate = _normalize_workspace_scope_path(match.group("path"))
+            if candidate and candidate.lower() not in generic_names:
+                return candidate
+        for pattern in path_patterns:
+            for match in pattern.finditer(raw):
+                candidate = _normalize_workspace_scope_path(match.group("path"))
+                if candidate and candidate.lower() not in generic_names:
+                    return candidate
+        for parts in _QUOTED_TEXT_RE.findall(raw):
+            quoted = next((part for part in parts if part), "")
+            candidate = _normalize_workspace_scope_path(quoted)
+            if candidate and candidate.lower() not in generic_names and candidate != ".":
+                return candidate
+        for match in named_folder_pattern.finditer(raw):
+            candidate = _normalize_workspace_scope_path(match.group("name"))
+            if candidate and candidate.lower() not in generic_names:
+                return candidate
+        return ""
+
+    explicit_user_scope = _extract_from_text(user_msg)
+    if explicit_user_scope:
+        return explicit_user_scope
+
+    user_text = str(user_msg or "").lower()
+    if (
+        FILE_ORG_REQUEST_RE.search(str(user_msg or ""))
+        and (EXTENSION_GROUPING_RE.search(str(user_msg or "")) or FILE_TYPE_GROUPING_RE.search(str(user_msg or "")))
+        and not re.search(
+            r"\b(there|that folder|that directory|that subfolder|that path|same folder|same directory|same subfolder|inside it|under it)\b",
+            user_text,
+        )
+    ):
+        return "."
+
+    blobs: list[str] = []
+    blobs.append(str(card.get("goal") or ""))
+    blobs.extend(str(item) for item in (card.get("context") or []))
+    for stage in card.get("stages") or []:
+        if not isinstance(stage, dict):
+            continue
+        blobs.append(str(stage.get("stage_goal") or ""))
+        blobs.append(str(stage.get("success_condition") or ""))
+        blobs.extend(str(item) for item in (stage.get("active_targets") or []))
+    for message in reversed(recent_history):
+        blobs.append(str(message.get("content") or ""))
+
+    for blob in blobs:
+        candidate = _extract_from_text(blob)
+        if candidate:
+            return candidate
+    return "."
+
+
 def _clean_route_content(raw_content: str) -> str:
     text = str(raw_content or "").strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
@@ -2670,6 +2815,7 @@ def _normalize_extension_file_work(
     card: Dict,
     stages: List[StageCard],
     user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     if not any(str(stage.get("stage_type", "")).upper() == "FILE_WORK" for stage in stages):
         return None
@@ -2679,7 +2825,8 @@ def _normalize_extension_file_work(
         for stage in stages
     )
     context_blob = " ".join(str(item) for item in card.get("context") or [])
-    combined = " ".join(filter(None, [user_msg, str(card.get("goal", "")), stage_blob, context_blob]))
+    history_blob = " ".join(str(message.get("content") or "") for message in recent_history)
+    combined = " ".join(filter(None, [user_msg, str(card.get("goal", "")), stage_blob, context_blob, history_blob]))
     if not combined:
         return None
 
@@ -2694,36 +2841,56 @@ def _normalize_extension_file_work(
         return None
 
     cleanup_empty = bool(EMPTY_DIR_CLEANUP_RE.search(combined))
+    scope_root = _extract_extension_file_work_scope(user_msg, card, recent_history)
+    scope_display = _display_workspace_scope_path(scope_root)
+    scope_context = (
+        "The workspace root is '.'."
+        if scope_root == "."
+        else f"The requested reorganization root is '{scope_display}'."
+    )
+    scope_guard = (
+        "Reorganize files under the workspace root only."
+        if scope_root == "."
+        else f"Only reorganize files under '{scope_display}'. Do not sweep the whole workspace root."
+    )
 
     normalized = dict(decision)
     new_card = dict(card)
     new_card["goal"] = (
-        "Consolidate workspace files so each extension ends up in one relevant folder "
+        f"Consolidate files under '{scope_display}' so each extension ends up in one relevant folder "
         "and remove folders that become empty."
         if cleanup_empty
-        else "Consolidate workspace files so each extension ends up in one relevant folder."
+        else f"Consolidate files under '{scope_display}' so each extension ends up in one relevant folder."
     )
+    new_card["context"] = [
+        scope_context,
+        scope_guard,
+        "Treat this as extension-based file organization, not a filename lookup.",
+    ]
     new_card["stages"] = [
         {
-            "stage_goal": "Inspect the workspace and build an extension inventory with a destination folder chosen for each extension.",
+            "stage_goal": f"Inspect '{scope_display}' and build an extension inventory with a destination folder chosen for each extension found there.",
             "stage_type": "FILE_WORK",
-            "success_condition": "An extension inventory exists and a destination folder is identified for each relevant extension.",
+            "success_condition": f"An extension inventory exists for '{scope_display}' and a destination folder is identified for each relevant extension under that scope.",
             "allowed_tools": ["FILE_OP"],
+            "active_targets": [scope_root],
         },
         {
-            "stage_goal": "Consolidate files so each extension lives in one chosen destination folder without creating duplicates.",
+            "stage_goal": f"Consolidate files under '{scope_display}' so each extension lives in one chosen destination folder without creating duplicates.",
             "stage_type": "FILE_WORK",
-            "success_condition": "For every relevant extension, files are consolidated into a single destination folder and duplicate identical files are not kept twice.",
+            "success_condition": f"For every relevant extension under '{scope_display}', files are consolidated into a single destination folder and duplicate identical files are not kept twice.",
             "allowed_tools": ["FILE_OP"],
+            "active_targets": [scope_root],
         },
     ]
     if cleanup_empty:
         new_card["stages"].append(
             {
-                "stage_goal": "Delete folders that are empty after consolidation.",
+                "stage_goal": f"Delete folders under '{scope_display}' that are empty after consolidation.",
                 "stage_type": "FILE_WORK",
-                "success_condition": "No empty folders remain under the workspace root.",
+                "success_condition": f"No empty folders remain under '{scope_display}'.",
                 "allowed_tools": ["FILE_OP"],
+                "active_targets": [scope_root],
             }
         )
     normalized["card"] = new_card

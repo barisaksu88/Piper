@@ -103,6 +103,10 @@ _SELF_IDENTIFY_PATTERNS = (
     re.compile(r"(?is)^\s*my name is\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
     re.compile(r"(?is)^\s*this is\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
     re.compile(r"(?is)^\s*(?:i am|i'm|im)\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
+    re.compile(
+        r"(?is)^\s*(?:(?:no|nah|nope|wait|sorry)\s+)?(?:i\s+mean\s+)?"
+        r"(?:it'?s|its)\s+me\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"
+    ),
 )
 _RELATION_TO_ADMIN_PATTERNS = (
     (re.compile(r"(?i)\b(?:baris'?s friend|friend of baris)\b"), "friend"),
@@ -937,6 +941,25 @@ class ActiveUserRuntime:
             return None, False, self._build_identity_clarification_message(name, candidates)
         return self.registry._new_standard_profile(name), True, ""
 
+    def _extract_bare_known_identity_name(self, text: str) -> str:
+        raw = " ".join(str(text or "").strip().split())
+        if not raw:
+            return ""
+        if not re.fullmatch(r"[A-Za-z][A-Za-z .'-]{0,40}[.]?", raw):
+            return ""
+        candidate = _clean_identity_name(raw)
+        if not candidate:
+            return ""
+        normalized_candidate = _normalize_token(candidate)
+        if not normalized_candidate:
+            return ""
+        for profile in self.registry.matching_profiles(candidate):
+            if _normalize_token(profile.name) == normalized_candidate:
+                return candidate
+            if _normalize_token(profile.user_id) == normalized_candidate:
+                return candidate
+        return ""
+
     def _activate_target_profile(self, target_profile: UserProfile) -> UserSwitchResult:
         result = self.registry.activate_profile(target_profile)
         self._initialize_profile_state(result.profile)
@@ -984,12 +1007,13 @@ class ActiveUserRuntime:
     def observe_typed_identity_hint(self, text: str) -> UserActivationResult | None:
         candidate = _extract_self_identified_name(text)
         relation_hint = _extract_relation_to_admin(text)
+        current = self.active_profile()
+        if not candidate and current.is_unknown:
+            candidate = self._extract_bare_known_identity_name(text)
         if not candidate:
-            current = self.active_profile()
             if relation_hint and not current.is_admin and not current.is_unknown:
                 self._upsert_admin_relationship_hint(current.user_id, relation_hint)
             return None
-        current = self.active_profile()
         target_profile, created, clarification_message = self._resolve_identity_target_profile(candidate, relation_hint)
         if target_profile is None:
             return UserActivationResult(

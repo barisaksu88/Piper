@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any, Dict
 
 from core.runtime_control import CancellationToken, OperationCancelled
-from tools.file_ops import FileOpError, parse_payload as parse_file_op_payload, resolve_workspace_path
+from tools.file_ops import (
+    FileOpError,
+    parse_normalized_payload as parse_file_op_payload,
+    resolve_workspace_path,
+)
 from tools.workspace_extension_ops import (
     build_extension_inventory,
     canonical_path,
@@ -272,57 +276,6 @@ class WorkspaceToolRuntime:
         return items
 
     @staticmethod
-    def _normalize_file_op_action(action: str) -> str:
-        normalized = str(action or "").strip().lower()
-        aliases = {
-            "mkdir": "ensure_dir",
-            "mkdirs": "ensure_dirs",
-            "make_dir": "ensure_dir",
-            "create_dir": "ensure_dir",
-            "create_directory": "ensure_dir",
-            "make_directory": "ensure_dir",
-            "make_directories": "ensure_dirs",
-            "create_directories": "ensure_dirs",
-            "read_file": "read_text",
-            "read_files": "read_many",
-            "list_files": "list_tree",
-            "list_dir": "list_tree",
-            "list_directory": "list_tree",
-            "list_workspace": "list_tree",
-            "find_file": "find_paths",
-            "find_files": "find_paths",
-            "find_path": "find_paths",
-            "search_paths": "find_paths",
-            "search_files": "find_paths",
-            "locate_file": "find_paths",
-            "locate_files": "find_paths",
-            "scan_extensions": "extension_inventory",
-            "inventory_extensions": "extension_inventory",
-            "extension_scan": "extension_inventory",
-            "group_by_extension": "consolidate_by_extension",
-            "merge_by_extension": "consolidate_by_extension",
-            "consolidate_extensions": "consolidate_by_extension",
-            "cleanup_empty_dirs": "delete_empty_dirs",
-            "remove_empty_dirs": "delete_empty_dirs",
-            "remove_empty_directories": "delete_empty_dirs",
-            "create_json": "write_json",
-            "modify_json": "update_json",
-            "patch_json": "update_json",
-            "move_file": "move_path",
-            "move_files": "move_many",
-            "rename_path": "move_path",
-            "rename_file": "move_path",
-            "rename_files": "move_many",
-            "copy_file": "copy_path",
-            "copy_files": "copy_many",
-            "delete_file": "delete_path",
-            "delete_files": "delete_many",
-            "remove_file": "delete_path",
-            "remove_files": "delete_many",
-        }
-        return aliases.get(normalized, normalized)
-
-    @staticmethod
     def _normalize_extension_token(token: Any) -> str:
         raw = str(token or "").strip().lower()
         if not raw:
@@ -407,7 +360,7 @@ class WorkspaceToolRuntime:
         try:
             self._raise_if_cancelled(cancel_token)
             payload = parse_file_op_payload(self._strip_fences(payload_text))
-            action = self._normalize_file_op_action(payload.get("action", ""))
+            action = str(payload.get("action") or "").strip().lower()
             file_op_error = lambda message, **extra: self._file_op_error(message, action=action, **extra)
             if not action:
                 return self._file_op_error("FILE_OP action is required.")

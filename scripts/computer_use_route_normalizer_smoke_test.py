@@ -10,6 +10,7 @@ from _bootstrap import ROOT_DIR
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from core.browser_route_utils import extract_browser_url
 from core.routing.route_normalizer import normalize_route_decision
 
 
@@ -49,6 +50,9 @@ class ComputerUseRouteSmokeReport:
     download_only_success: bool
     download_only_require_extract: bool
     download_only_stage_goal: str
+    abbreviation_url_blocked: bool
+    file_followup_browser_blocked: bool
+    file_followup_stage_type: str
 
 
 def run_smoke() -> ComputerUseRouteSmokeReport:
@@ -255,6 +259,25 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         and not download_only_require_extract
         and "requested on-page information" not in download_only_stage_goal.lower()
     )
+    abbreviation_url_blocked = extract_browser_url("e.g., `grocery-list.txt`") == ""
+    file_followup_history = [
+        {
+            "role": "assistant",
+            "content": (
+                "Here's what I need from you:\n"
+                "1. What is the exact filename? (e.g., `grocery-list.txt`)\n"
+                "2. What's the current content?"
+            ),
+        }
+    ]
+    file_followup = normalize_route_decision(
+        {"decision": "CHAT"},
+        "Read grocery_list.txt and tell me its exact contents only.",
+        file_followup_history,
+    )
+    file_followup_stage = (((file_followup or {}).get("card") or {}).get("stages") or [{}])[0]
+    file_followup_stage_type = str(file_followup_stage.get("stage_type") or "")
+    file_followup_browser_blocked = file_followup_stage_type != "COMPUTER_USE"
     success = bool(
         simple_success
         and compound_success
@@ -266,6 +289,8 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         and contextual_followup_success
         and download_followup_success
         and download_only_success
+        and abbreviation_url_blocked
+        and file_followup_browser_blocked
     )
     return ComputerUseRouteSmokeReport(
         success=bool(success),
@@ -302,6 +327,9 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         download_only_success=bool(download_only_success),
         download_only_require_extract=bool(download_only_require_extract),
         download_only_stage_goal=download_only_stage_goal,
+        abbreviation_url_blocked=bool(abbreviation_url_blocked),
+        file_followup_browser_blocked=bool(file_followup_browser_blocked),
+        file_followup_stage_type=file_followup_stage_type,
     )
 
 
@@ -351,6 +379,9 @@ def main() -> int:
         print(f"DOWNLOAD_ONLY_SUCCESS: {report.download_only_success}")
         print(f"DOWNLOAD_ONLY_REQUIRE_EXTRACT: {report.download_only_require_extract}")
         print(f"DOWNLOAD_ONLY_STAGE_GOAL: {report.download_only_stage_goal}")
+        print(f"ABBREVIATION_URL_BLOCKED: {report.abbreviation_url_blocked}")
+        print(f"FILE_FOLLOWUP_BROWSER_BLOCKED: {report.file_followup_browser_blocked}")
+        print(f"FILE_FOLLOWUP_STAGE_TYPE: {report.file_followup_stage_type}")
     return 0 if report.success else 1
 
 

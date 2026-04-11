@@ -50,6 +50,8 @@ def _stage(
     allowed_tools=None,
     objective: str = "",
     active_targets=None,
+    declared_scope_root: str = "",
+    declared_exact_targets=None,
     evidence_required: str = "",
 ) -> dict:
     s: dict = {"stage_goal": stage_goal, "stage_type": stage_type,
@@ -60,6 +62,10 @@ def _stage(
         s["objective"] = objective
     if active_targets is not None:
         s["active_targets"] = list(active_targets)
+    if declared_scope_root:
+        s["declared_scope_root"] = declared_scope_root
+    if declared_exact_targets is not None:
+        s["declared_exact_targets"] = list(declared_exact_targets)
     if evidence_required:
         s["evidence_required"] = evidence_required
     return s
@@ -138,6 +144,49 @@ def test_evidence_required_defaults_to_success_condition() -> None:
     inp = PlannerBoundary.validate_input(stage)
     assert inp.evidence_required == stage["success_condition"]
     assert stage["evidence_required"] == stage["success_condition"]
+
+
+def test_declared_exact_targets_are_preserved_and_derived() -> None:
+    explicit_stage = _stage(
+        stage_goal="Read grocery_list.txt exactly.",
+        success_condition="The exact contents of grocery_list.txt are reported.",
+        active_targets=["grocery_list.txt"],
+        declared_exact_targets=["grocery_list.txt"],
+    )
+    explicit_inp = PlannerBoundary.validate_input(explicit_stage)
+    assert explicit_inp.declared_exact_targets == ["grocery_list.txt"]
+    assert explicit_stage["declared_exact_targets"] == ["grocery_list.txt"]
+
+    derived_stage = _stage(
+        stage_goal="Locate grocery_list.txt and read its exact contents.",
+        success_condition="The exact contents of grocery_list.txt are reported.",
+    )
+    derived_inp = PlannerBoundary.validate_input(derived_stage)
+    assert derived_inp.declared_exact_targets == ["grocery_list.txt"]
+    assert derived_stage["declared_exact_targets"] == ["grocery_list.txt"]
+
+
+def test_declared_scope_root_is_preserved_and_derived() -> None:
+    explicit_stage = _stage(
+        stage_goal="Inspect './test' and prepare folders for cleanup.",
+        success_condition="The cleanup scope stays inside './test'.",
+        active_targets=["test"],
+        declared_scope_root="test",
+    )
+    explicit_stage["file_stage_kind"] = "BROAD_REORG"
+    explicit_inp = PlannerBoundary.validate_input(explicit_stage)
+    assert explicit_inp.declared_scope_root == "test"
+    assert explicit_stage["declared_scope_root"] == "test"
+
+    derived_stage = _stage(
+        stage_goal="Inspect './test' and build an extension inventory with a destination folder chosen for each extension found there.",
+        success_condition="An extension inventory exists for './test' and a destination folder is identified for each relevant extension under that scope.",
+        active_targets=["test"],
+    )
+    derived_stage["file_stage_kind"] = "BROAD_REORG"
+    derived_inp = PlannerBoundary.validate_input(derived_stage)
+    assert derived_inp.declared_scope_root == "test"
+    assert derived_stage["declared_scope_root"] == "test"
 
 
 def test_objective_from_stage_card() -> None:
@@ -269,6 +318,7 @@ def test_prompt_builder_renders_planner_boundary_block() -> None:
     assert "[PLANNER_BOUNDARY]" in prompt
     assert "objective: Repair the broken import." in prompt
     assert "active_targets: app.py" in prompt
+    assert "declared_exact_targets: app.py" in prompt
     assert "evidence_required: app.py imports correctly and tests pass." in prompt
 
 
@@ -303,6 +353,49 @@ def test_prompt_builder_compacts_large_exact_read_for_budget() -> None:
     assert "TRUNCATED FOR PLANNER BUDGET" in prompt
     assert huge_content[7000:7600] not in prompt
     assert len(prompt) < 28000, f"planner prompt too large: {len(prompt)} chars"
+
+
+def test_prompt_builder_compacts_extension_reorg_stage_when_full_template_is_too_large() -> None:
+    stage = {
+        "stage_goal": "Inspect './test' and build an extension inventory with a destination folder chosen for each extension found there.",
+        "stage_type": "FILE_WORK",
+        "success_condition": "An extension inventory exists for './test' and a destination folder is identified for each relevant extension under that scope.",
+        "allowed_tools": ["FILE_OP"],
+        "active_targets": ["test"],
+        "objective": "Consolidate files under './test' so each extension ends up in one relevant folder.",
+        "file_stage_kind": "INSPECTION",
+        "context": [
+            "The requested reorganization root is './test'.",
+            "Only reorganize files under './test'. Do not sweep the whole workspace root.",
+            "Treat this as extension-based file organization, not a filename lookup.",
+        ],
+        "skill": {
+            "name": "workspace_cleanup",
+            "procedure": [
+                "Inspect the workspace through extension inventory.",
+                "Consolidate each extension into a single destination folder.",
+                "Delete empty folders only after consolidation is verified.",
+            ],
+            "planner_hint": (
+                "Prefer the extension-cleanup workflow: extension_inventory -> "
+                "consolidate_by_extension -> delete_empty_dirs. Do not hand-write "
+                "broad move/copy batches unless the dedicated extension workflow fails."
+            ),
+        },
+    }
+    planner_input = PlannerBoundary.validate_input(stage, objective=stage["objective"])
+    manager_template = (ROOT_DIR / "data" / "prompts" / "manager.txt").read_text(encoding="utf-8")
+    prompt = PromptBuilder.build_planner_prompt(
+        base_template=manager_template,
+        stage=stage,
+        scratchpad_text="",
+        step_count=1,
+        planner_input=planner_input,
+    )
+    assert len(prompt) < 8000, f"extension reorg planner prompt too large: {len(prompt)} chars"
+    assert "extension_inventory" in prompt
+    assert "consolidate_by_extension" in prompt
+    assert "./test" in prompt
 
 
 # ---------------------------------------------------------------------------

@@ -168,6 +168,12 @@ def _runtime_checks() -> dict[str, object]:
         )
         restart_active_profile = restarted.active_profile()
         restart_admin_statement = restarted.observe_typed_identity_hint("I'm Baris")
+        restarted.cancel_pending_admin_password()
+        restart_bare_admin_statement = restarted.observe_typed_identity_hint("Baris")
+        restart_active_after_bare = restarted.active_profile().user_id
+        restarted.cancel_pending_admin_password()
+        restart_corrective_admin_statement = restarted.observe_typed_identity_hint("no i mean its me baris")
+        restart_active_after_corrective = restarted.active_profile().user_id
         restart_unknown_memory_path = restarted.current_memory_path()
         restart_unknown_summary_path = restarted.current_conversation_summary_path()
 
@@ -220,6 +226,10 @@ def _runtime_checks() -> dict[str, object]:
                 "admin_mirror_friend_relation": bool(mirrored_friend),
                 "restart_returns_to_unknown": restart_active_profile.user_id == "unknown",
                 "typed_baris_statement_requires_password": bool(getattr(restart_admin_statement, "requires_password", False)),
+                "bare_baris_statement_requires_password": bool(getattr(restart_bare_admin_statement, "requires_password", False)),
+                "bare_baris_statement_keeps_unknown_active": restart_active_after_bare == "unknown",
+                "corrective_baris_statement_requires_password": bool(getattr(restart_corrective_admin_statement, "requires_password", False)),
+                "corrective_baris_statement_keeps_unknown_active": restart_active_after_corrective == "unknown",
                 "restart_clears_unknown_memory": not restart_unknown_memory_path.exists(),
                 "restart_clears_unknown_summary": not restart_unknown_summary_path.exists(),
             },
@@ -303,6 +313,13 @@ def _harness_checks() -> dict[str, bool]:
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
         harness.chat_state.begin_fresh_session(wipe_persistent=False)
+        bare_prompt_turn = harness.send_text("Baris")
+        harness.send_text("/cancel")
+        corrective_prompt_turn = harness.send_text("no i mean its me baris")
+        harness.send_text("/cancel")
+        harness.user_runtime.switch_active_user("unknown")
+        harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
+        harness.chat_state.begin_fresh_session(wipe_persistent=False)
         harness.send_text(f"I'm {duplicate_name}, Baris's partner")
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
@@ -356,6 +373,8 @@ def _harness_checks() -> dict[str, bool]:
             "list_message_rendered": any(message.startswith("[UI] Users:") for message in all_messages),
             "whoami_message_rendered": any(message.startswith("[UI] Active user:") for message in all_messages),
             "password_prompt_rendered": any("password required" in message.lower() for message in prompt_turn.system_messages),
+            "bare_name_password_prompt_rendered": any("password required" in message.lower() for message in bare_prompt_turn.system_messages),
+            "corrective_identity_password_prompt_rendered": any("password required" in message.lower() for message in corrective_prompt_turn.system_messages),
             "wrong_password_rejected": any("incorrect admin password" in message.lower() for message in wrong_turn.system_messages),
             "correct_password_switches": active_after_correct_password == "admin_baris",
             "admin_style_restored": style_after_correct_password == "secretary.style",
@@ -375,7 +394,8 @@ def _harness_checks() -> dict[str, bool]:
                 for message in duplicate_name_messages
             ),
             "password_not_persisted_to_chat": not any(
-                str(message.get("role") or "") == "user" and str(message.get("content") or "") in {"I'm Baris", "wrong", "rosebud"}
+                str(message.get("role") or "") == "user"
+                and str(message.get("content") or "") in {"I'm Baris", "Baris", "no i mean its me baris", "wrong", "rosebud"}
                 for message in snapshot
             ),
         }

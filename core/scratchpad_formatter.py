@@ -20,7 +20,7 @@ class ScratchpadFormatter:
     _FILE_READ_OBSERVATION_LIMIT = 1800
     _FILE_MULTI_READ_OBSERVATION_LIMIT = 1400
     _FILE_MUTATION_OBSERVATION_LIMIT = 2200
-    _BROWSER_OBSERVATION_LIMIT = 1800
+    _BROWSER_OBSERVATION_LIMIT = 1200
 
     @staticmethod
     def format_stage_header(stage_num: int, stage: Dict) -> str:
@@ -92,9 +92,13 @@ OBSERVATION_TEXT: {obs_text}"""
                     ("top_level_dirs", 8),
                     ("top_level_files", 12),
                     ("requested_paths", 12),
+                    ("requested_extensions", 12),
                     ("missing_files", 12),
                     ("matches", 12),
+                    ("collisions", 12),
                     ("deduplicated_files", 12),
+                    ("excluded_names", 12),
+                    ("excluded_prefixes", 12),
                     ("empty_dirs", 12),
                     ("created_files", 12),
                     ("updated_files", 12),
@@ -153,6 +157,7 @@ OBSERVATION_TEXT: {obs_text}"""
                     pass
             if tool == "BROWSER_OP":
                 safe: Dict[str, Any] = {}
+                action = str(observation.get("action") or "").strip().lower()
                 for key in (
                     "tool",
                     "status",
@@ -172,22 +177,19 @@ OBSERVATION_TEXT: {obs_text}"""
                 inventory = observation.get("element_inventory")
                 if isinstance(inventory, list) and inventory:
                     compact_inventory = []
-                    for item in inventory[:10]:
+                    for item in inventory[:12]:
                         if not isinstance(item, dict):
                             continue
                         compact_item: Dict[str, Any] = {}
-                        for field_name in (
-                            "selector",
-                            "tag",
-                            "id",
-                            "data_testid",
-                            "name",
-                            "href",
-                            "type",
-                            "text",
-                        ):
+                        for field_name in ("selector", "tag", "type"):
                             if field_name in item:
                                 compact_item[field_name] = item.get(field_name)
+                        for field_name in ("id", "data_testid", "name", "href", "text"):
+                            if field_name not in item:
+                                continue
+                            value = SummaryEngine.truncate_text(str(item.get(field_name) or "").strip(), 72)
+                            if value:
+                                compact_item[field_name] = value
                         if compact_item:
                             compact_inventory.append(compact_item)
                     if compact_inventory:
@@ -200,8 +202,8 @@ OBSERVATION_TEXT: {obs_text}"""
                         if str(key).strip()
                     }
                 text_preview = str(observation.get("text_preview") or "").strip()
-                if text_preview:
-                    safe["text_preview"] = SummaryEngine.truncate_text(text_preview, 320)
+                if text_preview and action not in {"goto_url", "open_page"}:
+                    safe["text_preview"] = SummaryEngine.truncate_text(text_preview, 180)
                 verification = observation.get("verification")
                 if isinstance(verification, dict) and verification:
                     safe["verification"] = verification

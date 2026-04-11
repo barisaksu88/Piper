@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import difflib
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from core.contracts import FileStageKind, StageCard
 from core.file_extensions import CODE_FILE_EXTENSIONS
 from core.file_reference_matcher import file_reference_matches
+from tools.file_ops import (
+    FileOpError,
+    normalized_action_from_payload,
+    parse_normalized_tool_tag_payload,
+    path_list_from_payload,
+    primary_path_from_payload,
+    source_paths_from_payload,
+)
 
 
 class FileStagePolicy:
@@ -445,27 +454,28 @@ class FileStagePolicy:
         return str(tool_result.get("action", "")).lower() in {"read_text", "read_many", "list_tree", "find_paths", "extension_inventory"}
 
     @staticmethod
+    @lru_cache(maxsize=512)
+    def _planned_file_op_payload(tool_tag: str) -> dict[str, Any]:
+        try:
+            return parse_normalized_tool_tag_payload(tool_tag, tag="FILE_OP")
+        except FileOpError:
+            return {}
+
+    @staticmethod
     def planned_file_op_action(tool_tag: str) -> str:
-        match = re.search(r'"action"\s*:\s*"([^"]+)"', tool_tag or "", re.IGNORECASE)
-        return (match.group(1).strip().lower() if match else "")
+        return normalized_action_from_payload(FileStagePolicy._planned_file_op_payload(str(tool_tag or "")))
 
     @staticmethod
     def planned_file_op_path(tool_tag: str) -> str:
-        match = re.search(r'"path"\s*:\s*"([^"]+)"', tool_tag or "", re.IGNORECASE)
-        return (match.group(1).strip() if match else "")
+        return primary_path_from_payload(FileStagePolicy._planned_file_op_payload(str(tool_tag or "")))
 
     @staticmethod
     def planned_file_op_paths(tool_tag: str) -> list[str]:
-        payload = str(tool_tag or "")
-        single = FileStagePolicy.planned_file_op_path(payload)
-        paths: list[str] = [single] if single else []
-        list_match = re.search(r'"paths"\s*:\s*\[(.*?)\]', payload, re.IGNORECASE | re.DOTALL)
-        if list_match:
-            for match in re.findall(r'"([^"]+)"', list_match.group(1)):
-                clean = str(match or "").strip()
-                if clean and clean not in paths:
-                    paths.append(clean)
-        return paths
+        return path_list_from_payload(FileStagePolicy._planned_file_op_payload(str(tool_tag or "")))
+
+    @staticmethod
+    def planned_file_op_source_paths(tool_tag: str) -> list[str]:
+        return source_paths_from_payload(FileStagePolicy._planned_file_op_payload(str(tool_tag or "")))
 
     @classmethod
     def is_code_path(cls, path: str) -> bool:
@@ -481,6 +491,78 @@ class FileStagePolicy:
         if not isinstance(tool_result, dict):
             return ""
         return str(tool_result.get("requested_root") or tool_result.get("requested_path") or tool_result.get("path") or "").strip()
+
+    @staticmethod
+    def _normalize_stage_path_target(raw: Any) -> str:
+        clean = str(raw or "").replace("\\", "/").strip().strip("'\"")
+        if not clean:
+            return ""
+        lower = clean.lower()
+        workspace_roots = {
+            "c:/projects/piper/data/workspace",
+            "/mnt/c/projects/piper/data/workspace",
+            "/projects/piper/data/workspace",
+            "data/workspace",
+            "./data/workspace",
+            "workspace",
+            "./workspace",
+        }
+        if lower in workspace_roots:
+            return "."
+        for prefix in tuple(f"{root}/" for root in workspace_roots):
+            if lower.startswith(prefix):
+                clean = clean[len(prefix):]
+                break
+        clean = clean.lstrip("/")
+        if clean.startswith("./"):
+            clean = clean[2:]
+        clean = clean.rstrip("/")
+        if clean in {"", "."}:
+            return "."
+        normalized = Path(clean).as_posix()
+        if normalized.startswith("../"):
+            return ""
+        return normalized
+
+    @classmethod
+    def stage_scope_root(cls, stage: StageCard) -> str:
+        if not (cls.stage_is_extension_file_reorg(stage) or cls.stage_is_broad_file_reorg(stage)):
+            return ""
+        declared = cls._normalize_stage_path_target(stage.get("declared_scope_root"))
+        if declared:
+            return declared
+        candidates: list[str] = []
+        for raw in stage.get("active_targets") or []:
+            normalized = cls._normalize_stage_path_target(raw)
+            if normalized:
+                candidates.append(normalized)
+        if not candidates:
+            raw_text = " ".join(
+                [
+                    str(stage.get("stage_goal", "")),
+                    str(stage.get("success_condition", "")),
+                    " ".join(str(item) for item in (stage.get("context") or [])),
+                ]
+            )
+            for parts in re.findall(r"'([^']+)'|\"([^\"]+)\"", raw_text):
+                candidate = next((part for part in parts if part), "")
+                normalized = cls._normalize_stage_path_target(candidate)
+                if normalized:
+                    candidates.append(normalized)
+        for candidate in candidates:
+            if candidate == ".":
+                return "."
+            if Path(candidate).suffix and "/" not in candidate:
+                continue
+            return candidate
+        return "." if "workspace root" in cls.stage_file_text(stage) else ""
+
+    @staticmethod
+    def describe_scope_root(root: str) -> str:
+        clean = FileStagePolicy._normalize_stage_path_target(root)
+        if not clean or clean == ".":
+            return "the workspace root '.'"
+        return f"'./{clean}'"
 
     @staticmethod
     def file_read_paths(tool_result: Any) -> list[str]:
@@ -501,6 +583,19 @@ class FileStagePolicy:
 
     @staticmethod
     def stage_named_file_targets(stage: StageCard) -> list[str]:
+        declared = [
+            str(item).strip().lower()
+            for item in (stage.get("declared_exact_targets") or [])
+            if str(item).strip()
+        ]
+        if declared:
+            seen: set[str] = set()
+            ordered: list[str] = []
+            for item in declared:
+                if item not in seen:
+                    seen.add(item)
+                    ordered.append(item)
+            return ordered
         text = " ".join(
             [
                 str(stage.get("stage_goal", "")),
@@ -935,17 +1030,84 @@ class FileStagePolicy:
                     "Use the exact scratchpad content for analysis or proceed to the next concrete change."
                 )
         if cls.stage_is_extension_file_reorg(stage) and action == "list_tree" and status == "EXECUTED":
+            scope_root = cls.stage_scope_root(stage) or "."
+            scope_label = cls.describe_scope_root(scope_root)
             return (
                 "SYSTEM HINT: This stage is about organizing files by extension. "
-                "Use FILE_OP extension_inventory on the workspace root, then FILE_OP consolidate_by_extension "
+                f"Use FILE_OP extension_inventory on {scope_label}, then FILE_OP consolidate_by_extension "
                 "or delete_empty_dirs as needed."
             )
-        if cls.stage_requires_targeted_lookup(stage) and action == "list_tree" and status == "EXECUTED":
+        if cls.stage_is_extension_file_reorg(stage) and action == "consolidate_by_extension" and status == "FAILED":
+            collisions = [
+                str(item).strip()
+                for item in (tool_result.get("collisions") or [])
+                if str(item).strip()
+            ]
+            if collisions:
+                collision_preview = "; ".join(collisions[:3])
+                return (
+                    "SYSTEM HINT: consolidate_by_extension already identified different-content name collisions. "
+                    f"Review the collision list in OBSERVATION_TEXT ({collision_preview}). "
+                    "Do not repeat list_tree. Re-run consolidate_by_extension with an `exclude_files` list for the specific "
+                    "colliding source filenames you want to leave in place, or use FILE_OP find_paths on one collided basename "
+                    "if you need to inspect that case before choosing."
+                )
+        if (
+            (
+                cls.stage_requires_targeted_lookup(stage)
+                or (
+                    cls.stage_is_content_edit_stage(stage)
+                    and bool(cls.stage_target_terms(stage))
+                    and not cls.stage_named_file_targets(stage)
+                )
+            )
+            and action == "list_tree"
+            and status == "EXECUTED"
+        ):
             targets = cls.stage_target_terms(stage)
             if targets:
                 return (
                     "SYSTEM HINT: This stage is a targeted file lookup. Use FILE_OP find_paths with a filename query like "
                     f"'{targets[0]}' instead of broad list_tree."
+                )
+        if (
+            (cls.stage_is_content_edit_stage(stage) or cls.stage_requires_targeted_lookup(stage))
+            and action == "find_paths"
+            and status == "EXECUTED"
+        ):
+            matches = [str(item).strip() for item in (tool_result.get("matches") or []) if str(item).strip()]
+            if len(matches) > 1:
+                named_targets = {
+                    str(path).strip().replace("\\", "/").lower()
+                    for path in cls.stage_named_file_targets(stage)
+                    if str(path).strip()
+                }
+                exact_match = next((path for path in matches if path.lower() in named_targets), "")
+                if exact_match:
+                    alternates = [path for path in matches if path.lower() != exact_match.lower()]
+                    alt_preview = ", ".join(alternates[:2])
+                    if alt_preview:
+                        return (
+                            "SYSTEM HINT: An exact file match was found. "
+                            f"Read '{exact_match}' directly before nested alternatives like {alt_preview}. "
+                            "Do not compare multiple files unless the user explicitly asked you to."
+                        )
+                    return (
+                        "SYSTEM HINT: An exact file match was found. "
+                        f"Read '{exact_match}' directly."
+                    )
+                preferred = next((path for path in matches if "/" not in path), matches[0])
+                alternates = [path for path in matches if path != preferred]
+                alt_preview = ", ".join(alternates[:2])
+                if alt_preview:
+                    return (
+                        "SYSTEM HINT: Multiple plausible file matches were found. "
+                        f"Unless the user specified a subdirectory, prefer '{preferred}' before nested alternatives like {alt_preview}. "
+                        "Proceed to inspect or edit the preferred match instead of asking for clarification too early."
+                    )
+                return (
+                    "SYSTEM HINT: Multiple plausible file matches were found. "
+                    f"Unless the user specified a subdirectory, prefer '{preferred}' first."
                 )
         missing = [str(item) for item in (tool_result.get("missing_files") or []) if str(item).strip()]
         if status == "FAILED" and "source not found:" in summary.lower():

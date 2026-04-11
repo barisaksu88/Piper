@@ -322,6 +322,7 @@ def run_smoke() -> RouteBoundaryReport:
                             "stage_type": "FILE_WORK",
                             "success_condition": "'bob.txt' does not exist in the workspace.",
                             "active_targets": ["bob.txt"],
+                            "declared_exact_targets": ["bob.txt"],
                         }
                     ],
                 },
@@ -767,6 +768,7 @@ def run_smoke() -> RouteBoundaryReport:
         and str((file_target_confirmation_yes_result or {}).get("next_stage") or "") == "MANAGER"
         and str((((file_target_confirmation_yes_result or {}).get("route_decision") or {}).get("card") or {}).get("goal") or "").lower() == "delete 'b.txt'."
         and str((((((file_target_confirmation_yes_result or {}).get("route_decision") or {}).get("card") or {}).get("stages") or [{}])[0].get("active_targets") or [""])[0]).lower() == "b.txt"
+        and str((((((file_target_confirmation_yes_result or {}).get("route_decision") or {}).get("card") or {}).get("stages") or [{}])[0].get("declared_exact_targets") or [""])[0]).lower() == "b.txt"
         and str((file_target_confirmation_cancel_result or {}).get("next_stage") or "") == "PERSONA"
         and str((((file_target_confirmation_cancel_result or {}).get("route_decision") or {}).get("system_notice") or {}).get("kind") or "") == "file_target_confirmation_cancelled"
         and dict(lookup_source_followup_result).get("decision") == "TASK"

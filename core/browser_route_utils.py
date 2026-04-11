@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 import urllib.parse
 from typing import Any, Sequence
@@ -12,7 +13,7 @@ _BROWSER_HTTP_SCHEME_RE = re.compile(r"^https?://", re.IGNORECASE)
 _BROWSER_URL_RE = re.compile(r"(?P<url>(?:https?://|file://)[^\s'\"<>]+)", re.IGNORECASE)
 _BROWSER_FILE_SCHEME_RE = re.compile(r"^file://", re.IGNORECASE)
 _BROWSER_BARE_URL_RE = re.compile(
-    r"""(?P<url>(?<!@)(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d{2,5})?(?:/[^\s'"<>]*)?)""",
+    r"""(?P<url>(?<!@)(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z0-9-]{2,})(?::\d{2,5})?(?:/[^\s'"<>]*)?)""",
     re.IGNORECASE,
 )
 _BROWSER_REQUEST_HINT_RE = re.compile(
@@ -84,6 +85,7 @@ _BROWSER_REPLY_HEADING_RE = re.compile(r'(?is)\bunder\s+"(?P<heading>[^"]+)"')
 _BROWSER_REPLY_MAIN_HEADING_RE = re.compile(r'(?is)\bmain heading(?:\s+at\s+\S+)?\s+is\s+"(?P<heading>[^"]+)"')
 _SHORT_BROWSER_TOPIC_REPLY_MAX_TOKENS = 8
 _BROWSER_DOWNLOAD_PRONOUNS = {"it", "that", "this", "them", "those", "artifact", "file"}
+_BROWSER_HOST_ABBREVIATION_BLOCKLIST = {"e.g", "i.e"}
 
 _COMMON_FILEISH_SUFFIXES = {
     "avif",
@@ -339,7 +341,7 @@ def build_browser_context_followup_route(
         return None
     if extract_browser_url(text):
         return None
-    if _NON_BROWSER_CONTEXT_RE.search(text):
+    if _NON_BROWSER_CONTEXT_RE.search(text) or _looks_like_workspace_file_followup(text):
         return None
 
     runtime = extract_latest_runtime_context_fields(recent_history)
@@ -417,12 +419,17 @@ def build_browser_context_followup_route(
         return _with_browser_selector_hint(route, "body")
     if _looks_like_browser_topic_reply(text, recent_history):
         requested_topic = _clean_browser_requested_topic(text)
+        avoid_heading = ""
+        if requested_topic.lower() in {"general info", "general information", "overview", "summary"}:
+            avoid_heading = _extract_recent_browser_reply_heading(recent_history)
         route = build_explicit_browser_task_card(
             f"Open {url} in the browser and read the page text.",
             url,
             requested_topic=requested_topic,
+            avoid_heading=avoid_heading,
         )
         route = _with_browser_requested_topic(route, requested_topic)
+        route = _with_browser_avoid_heading(route, avoid_heading)
         return _with_browser_selector_hint(route, "body")
     return None
 
@@ -440,9 +447,11 @@ def _normalize_browser_url_candidate(raw_value: str) -> str:
     host = str(probe.hostname or "").strip().lower()
     if not host:
         return ""
+    if host in _BROWSER_HOST_ABBREVIATION_BLOCKLIST:
+        return ""
     if not re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}|localhost", host, re.IGNORECASE):
         suffix = host.rsplit(".", 1)[-1].lower() if "." in host else ""
-        if suffix in _COMMON_FILEISH_SUFFIXES:
+        if len(suffix) < 2 or suffix in _COMMON_FILEISH_SUFFIXES:
             return ""
         scheme = "https"
     else:
@@ -752,6 +761,17 @@ def _extract_browser_requested_topic(text: str) -> str:
     if not match:
         return ""
     return _clean_browser_requested_topic(match.group("topic") or match.group("topic_alt"))
+
+
+def _looks_like_workspace_file_followup(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    for token in re.findall(r"[\w./\\-]+\.[A-Za-z0-9]{1,8}", raw):
+        suffix = Path(token).suffix.lower().lstrip(".")
+        if suffix and suffix in _COMMON_FILEISH_SUFFIXES:
+            return True
+    return False
 
 
 def _clean_browser_requested_topic(text: str) -> str:

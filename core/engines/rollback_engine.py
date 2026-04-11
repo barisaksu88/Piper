@@ -31,6 +31,7 @@ Limitations (v1)
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,7 +55,12 @@ def _manifest_dir(data_dir: Path) -> Path:
 
 
 def _safe_turn_id(turn_id: str) -> str:
-    return "".join(c if c.isalnum() or c in "-:." else "_" for c in str(turn_id or ""))
+    raw = str(turn_id or "").strip()
+    if not raw:
+        return ""
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in raw)
+    safe = re.sub(r"_+", "_", safe).strip(" ._")
+    return safe
 
 
 def is_bulk_action(action: str) -> bool:

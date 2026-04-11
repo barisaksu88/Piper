@@ -100,6 +100,37 @@ _DOWNLOAD_TOKEN_ALIASES = {
     "source": {".tar", ".tar.gz", ".tgz", ".zip", "source", "src"},
     "text": {".md", ".rst", ".txt", "plain", "readme", "text", "txt"},
 }
+_DOWNLOAD_AUXILIARY_PATH_TOKENS = {
+    "bib",
+    "bibtex",
+    "cite",
+    "citation",
+    "citations",
+    "doi",
+    "errata",
+    "history",
+    "ref",
+    "reference",
+    "references",
+    "refs",
+    "ris",
+    "xml",
+}
+_DOWNLOAD_IDENTITY_STOPWORDS = _DOWNLOAD_HINT_STOPWORDS | {
+    "default",
+    "doc",
+    "docs",
+    "document",
+    "download",
+    "downloads",
+    "file",
+    "files",
+    "home",
+    "index",
+    "info",
+    "page",
+    "pages",
+}
 
 
 class BrowserOpError(RuntimeError):
@@ -316,6 +347,30 @@ class ComputerUseEngine:
         return normalized
 
     @staticmethod
+    def _download_url_stem(value: str) -> str:
+        path = str(urllib.parse.urlparse(str(value or "").strip()).path or "").strip()
+        if not path:
+            return ""
+        name = Path(path).name or Path(path).stem
+        stem = Path(name).stem if Path(name).suffix else name
+        normalized = re.sub(r"[^a-z0-9]+", "", stem.lower())
+        if len(normalized) < 3 or normalized in _DOWNLOAD_IDENTITY_STOPWORDS:
+            return ""
+        return normalized
+
+    @classmethod
+    def _download_identity_tokens(cls, *values: str) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            for token in cls._normalize_download_hint_tokens(value):
+                if len(token) < 3 or token in _DOWNLOAD_IDENTITY_STOPWORDS or token in seen:
+                    continue
+                seen.add(token)
+                normalized.append(token)
+        return normalized
+
+    @staticmethod
     def _download_candidate_haystack(candidate: dict[str, Any]) -> str:
         parts = [
             str(candidate.get("text") or ""),
@@ -329,7 +384,14 @@ class ComputerUseEngine:
         return " ".join(part for part in parts if part).lower()
 
     @classmethod
-    def _score_download_candidate(cls, candidate: dict[str, Any], hint: str) -> int:
+    def _score_download_candidate(
+        cls,
+        candidate: dict[str, Any],
+        hint: str,
+        *,
+        current_url: str = "",
+        current_title: str = "",
+    ) -> int:
         hint_l = str(hint or "").strip().lower()
         if not hint_l:
             return -10**9
@@ -338,6 +400,10 @@ class ComputerUseEngine:
         download_attr = str(candidate.get("download") or "").strip().lower()
         haystack = cls._download_candidate_haystack(candidate)
         tokens = cls._normalize_download_hint_tokens(hint_l)
+        href_path_tokens = set(re.findall(r"[a-z0-9]+", urllib.parse.urlparse(href).path))
+        current_stem = cls._download_url_stem(current_url)
+        candidate_stem = cls._download_url_stem(href)
+        identity_tokens = cls._download_identity_tokens(current_stem, current_title)
         matched = 0
         score = 0
 
@@ -380,10 +446,25 @@ class ComputerUseEngine:
             score += 20
         if text in {"text", "pdf", "html"} and text in tokens:
             score += 24
+        if current_stem and candidate_stem:
+            if candidate_stem == current_stem:
+                score += 72
+            elif current_stem in candidate_stem or candidate_stem in current_stem:
+                score += 34
+        identity_hits = 0
+        for token in identity_tokens:
+            if token and token in haystack:
+                identity_hits += 1
+        if identity_hits:
+            score += min(identity_hits, 3) * 12
         if href and not cls._looks_like_html_page_href(href, download_attr):
             score += 16
         if download_attr:
             score += 14
+        if href_path_tokens & _DOWNLOAD_AUXILIARY_PATH_TOKENS:
+            score -= 42
+            if text in {"txt", "pdf", "html", "xml"}:
+                score -= 10
         if cls._looks_like_html_page_href(href, download_attr):
             score -= 80
         elif href:
@@ -400,11 +481,18 @@ class ComputerUseEngine:
         candidates: list[dict[str, Any]],
         *,
         hint: str,
+        current_url: str = "",
+        current_title: str = "",
     ) -> dict[str, Any] | None:
         best: dict[str, Any] | None = None
         best_score = -10**9
         for candidate in candidates:
-            score = cls._score_download_candidate(candidate, hint)
+            score = cls._score_download_candidate(
+                candidate,
+                hint,
+                current_url=current_url,
+                current_title=current_title,
+            )
             if score > best_score:
                 best = dict(candidate)
                 best_score = score
@@ -1116,6 +1204,8 @@ class ComputerUseEngine:
                     "name": str(node.attrs.get("name") or "").strip(),
                 },
                 text,
+                current_url=self._session.current_url,
+                current_title=self._session.current_title,
             )
             if best is None or score > best[0]:
                 best = (score, node)
@@ -1244,6 +1334,8 @@ class ComputerUseEngine:
             candidate = self._best_download_candidate(
                 self._capture_playwright_download_candidates(),
                 hint=text,
+                current_url=self._session.current_url,
+                current_title=self._session.current_title,
             )
             if candidate is not None:
                 return str(candidate.get("selector") or "").strip()
@@ -1523,6 +1615,21 @@ class ComputerUseEngine:
                 result["topic_match_score"] = topic_match_score
             if matched_heading:
                 result["matched_heading"] = matched_heading
+            # When topic suggests a download/file search, enrich element_inventory
+            # with href-bearing anchor candidates so the planner can see actual download URLs.
+            _DOWNLOAD_TOPIC_TOKENS = {"download", "format", "file", "txt", "pdf", "text", "html"}
+            topic_tokens = set(re.findall(r"[a-z]+", topic.lower())) if topic else set()
+            if topic and topic_tokens & _DOWNLOAD_TOPIC_TOKENS:
+                dl_candidates = self._capture_playwright_download_candidates()
+                dl_entries = [
+                    {k: v for k, v in c.items() if k in ("tag", "selector", "href", "text", "id")}
+                    for c in dl_candidates[:12]
+                    if c.get("href")
+                ]
+                if dl_entries:
+                    seen_hrefs = {e.get("href") for e in dl_entries}
+                    existing = [e for e in (result.get("element_inventory") or []) if e.get("href") not in seen_hrefs]
+                    result["element_inventory"] = dl_entries + existing
             return result
         if not self._session.current_url:
             raise BrowserOpError("No active browser page is loaded yet.")

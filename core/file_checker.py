@@ -40,6 +40,10 @@ class FileWorkChecker:
         if current_decision is not None:
             return current_decision
 
+        absence_decision = self._verify_lookup_absence_confirmation(stage, tool_result)
+        if absence_decision is not None:
+            return absence_decision
+
         current_read = self._build_current_state_read_result(stage, tool_result)
         if current_read is not None:
             current_read_decision = self.run_file_checker(stage, current_read)
@@ -56,9 +60,21 @@ class FileWorkChecker:
         if inventory_builder is None:
             return None
 
+        workspace_root = Path(workspace).resolve()
+        requested_root = FileStagePolicy.file_op_root(tool_result) or FileStagePolicy.stage_scope_root(stage) or "."
+        root_path = workspace_root if requested_root in {"", "."} else (workspace_root / requested_root).resolve()
+        try:
+            root_path.relative_to(workspace_root)
+        except ValueError:
+            root_path = workspace_root
+            requested_root = "."
+        if not root_path.exists() or not root_path.is_dir():
+            root_path = workspace_root
+            requested_root = "."
+
         inventory = inventory_builder(
-            Path(workspace),
-            Path(workspace).resolve(),
+            root_path,
+            workspace_root,
             extensions=None,
         )
         stage_text = FileStagePolicy.stage_file_text(stage)
@@ -66,13 +82,13 @@ class FileWorkChecker:
             synthetic = {
                 "tool": "FILE_OP",
                 "action": "delete_empty_dirs",
-                "requested_root": ".",
+                "requested_root": requested_root,
             }
         else:
             synthetic = {
                 "tool": "FILE_OP",
                 "action": "consolidate_by_extension",
-                "requested_root": ".",
+                "requested_root": requested_root,
                 "destinations": inventory.get("destination_hints", {}),
             }
             # Carry exclusion info from the original tool_result so files that were
@@ -84,6 +100,36 @@ class FileWorkChecker:
                 if tool_result.get("excluded_prefixes"):
                     synthetic["excluded_prefixes"] = tool_result["excluded_prefixes"]
         return self.run_local_file_op_checker(stage, synthetic)
+
+    @staticmethod
+    def _verify_lookup_absence_confirmation(stage: StageCard, tool_result: Any | None) -> FileCheckDecision | None:
+        if not isinstance(tool_result, dict):
+            return None
+        if str(tool_result.get("tool", "")).upper() != "FILE_OP":
+            return None
+        if str(tool_result.get("action", "")).lower() != "find_paths":
+            return None
+        if not FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return None
+        if not FileStagePolicy.stage_requires_targeted_lookup(stage):
+            return None
+
+        try:
+            match_count = int(tool_result.get("match_count", len(tool_result.get("matches") or [])) or 0)
+        except (TypeError, ValueError):
+            return None
+        if match_count != 0:
+            return None
+
+        query = str(tool_result.get("requested_query") or "").strip()
+        if not FileStagePolicy._query_matches_stage_targets(query, stage):
+            return None
+
+        return {
+            "verdict": "VERIFIED",
+            "reason": f"No plausible file match was found for '{query}', so the absence-based success condition is satisfied.",
+            "evidence_files": [],
+        }
 
     def build_current_file_stage_read_result(self, stage: StageCard, tool_result: Any | None = None) -> dict[str, Any] | None:
         if not FileStagePolicy.stage_is_file_work(stage):

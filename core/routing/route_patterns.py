@@ -87,7 +87,7 @@ EXTENSION_GROUPING_RE = re.compile(
     r"(?i)\b(by extension|same extension|file extensions?|group(?:ing)? .* extension|extension folders?)\b"
 )
 FILE_TYPE_GROUPING_RE = re.compile(
-    r"(?i)\b(png|jpg|jpeg|gif|webp|txt|json|py|photos?|images?|text files?|duplicate folders?|stray files?)\b"
+    r"(?i)\b(file types?|png|jpg|jpeg|gif|webp|txt|json|py|photos?|images?|text files?|duplicate folders?|stray files?)\b"
 )
 EMPTY_DIR_CLEANUP_RE = re.compile(
     r"(?i)\b(delete|remove|clean up|clear)\s+empty\s+(?:folders|directories)\b|\bduplicate folders?\b"

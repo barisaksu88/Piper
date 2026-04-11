@@ -88,6 +88,10 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> PythonDocsFollowupHarn
         and not any(timed_out_flags)
         and outcomes[:4] == ["VERIFIED", "VERIFIED", "VERIFIED", "VERIFIED"]
         and stage_types[:4] == ["COMPUTER_USE", "COMPUTER_USE", "COMPUTER_USE", "COMPUTER_USE"]
+        and len(set(lower_replies[1:])) >= 2
+        and "section about 'general info'" not in lower_replies[1]
+        and "section about 'general info'" not in lower_replies[2]
+        and "section about 'general info'" not in lower_replies[3]
         and "which specific piece of information" not in lower_replies[1]
         and "clarify" not in stage_goals[1].lower()
         and "python.org/about/license" not in lower_replies[2]

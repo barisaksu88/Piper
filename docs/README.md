@@ -9,13 +9,19 @@ Authoritative doctrine remains in [AGENTS.md](../AGENTS.md).
 1. [AGENTS.md](../AGENTS.md)
    - non-negotiable architecture and behavior doctrine
 
-2. [foundation/BLUEPRINT.md](foundation/BLUEPRINT.md)
+2. [OVERVIEW.md](OVERVIEW.md)
+   - what Piper does today, in plain language; one page, no implementation detail
+
+3. [VISION.md](VISION.md)
+   - where Piper is going; your control point — update this when something feels wrong or missing
+
+4. [foundation/BLUEPRINT.md](foundation/BLUEPRINT.md)
    - philosophy, target stack, anti-drift rules
 
-3. [architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md)
+5. [architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md)
    - prescriptive runtime spec: full turn lifecycle, route kinds, context blocks, all implemented features
 
-4. [ROADMAP.md](ROADMAP.md)
+6. [ROADMAP.md](ROADMAP.md)
    - planned future work; specs must be written here before Codex touches anything
 
 5. [foundation/checklists/V1_GUARDRAILS.md](foundation/checklists/V1_GUARDRAILS.md)

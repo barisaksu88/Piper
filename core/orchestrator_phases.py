@@ -1910,6 +1910,24 @@ def _render_recall_block(query: str, hits: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _persona_recall_allowed(
+    orc,
+    *,
+    reporter_just_ran: bool,
+    explain_last_turn: bool,
+) -> bool:
+    if reporter_just_ran or explain_last_turn:
+        return False
+    if bool(getattr(orc, "ingested_document_chat", False)):
+        return False
+    if str(getattr(orc, "document_focus_text", "") or "").strip():
+        return False
+    decision = str((getattr(orc, "route_decision", {}) or {}).get("decision") or "").strip().upper()
+    if decision != "CHAT":
+        return False
+    return True
+
+
 def _debug_log_stream(tokens, label: str):
     """Yield every token from *tokens* while printing a debug line per token.
 
@@ -2183,6 +2201,11 @@ def phase_persona(orc) -> None:
         outcome_pack=_outcome_pack_for_persona,
     )
     outcome_block = persona_runtime.outcome_block
+    allow_persona_recall = _persona_recall_allowed(
+        orc,
+        reporter_just_ran=reporter_just_ran,
+        explain_last_turn=explain_last_turn,
+    )
     persona_directives = orc.prompt_context.build_persona_directive_pack(
         route_decision=orc.route_decision,
         ingested_document_chat=bool(getattr(orc, "ingested_document_chat", False)),
@@ -2195,6 +2218,12 @@ def phase_persona(orc) -> None:
 
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
     tail_system_parts = list(persona_directives.tail_system_blocks)
+    if not allow_persona_recall:
+        tail_system_parts.append(
+            "[MEMORY RECALL RULE]\n"
+            "Do not emit [RECALL: ...] markers on this turn.\n"
+            "Answer only from the current turn evidence, runtime context, and verified state."
+        )
 
     history = orc.get_context()
     if reporter_just_ran:
@@ -2296,7 +2325,7 @@ def phase_persona(orc) -> None:
             full_answer, recall_requested = _stream_or_capture_persona_answer(
                 orc,
                 messages,
-                allow_recall=True,
+                allow_recall=allow_persona_recall,
             )
         except VisionError as exc:
             orc.ui.put(("agent_log", f"   -> Live Screen Persona Error: {exc}"))
@@ -2309,7 +2338,7 @@ def phase_persona(orc) -> None:
                 full_answer, recall_requested = _stream_or_capture_persona_answer_text_only(
                     orc,
                     messages,
-                    allow_recall=True,
+                    allow_recall=allow_persona_recall,
                 )
             except LLMClientError as retry_exc:
                 orc.emit_runtime_signal(
@@ -2340,7 +2369,7 @@ def phase_persona(orc) -> None:
             persona_error = True
             break
 
-        recall_query = _extract_recall_query(full_answer)
+        recall_query = _extract_recall_query(full_answer) if allow_persona_recall else ""
         if not recall_query:
             break
         if recall_pass >= 2:

@@ -85,12 +85,23 @@ def stream_thinking_filter(tokens: Iterable[str]) -> Iterator[str]:
             continue
 
         # 4. Enough chars: not a <think> tag — regular response text.
+        #    Special case: a bare </think> can arrive when the opening <think>
+        #    was emitted on the reasoning_content SSE field and only the closing
+        #    tag leaks into the content field (observed on llama.cpp b8712+).
+        #    Discard it silently instead of passing it through as response text.
         if not stripped.lower().startswith(_THINK_OPEN_PREFIX):
-            think_passed = True
-            out = buf.lstrip("\n\r ")
-            buf = ""
-            if out:
-                yield out
+            if stripped.lower().startswith(_THINK_CLOSE):
+                think_passed = True
+                remainder = buf[buf.lower().find(_THINK_CLOSE) + _THINK_CLOSE_LEN:].lstrip("\n\r ")
+                buf = ""
+                if remainder:
+                    yield remainder
+            else:
+                think_passed = True
+                out = buf.lstrip("\n\r ")
+                buf = ""
+                if out:
+                    yield out
             continue
 
         # 5. Confirmed <think> preamble — scan for closing tag.

@@ -94,6 +94,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> BrowserFollowupHarness
         and second_stage_type == "COMPUTER_USE"
         and "general info" in second_stage_goal.lower()
         and "certain domains are set aside" in second_lower
+        and "section about 'general info'" not in second_lower
         and ("other visible sections include" in second_lower or "example domains" in second_lower)
         and "broad inquiry" not in second_lower
         and "are you referring" not in second_lower

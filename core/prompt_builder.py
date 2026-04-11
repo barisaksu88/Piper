@@ -9,18 +9,83 @@ from core.contracts import PromptContext
 from core.engines.summary import SummaryEngine
 from core.file_stage_policy import FileStagePolicy
 from memory.documents import extract_document_reference_labels
-from tools.registry import render_stage_guide
+from tools.registry import get_tool_spec, iter_tool_specs, render_stage_guide
 
 
 class PromptBuilder:
     """Constructs prompts for planner, inspector, and persona phases."""
 
+    _PLANNER_COMPACT_TEMPLATE = """## ROLE
+
+You are the Planner. Complete only the current stage using the allowed tools.
+Do not chat. Do not solve future stages. Do not switch domains.
+
+## STEP
+
+[STEP]
+
+## CURRENT STAGE
+
+[PLANNER_BOUNDARY]
+
+[STAGE_CARD]
+
+## SCRATCHPAD
+
+[SCRATCHPAD]
+
+Use the scratchpad to avoid repeating failed actions, unchanged inspections, or already-satisfied work.
+
+## EXECUTION RULES
+
+- Output exactly one tool call per step, or `tool: null` when the stage is complete.
+- Use only tools from `allowed_tools`.
+- If the latest successful result already satisfies `success_condition`, stop immediately.
+- If the stage is inspection-only, proposal-only, or approval-gated, do not mutate early.
+- For `FILE_WORK`, prefer `FILE_OP` for direct file/path operations and use `RUN_CODE` only for real computation or substantive code edits.
+- For extension-based cleanup, prefer `extension_inventory`, then `consolidate_by_extension`, then `delete_empty_dirs`.
+- `FILE_WORK` completion is not real unless runtime verification proves the requested workspace state.
+- For `CHAT` stages, finish with `tool: null`, `is_complete: true`, and place the exact user-facing clarification in `proposal`.
+
+## TOOL GUIDE
+
+[TOOL_GUIDE]
+
+## JSON OUTPUT
+
+{
+  "thought": "brief reasoning",
+  "tool": "[TOOL_TAG: arguments]",
+  "is_complete": false,
+  "proposal": ""
+}
+
+When the stage is finished:
+
+{
+  "thought": "Stage complete",
+  "tool": null,
+  "is_complete": true,
+  "proposal": "optional user-facing proposal or approval request",
+  "constraints": []
+}
+
+For `FILE_WORK` stage completions, include `constraints` so verification can prove the artifact state.
+JSON only. No extra text. Keep `thought` short and concrete.
+"""
+    _PLANNER_PROMPT_SOFT_MAX_CHARS = 20000
+    _PLANNER_PROMPT_HARD_MAX_CHARS = 18500
     _PLANNER_SCRATCHPAD_MAX_CHARS = 6000
     _PLANNER_FILE_READ_SCRATCHPAD_MAX_CHARS = 14000
     _INSPECTOR_SCRATCHPAD_MAX_CHARS = 8000
     _PLANNER_EXACT_READ_CODE_MAX_CHARS = 5000
     _PLANNER_EXACT_READ_TEXT_MAX_CHARS = 2500
     _PLANNER_EXACT_READ_TOTAL_MAX_CHARS = 8000
+    _PLANNER_COMPACT_STAGE_CONTEXT_MAX_ITEMS = 4
+    _PLANNER_COMPACT_STAGE_CONTEXT_ITEM_MAX_CHARS = 220
+    _PLANNER_COMPACT_TOOL_RULE_MAX = 10
+    _PLANNER_COMPACT_TOOL_EXAMPLE_MAX = 4
+    _PLANNER_COMPACT_TOOL_GUIDE_MAX_CHARS = 2600
     _PLANNER_EXACT_READ_PATTERN = re.compile(
         r"FILE_READ_EXACT_PATH:\s*(?P<path>[^\n]+)\nFILE_READ_EXACT_CONTENT:\n"
         r"(?P<content>.*?)(?=\nFILE_READ_EXACT_PATH:|\n=== STAGE |\Z)",
@@ -126,6 +191,20 @@ class PromptBuilder:
             or stage.get("active_targets", [])
             or []
         )
+        declared_scope_root = str(
+            getattr(planner_input, "declared_scope_root", None)
+            if planner_input is not None
+            else stage.get("declared_scope_root", "")
+            or stage.get("declared_scope_root", "")
+            or ""
+        ).strip()
+        declared_exact_targets = list(
+            getattr(planner_input, "declared_exact_targets", None)
+            if planner_input is not None
+            else stage.get("declared_exact_targets", [])
+            or stage.get("declared_exact_targets", [])
+            or []
+        )
         evidence_required = str(
             getattr(planner_input, "evidence_required", None)
             if planner_input is not None
@@ -140,6 +219,10 @@ class PromptBuilder:
         lines.append(f"stage_type: {stage_type or '(missing)'}")
         lines.append("allowed_tools: " + (" | ".join(str(tool).strip() for tool in allowed_tools if str(tool).strip()) or "(none)"))
         lines.append("active_targets: " + (" | ".join(str(target).strip() for target in active_targets if str(target).strip()) or "(none identified)"))
+        if declared_scope_root:
+            lines.append(f"declared_scope_root: {declared_scope_root}")
+        if declared_exact_targets:
+            lines.append("declared_exact_targets: " + " | ".join(str(target).strip() for target in declared_exact_targets if str(target).strip()))
         lines.append(f"evidence_required: {evidence_required or '(none)'}")
         lines.append("Treat this block as the authoritative normalized planner contract for the current stage.")
         return "\n".join(lines)
@@ -187,6 +270,272 @@ class PromptBuilder:
 
         return cls._PLANNER_EXACT_READ_PATTERN.sub(_replace, text)
 
+    @classmethod
+    def _build_planner_stage_card(
+        cls,
+        stage: Dict[str, Any],
+        *,
+        planner_input: Any | None = None,
+        compact: bool = False,
+    ) -> str:
+        if not compact:
+            return json.dumps(stage, indent=2, ensure_ascii=False)
+
+        card: Dict[str, Any] = {
+            "stage_goal": str(
+                getattr(planner_input, "stage_goal", None)
+                if planner_input is not None
+                else stage.get("stage_goal", "")
+                or stage.get("stage_goal", "")
+                or ""
+            ).strip(),
+            "stage_type": str(
+                getattr(planner_input, "stage_type", None)
+                if planner_input is not None
+                else stage.get("stage_type", "")
+                or stage.get("stage_type", "")
+                or ""
+            ).strip(),
+            "success_condition": str(
+                getattr(planner_input, "success_condition", None)
+                if planner_input is not None
+                else stage.get("success_condition", "")
+                or stage.get("success_condition", "")
+                or ""
+            ).strip(),
+        }
+
+        allowed_tools = list(
+            getattr(planner_input, "allowed_tools", None)
+            if planner_input is not None
+            else stage.get("allowed_tools", [])
+            or stage.get("allowed_tools", [])
+            or []
+        )
+        if allowed_tools:
+            card["allowed_tools"] = allowed_tools
+
+        objective = str(
+            getattr(planner_input, "objective", None)
+            if planner_input is not None
+            else stage.get("objective", "")
+            or stage.get("objective", "")
+            or ""
+        ).strip()
+        if objective:
+            card["objective"] = objective
+
+        active_targets = list(
+            getattr(planner_input, "active_targets", None)
+            if planner_input is not None
+            else stage.get("active_targets", [])
+            or stage.get("active_targets", [])
+            or []
+        )
+        if active_targets:
+            card["active_targets"] = active_targets
+
+        declared_scope_root = str(
+            getattr(planner_input, "declared_scope_root", None)
+            if planner_input is not None
+            else stage.get("declared_scope_root", "")
+            or stage.get("declared_scope_root", "")
+            or ""
+        ).strip()
+        if declared_scope_root:
+            card["declared_scope_root"] = declared_scope_root
+
+        declared_exact_targets = list(
+            getattr(planner_input, "declared_exact_targets", None)
+            if planner_input is not None
+            else stage.get("declared_exact_targets", [])
+            or stage.get("declared_exact_targets", [])
+            or []
+        )
+        if declared_exact_targets:
+            card["declared_exact_targets"] = declared_exact_targets
+
+        evidence_required = str(
+            getattr(planner_input, "evidence_required", None)
+            if planner_input is not None
+            else stage.get("evidence_required", "")
+            or stage.get("evidence_required", "")
+            or ""
+        ).strip()
+        if evidence_required:
+            card["evidence_required"] = evidence_required
+
+        file_stage_kind = str(stage.get("file_stage_kind", "") or "").strip()
+        if file_stage_kind:
+            card["file_stage_kind"] = file_stage_kind
+
+        context_items = [
+            SummaryEngine.truncate_text(str(item or "").strip(), cls._PLANNER_COMPACT_STAGE_CONTEXT_ITEM_MAX_CHARS)
+            for item in (stage.get("context") or [])
+            if str(item or "").strip()
+        ]
+        if context_items:
+            card["context"] = context_items[: cls._PLANNER_COMPACT_STAGE_CONTEXT_MAX_ITEMS]
+
+        skill = stage.get("skill") or {}
+        if isinstance(skill, dict):
+            compact_skill: Dict[str, Any] = {}
+            name = str(skill.get("name") or "").strip()
+            if name:
+                compact_skill["name"] = name
+            planner_hint = str(skill.get("planner_hint") or "").strip()
+            if planner_hint:
+                compact_skill["planner_hint"] = SummaryEngine.truncate_text(planner_hint, 260)
+            if compact_skill:
+                card["skill"] = compact_skill
+
+        return json.dumps(card, indent=2, ensure_ascii=False)
+
+    @staticmethod
+    def _render_planner_prompt(
+        base_template: str,
+        *,
+        step_count: int,
+        stage_card_text: str,
+        planner_boundary_text: str,
+        scratchpad_text: str,
+        tool_guide: str,
+    ) -> str:
+        prompt = base_template
+        prompt = prompt.replace("[STEP]", str(step_count))
+        prompt = prompt.replace("[STAGE_CARD]", stage_card_text)
+        prompt = prompt.replace("[PLANNER_BOUNDARY]", planner_boundary_text)
+        prompt = prompt.replace("[SCRATCHPAD]", scratchpad_text)
+        prompt = prompt.replace("[TOOL_GUIDE]", tool_guide)
+        return prompt
+
+    @staticmethod
+    def _select_compact_items(items: list[str], *, priority_terms: tuple[str, ...], limit: int) -> list[str]:
+        selected: list[str] = []
+        seen: set[str] = set()
+
+        def _append(value: str) -> None:
+            text = str(value or "").strip()
+            if not text:
+                return
+            key = text.lower()
+            if key in seen:
+                return
+            seen.add(key)
+            selected.append(text)
+
+        lowered_terms = tuple(str(term or "").strip().lower() for term in priority_terms if str(term or "").strip())
+        for item in items:
+            lowered = str(item or "").lower()
+            if lowered_terms and any(term in lowered for term in lowered_terms):
+                _append(item)
+                if len(selected) >= limit:
+                    return selected
+        for item in items:
+            _append(item)
+            if len(selected) >= limit:
+                return selected
+        return selected
+
+    @classmethod
+    def _planner_priority_terms(cls, stage: Dict[str, Any]) -> tuple[str, ...]:
+        terms = [
+            "relative to the workspace",
+            "workspace root",
+            "valid json",
+            "file_op block",
+            "run_code",
+        ]
+        if FileStagePolicy.stage_is_extension_file_reorg(stage):
+            terms.extend(
+                [
+                    "extension_inventory",
+                    "consolidate_by_extension",
+                    "delete_empty_dirs",
+                    "exclude_files",
+                    "find_paths",
+                ]
+            )
+        if FileStagePolicy.stage_is_content_edit_stage(stage):
+            terms.extend(
+                [
+                    "read_text",
+                    "read_many",
+                    "write_text",
+                    "write_json",
+                    "update_json",
+                    "run_workspace_script",
+                ]
+            )
+        elif FileStagePolicy.is_file_inspection_stage(stage):
+            terms.extend(["read_text", "read_many", "list_tree", "find_paths"])
+        return tuple(dict.fromkeys(term.lower() for term in terms if term))
+
+    @classmethod
+    def _render_compact_tool_guide(
+        cls,
+        stage: Dict[str, Any],
+        *,
+        domain_type: str,
+        allowed_tools: list[str],
+    ) -> str:
+        allowed = {str(name).upper() for name in (allowed_tools or []) if str(name).strip()}
+        specs = list(iter_tool_specs(domain=domain_type, listed_only=True))
+        if allowed:
+            seen = {spec.name for spec in specs}
+            for name in allowed:
+                spec = get_tool_spec(name)
+                if spec and spec.name not in seen:
+                    specs.append(spec)
+                    seen.add(spec.name)
+        if not specs:
+            return render_stage_guide(domain_type, allowed_tools)
+
+        priority_terms = cls._planner_priority_terms(stage)
+        lines: list[str] = [f"## DOMAIN: {domain_type}", "", "### TOOLS", ""]
+        lines.extend(spec.name for spec in specs)
+
+        descriptions: list[str] = []
+        seen_desc: set[str] = set()
+        for spec in specs:
+            desc = str(spec.description or "").strip()
+            if not desc or desc in seen_desc:
+                continue
+            seen_desc.add(desc)
+            descriptions.append(desc)
+        if descriptions:
+            lines.extend(["", "### DESCRIPTION", ""])
+            lines.extend(descriptions)
+
+        rules: list[str] = []
+        for spec in specs:
+            rules.extend(str(rule or "").strip() for rule in spec.rules if str(rule or "").strip())
+        compact_rules = cls._select_compact_items(
+            rules,
+            priority_terms=priority_terms,
+            limit=cls._PLANNER_COMPACT_TOOL_RULE_MAX,
+        )
+        if compact_rules:
+            lines.extend(["", "### RULES", ""])
+            lines.extend(f"- {rule}" for rule in compact_rules)
+
+        examples: list[str] = []
+        for spec in specs:
+            examples.extend(str(item or "").strip() for item in spec.syntax if str(item or "").strip())
+        compact_examples = cls._select_compact_items(
+            examples,
+            priority_terms=priority_terms,
+            limit=cls._PLANNER_COMPACT_TOOL_EXAMPLE_MAX,
+        )
+        if compact_examples:
+            lines.extend(["", "### SYNTAX", ""])
+            lines.extend(compact_examples)
+
+        compact = "\n".join(lines).strip()
+        if len(compact) <= cls._PLANNER_COMPACT_TOOL_GUIDE_MAX_CHARS:
+            return compact
+        return SummaryEngine.truncate_text(compact, cls._PLANNER_COMPACT_TOOL_GUIDE_MAX_CHARS)
+
     @staticmethod
     def build_planner_prompt(
         base_template: str,
@@ -196,7 +545,6 @@ class PromptBuilder:
         *,
         planner_input: Any | None = None,
     ) -> str:
-        stage_card_text = json.dumps(stage, indent=2)
         scratchpad_limit = PromptBuilder._PLANNER_SCRATCHPAD_MAX_CHARS
         if (
             FileStagePolicy.stage_is_file_work(stage)
@@ -212,15 +560,7 @@ class PromptBuilder:
             scratchpad_text,
             limit=scratchpad_limit,
         )
-
-        prompt = base_template
-        prompt = prompt.replace("[STEP]", str(step_count))
-        prompt = prompt.replace("[STAGE_CARD]", stage_card_text)
-        prompt = prompt.replace(
-            "[PLANNER_BOUNDARY]",
-            PromptBuilder._render_planner_boundary_block(stage, planner_input=planner_input),
-        )
-        prompt = prompt.replace("[SCRATCHPAD]", scratchpad_text)
+        planner_boundary_text = PromptBuilder._render_planner_boundary_block(stage, planner_input=planner_input)
         tool_guide = render_stage_guide(
             stage.get("stage_type", "UNKNOWN"),
             stage.get("allowed_tools", []),
@@ -255,7 +595,44 @@ class PromptBuilder:
         skill_guide = PromptBuilder._render_active_skill_guide(stage)
         if skill_guide:
             tool_guide = tool_guide + "\n\n" + skill_guide
-        prompt = prompt.replace("[TOOL_GUIDE]", tool_guide)
+        prompt = PromptBuilder._render_planner_prompt(
+            base_template,
+            step_count=step_count,
+            stage_card_text=PromptBuilder._build_planner_stage_card(stage, planner_input=planner_input, compact=False),
+            planner_boundary_text=planner_boundary_text,
+            scratchpad_text=scratchpad_text,
+            tool_guide=tool_guide,
+        )
+
+        if len(prompt) > PromptBuilder._PLANNER_PROMPT_SOFT_MAX_CHARS:
+            compact_tool_guide = PromptBuilder._render_compact_tool_guide(
+                stage,
+                domain_type=str(stage.get("stage_type", "UNKNOWN")),
+                allowed_tools=list(stage.get("allowed_tools", []) or []),
+            )
+            if skill_guide:
+                compact_tool_guide = compact_tool_guide + "\n\n" + skill_guide
+            prompt = PromptBuilder._render_planner_prompt(
+                PromptBuilder._PLANNER_COMPACT_TEMPLATE,
+                step_count=step_count,
+                stage_card_text=PromptBuilder._build_planner_stage_card(stage, planner_input=planner_input, compact=True),
+                planner_boundary_text=planner_boundary_text,
+                scratchpad_text=scratchpad_text,
+                tool_guide=compact_tool_guide,
+            )
+
+        if len(prompt) > PromptBuilder._PLANNER_PROMPT_HARD_MAX_CHARS:
+            prompt = PromptBuilder._render_planner_prompt(
+                PromptBuilder._PLANNER_COMPACT_TEMPLATE,
+                step_count=step_count,
+                stage_card_text=PromptBuilder._build_planner_stage_card(stage, planner_input=planner_input, compact=True),
+                planner_boundary_text=planner_boundary_text,
+                scratchpad_text=SummaryEngine.truncate_scratchpad(
+                    scratchpad_text,
+                    limit=max(PromptBuilder._PLANNER_SCRATCHPAD_MAX_CHARS, scratchpad_limit // 2),
+                ),
+                tool_guide=SummaryEngine.truncate_text(tool_guide, PromptBuilder._PLANNER_COMPACT_TOOL_GUIDE_MAX_CHARS),
+            )
         return prompt
 
     @staticmethod

@@ -164,6 +164,13 @@ class BootManager:
             return False
 
         server_exe = str(CFG.LLAMA_SERVER_EXE)
+        try:
+            _ver = subprocess.check_output([server_exe, "--version"], stderr=subprocess.STDOUT, timeout=5).decode(errors="replace")
+            _ver_line = next((l for l in _ver.splitlines() if l.startswith("version:")), None)
+            if _ver_line:
+                self.log(f"llama.cpp {_ver_line.strip()}")
+        except Exception:
+            pass
         model_arg = self._runtime_path_arg(CFG.MODEL_PATH, executable=server_exe)
         cmd = [
             server_exe,
@@ -172,6 +179,9 @@ class BootManager:
             "--ctx-size", str(CFG.CONTEXT_SIZE),
             "-ngl", str(getattr(CFG, "LLAMA_SERVER_GPU_LAYERS", 99)),
             "--host", str(getattr(CFG, "LLAMA_SERVER_BIND_HOST", "127.0.0.1")),
+            # Use 'auto' when mmproj is present — llama.cpp will skip FA for vision ops
+            # that don't support it, avoiding the CPU fallback issue on Qwen3.5 + CUDA.
+            "--flash-attn", "auto" if (getattr(CFG, "MMPROJ_PATH", None) and Path(getattr(CFG, "MMPROJ_PATH", None)).exists()) else "on",
         ]
         reasoning_budget = getattr(CFG, "LLAMA_SERVER_REASONING_BUDGET", -1)
         if reasoning_budget is not None:

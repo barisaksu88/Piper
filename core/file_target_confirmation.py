@@ -81,11 +81,14 @@ def _replace_in_jsonish(value: Any, *, exact_target: str, chosen_target: str) ->
     if isinstance(value, dict):
         replaced = {}
         for key, item in value.items():
-            if key == "active_targets" and isinstance(item, list):
+            if key in {"active_targets", "declared_exact_targets"} and isinstance(item, list):
                 replaced[key] = [
                     chosen_target if _targets_match(entry, exact_target) else _replace_in_jsonish(entry, exact_target=exact_target, chosen_target=chosen_target)
                     for entry in item
                 ]
+                continue
+            if key == "declared_scope_root" and isinstance(item, str) and _targets_match(item, exact_target):
+                replaced[key] = chosen_target
                 continue
             replaced[key] = _replace_in_jsonish(item, exact_target=exact_target, chosen_target=chosen_target)
         return replaced

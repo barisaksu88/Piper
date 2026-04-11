@@ -90,6 +90,8 @@ class StageCard(TypedDict, total=False):
     # Planner-boundary fields (may be set by router or filled by PlannerBoundary.validate_input)
     objective: str          # Parent route-card goal; why this workflow exists
     active_targets: List[str]   # Files or entities being acted on this stage
+    declared_scope_root: str    # User-declared scope root that later layers must not reinterpret
+    declared_exact_targets: List[str]   # User-declared exact file targets protected from later broadening
     evidence_required: str      # What constitutes verified completion (defaults to success_condition)
     constraints: List[PlanConstraint]   # Optional typed success constraints (router or planner emitted)
 

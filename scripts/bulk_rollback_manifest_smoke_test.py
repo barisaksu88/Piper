@@ -14,6 +14,7 @@ Covers:
   9. _prune_old_manifests keeps at most 5 manifests
  10. ChangeJournal.record_turn stores rollback_manifest path on entry
  11. ChangeJournal.mark_entry_undone sets undone_at on the right entry
+ 12. ISO turn ids produce Windows-safe manifest filenames
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ if str(ROOT) not in sys.path:
 
 from core.engines.rollback_engine import (
     _prune_old_manifests,
+    _safe_turn_id,
     invert_manifest,
     is_bulk_action,
     record_manifest,
@@ -275,6 +277,26 @@ def run_all() -> None:
         latest = journal.peek_latest_entry()
         ok = bool(latest and latest.get("undone_at") and latest.get("undo_last_status") == "VERIFIED")
         case("mark_entry_undone sets undone_at", ok, str(latest) if not ok else "")
+
+    # ------------------------------------------------------------------
+    # Case 12 — ISO turn ids produce Windows-safe manifest filenames
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as tmp_s:
+        tmp = Path(tmp_s)
+        data_dir = _make_data(tmp)
+        turn_id = "2026-04-09T01:17:17.261+00:00"
+        result = _consolidate_result([("alpha.txt", "text/alpha.txt")])
+        manifest_path = record_manifest(turn_id, "consolidate_by_extension", result, data_dir)
+        filename = manifest_path.name if manifest_path is not None else ""
+        safe_turn = _safe_turn_id(turn_id)
+        ok = bool(
+            manifest_path is not None
+            and ":" not in filename
+            and "+" not in filename
+            and safe_turn
+            and filename == f"rollback_{safe_turn}.json"
+        )
+        case("ISO turn ids produce Windows-safe manifest filenames", ok, filename if not ok else "")
 
     # ------------------------------------------------------------------
     # Summary

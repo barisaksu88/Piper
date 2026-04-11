@@ -57,6 +57,7 @@ class FileWorkEngineReport:
     # 5. should_block
     block_redundant_read_code: bool
     block_redundant_read_plain: bool
+    block_exact_target_read_many: bool
     block_write_text_code: bool
     block_run_code_task_event_escape: bool
     no_block_run_code_file_only: bool
@@ -219,7 +220,7 @@ def _test_capture_exact_read() -> tuple[bool, bool, bool, bool]:
 # 5. should_block
 # ---------------------------------------------------------------------------
 
-def _test_should_block() -> tuple[bool, bool, bool, bool, bool, bool, bool]:
+def _test_should_block() -> tuple[bool, bool, bool, bool, bool, bool, bool, bool]:
     content_edit_stage = _stage(
         "FILE_WORK",
         "Edit the source code to add a new function",
@@ -248,6 +249,15 @@ def _test_should_block() -> tuple[bool, bool, bool, bool, bool, bool, bool]:
     tool_tag_read_plain = '[FILE_OP: {"action":"read_text","path":"data/notes.txt"}]'
     block_plain = FileWorkEngine.should_block(content_edit_stage, tool_tag_read_plain, exact_paths_plain)
     ok_block_plain_read = block_plain.blocked and "file contents" in block_plain.reason
+
+    exact_read_stage = _stage(
+        "FILE_WORK",
+        "Locate grocery_list.txt and read its exact contents.",
+        "The exact contents of grocery_list.txt are reported.",
+    )
+    tool_tag_read_many = '[FILE_OP: {"action":"read_many","paths":["grocery_list.txt","text_files/grocery_list.txt"]}]'
+    block_exact_read_many = FileWorkEngine.should_block(exact_read_stage, tool_tag_read_many, [])
+    ok_block_exact_read_many = block_exact_read_many.blocked and "exact file 'grocery_list.txt'" in block_exact_read_many.reason
 
     # Guard 2: write_text on a code file when exact read paths exist
     tool_tag_write = '[FILE_OP: {"action":"write_text","path":"src/other.py","content":"x=1"}]'
@@ -284,6 +294,7 @@ Path("keep_me.txt").rename("archive/beta.txt")
     return (
         ok_block_code_read,
         ok_block_plain_read,
+        ok_block_exact_read_many,
         ok_block_write,
         ok_block_escape,
         ok_no_block_file_only,
@@ -391,7 +402,7 @@ def run_smoke() -> FileWorkEngineReport:
     e1, e2 = _test_exact_read_paths()
     r1, r2, r3 = _test_render_artifact_view()
     cap1, cap2, cap3, cap4 = _test_capture_exact_read()
-    b1, b2, b3, b4, b5, b6, b7 = _test_should_block()
+    b1, b2, b3, b4, b5, b6, b7, b8 = _test_should_block()
     h1, h2, h3 = _test_recovery_hint()
     cl1, cl2, cl3, cl4, cl5 = _test_classify()
     ex1, ex2 = _test_extensions()
@@ -401,7 +412,7 @@ def run_smoke() -> FileWorkEngineReport:
         e1, e2,
         r1, r2, r3,
         cap1, cap2, cap3, cap4,
-        b1, b2, b3, b4, b5, b6, b7,
+        b1, b2, b3, b4, b5, b6, b7, b8,
         h1, h2, h3,
         cl1, cl2, cl3, cl4, cl5,
         ex1, ex2,
@@ -423,11 +434,12 @@ def run_smoke() -> FileWorkEngineReport:
         capture_non_read_none=cap4,
         block_redundant_read_code=b1,
         block_redundant_read_plain=b2,
-        block_write_text_code=b3,
-        block_run_code_task_event_escape=b4,
-        no_block_run_code_file_only=b5,
-        no_block_no_overlap=b6,
-        no_block_non_edit_stage=b7,
+        block_exact_target_read_many=b3,
+        block_write_text_code=b4,
+        block_run_code_task_event_escape=b5,
+        no_block_run_code_file_only=b6,
+        no_block_no_overlap=b7,
+        no_block_non_edit_stage=b8,
         hint_invalid_json=h1,
         hint_run_code_mismatch=h2,
         hint_verified_empty=h3,

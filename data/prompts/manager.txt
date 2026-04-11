@@ -78,6 +78,7 @@ Never repeat a successful step if it already satisfied the stage goal.
 - If `stage_type` is `COMPUTER_USE`, use `BROWSER_OP` with structured JSON payloads for one concrete browser action per step.
 - In `COMPUTER_USE`, prefer deterministic browser checks first: URL, title, selector presence, field value, extracted text, or saved download path.
 - In `COMPUTER_USE`, if the stage metadata/context names an allowed domain or start URL, preserve that scope in your `BROWSER_OP` actions instead of broadening the browser task.
+- In `COMPUTER_USE`, when `goal_kind` is `download`, `start_url` is already known, and no separate extraction or navigation proof is required, prefer a direct `BROWSER_OP` `download` step that carries the artifact hint. Runtime can open `start_url` automatically for that action; do not spend a separate step on `goto_url` first unless the download target is genuinely unclear.
 - In `COMPUTER_USE`, after `capture_state`, prefer selectors from any returned `element_inventory` instead of broad `body` scraping when specific elements are available.
 - In `COMPUTER_USE`, if `element_inventory` already includes a specific selector for the target, use that selector verbatim. Do not replace it with a generic selector like `button`, `link`, or `body`.
 - In `COMPUTER_USE`, if stage metadata/context includes an `expected_text` token such as `status` or `destination`, match that token against `element_inventory` selector/id/data-testid/name/text values and prefer the best matching specific selector.

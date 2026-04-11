@@ -643,6 +643,7 @@ class SummaryEngine:
             "overview",
             "summary",
         }
+        display_topic = "" if is_generic_browser_overview else requested_topic
 
         if not extracted_text:
             for item in extracts:
@@ -666,9 +667,11 @@ class SummaryEngine:
         if extracted_text and saved_path:
             preview_limit = 420 if is_generic_browser_overview else 260
             preview = SummaryEngine.truncate_text(" ".join(extracted_text.split()), preview_limit)
-            if requested_topic:
+            if is_generic_browser_overview:
+                return f"Here is more from the page: {preview} The download was saved to `{saved_path}`."
+            if display_topic:
                 return (
-                    f"Here is the section about '{requested_topic}': {preview} "
+                    f"Here is the section about '{display_topic}': {preview} "
                     f"The download was saved to `{saved_path}`."
                 )
             return f"Here is the requested text: {preview} The download was saved to `{saved_path}`."
@@ -688,26 +691,42 @@ class SummaryEngine:
                     + ", ".join(f'"{item}"' for item in link_texts[:3])
                     + "."
                 )
-            if requested_topic and current_url:
+            if is_generic_browser_overview and current_url:
+                if matched_heading:
+                    base = f'Here is more from {current_url} under "{matched_heading}": {preview}'
+                else:
+                    base = f"Here is more from {current_url}: {preview}"
+                if extra_bits:
+                    return base + " " + " ".join(extra_bits)
+                return base
+            if display_topic and current_url:
                 if matched_heading:
                     base = (
-                        f"Here is the section about '{requested_topic}' from {current_url} "
+                        f"Here is the section about '{display_topic}' from {current_url} "
                         f"under \"{matched_heading}\": {preview}"
                     )
                     if extra_bits:
                         return base + " " + " ".join(extra_bits)
                     return base
-                base = f"Here is the section about '{requested_topic}' from {current_url}: {preview}"
+                base = f"Here is the section about '{display_topic}' from {current_url}: {preview}"
                 if extra_bits:
                     return base + " " + " ".join(extra_bits)
                 return base
-            if requested_topic:
+            if is_generic_browser_overview:
                 if matched_heading:
-                    base = f"Here is the section about '{requested_topic}' under \"{matched_heading}\": {preview}"
+                    base = f'Here is more from the page under "{matched_heading}": {preview}'
+                else:
+                    base = f"Here is more from the page: {preview}"
+                if extra_bits:
+                    return base + " " + " ".join(extra_bits)
+                return base
+            if display_topic:
+                if matched_heading:
+                    base = f"Here is the section about '{display_topic}' under \"{matched_heading}\": {preview}"
                     if extra_bits:
                         return base + " " + " ".join(extra_bits)
                     return base
-                base = f"Here is the section about '{requested_topic}': {preview}"
+                base = f"Here is the section about '{display_topic}': {preview}"
                 if extra_bits:
                     return base + " " + " ".join(extra_bits)
                 return base

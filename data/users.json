@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "active_user_id": "admin_baris",
+  "active_user_id": "unknown",
   "auth": {
     "admin_password_hash": "BV4uEdVZROWz+uZdWM958mHVr9huZwbAzXxTu9jAY+U=",
     "admin_password_salt": "z1u6l8bbtV/3Mxfh6Z5w1Q==",

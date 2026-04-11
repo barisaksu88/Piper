@@ -295,8 +295,8 @@ class StageExecutor:
         # required fields, tool resolution, active-target extraction, and
         # evidence_required defaulting.  It writes resolved allowed_tools back
         # into `stage` so the prompt builder sees the correct list.
+        objective = str(stage.get("objective", "") or "")
         try:
-            objective = str(stage.get("objective", "") or "")
             planner_input = PlannerBoundary.validate_input(stage, objective=objective)
             if not stage_is_chat(stage) and planner_input.allowed_tools != list(stage.get("allowed_tools", [])):
                 self.ui.put(("agent_log", f"   -> Auto-unlocked tools for {planner_input.stage_type}: {planner_input.allowed_tools}"))
@@ -318,6 +318,8 @@ class StageExecutor:
             step_count += 1
             self.ui.put(("status_widget_mode", "THINKING"))
             self.ui.put(("status_widget_step", f"Stage {stage_num}/{total_stages} | Step {step_count}"))
+
+            planner_input = PlannerBoundary.validate_input(stage, objective=objective)
 
             # Build Prompt via Architect
             scratch_text = "\n".join(self.scratchpad)
@@ -351,15 +353,13 @@ class StageExecutor:
 
             # Generate
             try:
-                raw = ""
                 planner_started_at = time.perf_counter()
-                for delta in self.llm.generate_stream(
+                raw = self.llm.generate(
                     messages,
                     temperature=0.0,
                     max_tokens=int(getattr(CFG, "PLANNER_MAX_TOKENS", 700)),
                     cancel_token=self.cancel_token,
-                ):
-                    raw += delta
+                )
                 planner_time_s += max(0.0, time.perf_counter() - planner_started_at)
             except LLMClientError as e:
                 self._emit_runtime_signal(
@@ -973,6 +973,7 @@ class StageExecutor:
                     success = True
                     break
                 if base_tag == "FILE_OP" and isinstance(tool_result, dict):
+                    self._refresh_file_stage_targets_from_tool_result(stage, tool_result)
                     _existing = FileWorkEngine.exact_read_paths_from_scratchpad(self.scratchpad)
                     _note = FileWorkEngine.capture_exact_read(stage, tool_result, _existing)
                     if _note and _note not in self.scratchpad:
@@ -1324,7 +1325,10 @@ class StageExecutor:
         return True
 
     def _append_file_lookup_note_if_available(self, stage: StageCard) -> None:
-        if not FileStagePolicy.stage_requires_targeted_lookup(stage):
+        if not (
+            FileStagePolicy.stage_requires_targeted_lookup(stage)
+            or FileStagePolicy.stage_is_content_edit_stage(stage)
+        ):
             return
         if self._last_successful_tool_name != "FILE_OP" or not isinstance(self._last_successful_tool_result, dict):
             return
@@ -1335,6 +1339,64 @@ class StageExecutor:
         note = "FILE_LOOKUP_MATCHES:\n" + "\n".join(matches) if matches else "FILE_LOOKUP_MATCHES:\n"
         if note not in self.scratchpad:
             self.scratchpad.append(note)
+
+    def _refresh_file_stage_targets_from_tool_result(self, stage: StageCard, tool_result: Any) -> None:
+        if not FileStagePolicy.stage_is_file_work(stage):
+            return
+        if not isinstance(tool_result, dict):
+            return
+        action = str(tool_result.get("action", "")).lower()
+        if action not in {"find_paths", "read_text", "read_many"}:
+            return
+
+        existing = [str(item).strip() for item in (stage.get("active_targets") or []) if str(item).strip()]
+        candidates: list[str] = []
+        if action == "find_paths":
+            matches = [str(item).strip() for item in (tool_result.get("matches") or []) if str(item).strip()]
+            if not matches:
+                return
+            candidates = list(matches)
+            workspace = Path(getattr(self.brain, "workspace", "."))
+            exact_targets = {
+                str(item).strip().replace("\\", "/").lower()
+                for item in FileStagePolicy.stage_named_file_targets(stage)
+                if str(item).strip()
+            }
+            exact_matches = [path for path in matches if path.lower() in exact_targets]
+            preferred: list[str] = []
+            seen_preferred: set[str] = set()
+            for term in FileStagePolicy.stage_target_terms(stage):
+                for path in FileStagePolicy.find_workspace_target_candidates(
+                    workspace,
+                    term,
+                    limit=max(3, len(matches)),
+                ):
+                    if path in matches and path not in seen_preferred:
+                        seen_preferred.add(path)
+                        preferred.append(path)
+            if exact_matches or preferred:
+                exact_seen = {path.lower() for path in exact_matches}
+                candidates = exact_matches + preferred + [
+                    path
+                    for path in matches
+                    if path.lower() not in exact_seen and path not in seen_preferred
+                ]
+        else:
+            candidates = FileStagePolicy.file_read_paths(tool_result) or FileWorkEngine.candidate_paths(tool_result)
+        if not candidates:
+            return
+
+        merged: list[str] = []
+        seen: set[str] = set()
+        for path in [*candidates, *existing]:
+            clean = str(path or "").strip().replace("\\", "/")
+            if not clean or clean in seen or clean == ".":
+                continue
+            seen.add(clean)
+            merged.append(clean)
+        if not merged:
+            return
+        stage["active_targets"] = merged[:3]
 
     def _append_verified_file_work_result_note(
         self,
@@ -1676,6 +1738,12 @@ class StageExecutor:
             and is_repeating
             and not bool(tool_result.get("workspace_changed"))
         )
+        browser_extract_repeat = (
+            str(tag or "").upper() == "BROWSER_OP"
+            and isinstance(tool_result, dict)
+            and str(tool_result.get("action", "")).lower() == "extract_text"
+            and is_repeating
+        )
         file_retry_budget = 7 if file_stage else 3
         file_repeat_budget = 3 if file_stage else 1
 
@@ -1697,9 +1765,11 @@ class StageExecutor:
             )
             root = FileStagePolicy.file_op_root(tool_result) or "."
             if FileStagePolicy.stage_is_extension_file_reorg(stage):
+                scope_root = root if root != "." else (FileStagePolicy.stage_scope_root(stage) or ".")
+                scope_label = FileStagePolicy.describe_scope_root(scope_root)
                 hint = (
-                    f"SYSTEM ERROR: Repeated identical list_tree on unchanged root '{root}'. "
-                    "Use FILE_OP extension_inventory on the workspace root, then FILE_OP consolidate_by_extension "
+                    f"SYSTEM ERROR: Repeated identical list_tree on unchanged root {scope_label}. "
+                    f"Use FILE_OP extension_inventory on {scope_label}, then FILE_OP consolidate_by_extension "
                     "or delete_empty_dirs. Repeating list_tree is not progress."
                 )
             elif FileStagePolicy.stage_requires_targeted_lookup(stage):
@@ -1773,6 +1843,21 @@ class StageExecutor:
                     "This stage requires changing the artifact, so compute the final text and use FILE_OP write_text next "
                     "unless the transformation truly requires RUN_CODE."
                 )
+            if not self.scratchpad or self.scratchpad[-1] != hint:
+                self.scratchpad.append(hint)
+            self.ui.put(("agent_log", f"   -> {hint}"))
+            return False
+        if browser_extract_repeat and self._repeat_count >= 1:
+            selector = str(tool_result.get("selector") or "#page")
+            topic = str(tool_result.get("topic") or "")
+            topic_clause = f" for topic '{topic}'" if topic else ""
+            hint = (
+                f"SYSTEM ERROR: Repeated identical extract_text on selector '{selector}'{topic_clause} "
+                "returned the same result. Text extraction cannot find the target — the element may not have visible text. "
+                "Try: (1) use BROWSER_OP capture_state to inspect all available hrefs, "
+                "(2) use BROWSER_OP download action if you can see a matching href in element_inventory, "
+                "(3) construct the direct file URL from the current page URL pattern and use BROWSER_OP goto_url."
+            )
             if not self.scratchpad or self.scratchpad[-1] != hint:
                 self.scratchpad.append(hint)
             self.ui.put(("agent_log", f"   -> {hint}"))
