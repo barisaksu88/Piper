@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.feature_hooks import register_hook
 from memory.storage import append_jsonl, ensure_parent, prune_jsonl_tail
 
 
@@ -584,3 +585,9 @@ class StatsCollector:
         )
         with self.alerts_path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+
+
+@register_hook("on_pre_route")
+def _hook_note_pre_route_user_msg(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
+    del recent_history
+    orc.stats_collector.note_user_msg(orc.turn_stats, orc.user_msg)

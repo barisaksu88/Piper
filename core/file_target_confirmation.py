@@ -5,6 +5,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
+from core.feature_hooks import register_hook
 
 PENDING_FILE_TARGET_CONFIRMATION_PREFIX = "[PENDING_FILE_TARGET_CONFIRMATION]"
 
@@ -157,3 +158,20 @@ def _targets_match(left: str, right: str) -> bool:
 def _normalize_fragment(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())
     return " ".join(cleaned.split())
+
+
+@register_hook("on_turn_end")
+def _hook_upsert_pending_file_target_confirmation(orc, *, reporter_just_ran: bool = False) -> None:
+    del reporter_just_ran
+    payload = dict(getattr(orc, "pending_file_target_confirmation", {}) or {})
+    if payload:
+        message = build_pending_file_target_confirmation_message(payload)
+        try:
+            orc.chat.upsert_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX, message)
+        except AttributeError:
+            orc.chat.append_message({"role": "system", "content": message, "hidden": True})
+        return
+    try:
+        orc.chat.remove_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX)
+    except AttributeError:
+        pass

@@ -19,6 +19,7 @@ from core.contracts import (
 )
 from core.engines.summary import SummaryEngine
 from core.engines.verification import VerificationResult
+from core.feature_hooks import register_hook
 from core.file_stage_policy import FileStagePolicy
 from core.turn_explanation import render_explain_last_turn_block
 
@@ -818,3 +819,24 @@ def _tail_block_failed_outcome_no_verification(ctx: TailBlockContext) -> str:
         "Only report what FILE_CHECKER VERIFIED evidence explicitly confirms.\n"
         "Use LAST_LOG as the sole authoritative cause of the failure — do not invent a reason."
     )
+
+
+@register_hook("on_turn_end")
+def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> None:
+    notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
+    if str(notice.get("kind") or "").strip().lower() == "file_target_confirmation_cancelled":
+        try:
+            orc.chat.remove_hidden_system_message(_LATEST_RUNTIME_CONTEXT_PREFIX)
+        except AttributeError:
+            pass
+        return
+    payload = orc.prompt_context.build_runtime_context_message(
+        orc,
+        reporter_just_ran=reporter_just_ran,
+    )
+    if not payload:
+        return
+    try:
+        orc.chat.upsert_hidden_system_message(_LATEST_RUNTIME_CONTEXT_PREFIX, payload)
+    except AttributeError:
+        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})

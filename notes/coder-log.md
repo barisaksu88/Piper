@@ -5468,3 +5468,9 @@ Four structural problems fixed across a single session:
   - `stats.jsonl` now prunes on write to `history_limit` lines with temp-file + atomic rename
   - repo sweep also capped `memory.jsonl` and `codex_escalations.jsonl` on the write path
   - added `TRIGGER_FLOW.md` §13.20 for the pre-roadmap #3 data-hygiene rules
+
+- Hook extraction pass:
+  - moved the 8 live hooks out of `core/orchestrator_phases.py` into their actual owning modules in the current repo
+  - added `core.feature_hooks.list_hooks()` for registry validation
+  - note: the task sheet's hook inventory was stale; the live repo already had `change_journal.py` and `proactive_monitor.py` self-registering hooks, so the final hook count is higher than 9
+  - added `TRIGGER_FLOW.md` §13.21 for the hook extraction pass

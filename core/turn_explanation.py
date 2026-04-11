@@ -5,6 +5,8 @@ import re
 import time
 from typing import Any, Sequence
 
+from core.feature_hooks import register_hook
+
 
 LAST_TURN_EXPLANATION_PREFIX = "[LAST_TURN_EXPLANATION_CONTEXT]"
 
@@ -271,3 +273,21 @@ def render_explain_last_turn_block(
         if timing_parts:
             lines.append("Phase timings: " + ", ".join(timing_parts))
     return "\n".join(lines)
+
+
+@register_hook("on_turn_end")
+def _hook_upsert_last_turn_explanation_context(orc, *, reporter_just_ran: bool = False) -> None:
+    snapshot: dict[str, Any] | None
+    if str(getattr(orc, "route_interceptor", "") or "").strip().upper() == "EXPLAIN":
+        snapshot = activate_last_turn_explanation_snapshot(
+            extract_last_turn_explanation_snapshot(orc.get_context())
+        )
+    else:
+        snapshot = build_last_turn_explanation_snapshot(orc, reporter_just_ran=reporter_just_ran)
+    if not snapshot:
+        return
+    payload = build_last_turn_explanation_message(snapshot)
+    try:
+        orc.chat.upsert_hidden_system_message(LAST_TURN_EXPLANATION_PREFIX, payload)
+    except AttributeError:
+        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})

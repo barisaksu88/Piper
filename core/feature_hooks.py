@@ -19,3 +19,10 @@ def register_hook(hook_type: str) -> Callable[[HookFn], HookFn]:
 def fire_hooks(hook_type: str, orc, **kwargs: Any) -> None:
     for hook in list(_HOOKS.get(str(hook_type or "").strip(), [])):
         hook(orc, **kwargs)
+
+
+def list_hooks() -> dict[str, list[str]]:
+    return {
+        hook_type: [f"{hook.__module__}.{hook.__name__}" for hook in hooks]
+        for hook_type, hooks in sorted(_HOOKS.items())
+    }

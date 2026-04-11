@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List
 
 from core.engines.context_pack import ContextPackEngine
+from core.feature_hooks import register_hook
 from core.engines.state_mutation import StateMutationEngine
 from core.engines.summary import SummaryEngine
 from core.engines.verification import VerificationResult
@@ -216,3 +217,18 @@ class PromptContextService:
         if self.transient_state_mgr is None:
             return
         self.transient_state_mgr.ingest_user_turn(user_msg)
+
+
+@register_hook("on_pre_route")
+def _hook_record_user_turn_once(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
+    del recent_history
+    if bool(getattr(orc, "synthetic_user_turn", False)):
+        return
+    msg_to_ingest = str(orc.user_msg or "").strip()
+    if not msg_to_ingest or getattr(orc, "_last_ingested_user_msg", None) == msg_to_ingest:
+        return
+    try:
+        orc.prompt_context.record_user_turn(msg_to_ingest)
+        orc._last_ingested_user_msg = msg_to_ingest
+    except Exception:
+        pass

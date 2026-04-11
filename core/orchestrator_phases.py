@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -11,11 +10,7 @@ from config import CFG
 from core.contracts import RouteDecision, StageOutcomePack
 from core.document_focus import build_document_focus_messages, extract_document_focus
 from core.debug_tools import log_prompt_debug
-from core.file_target_confirmation import (
-    PENDING_FILE_TARGET_CONFIRMATION_PREFIX,
-    build_pending_file_target_confirmation_message,
-)
-from core.feature_hooks import fire_hooks, register_hook
+from core.feature_hooks import fire_hooks
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.engines.proactive_monitor import (
@@ -44,13 +39,6 @@ from core.stage_policy import stage_requires_user_approval, stage_requires_user_
 from core.stream_filter import stream_thinking_filter
 from llm.llm_server_client import LLMClientError
 from core.runtime_control import OperationCancelled
-from core.turn_explanation import (
-    LAST_TURN_EXPLANATION_PREFIX,
-    activate_last_turn_explanation_snapshot,
-    build_last_turn_explanation_message,
-    build_last_turn_explanation_snapshot,
-    extract_last_turn_explanation_snapshot,
-)
 from tools.vision import VisionError, generate_stream_with_image_attachment, generate_with_image_attachment
 
 FALLBACK_SECRETARY = "You are a Router. Output JSON: {decision: 'CHAT' or 'TASK', card: {goal, context}}."
@@ -503,23 +491,6 @@ def _extract_latest_stage_outcome_entry(scratchpad: list[str]) -> str:
             return text
     return ""
 
-def _build_latest_runtime_context_message(orc, *, reporter_just_ran: bool = False) -> str:
-    return orc.prompt_context.build_runtime_context_message(
-        orc,
-        reporter_just_ran=reporter_just_ran,
-    )
-
-
-def _upsert_latest_runtime_context(orc, *, reporter_just_ran: bool = False) -> None:
-    payload = _build_latest_runtime_context_message(orc, reporter_just_ran=reporter_just_ran)
-    if not payload:
-        return
-    try:
-        orc.chat.upsert_hidden_system_message(_LATEST_RUNTIME_CONTEXT_PREFIX, payload)
-    except AttributeError:
-        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
-
-
 def _consume_pipeline_stream_metrics(orc) -> list[dict[str, float | str]]:
     try:
         return list(getattr(orc.pipeline, "consume_completed_stream_metrics", lambda: [])() or [])
@@ -532,109 +503,6 @@ def _finalize_persona_turn(orc, *, reporter_just_ran: bool = False) -> None:
     orc.latest_search_summary = ""
     orc.undo_notice_pending = False
     fire_hooks("on_turn_end", orc, reporter_just_ran=reporter_just_ran)
-
-
-@register_hook("on_turn_end")
-def _hook_consolidate_recent_memory(orc, *, reporter_just_ran: bool = False) -> None:
-    del reporter_just_ran
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    recent_messages = orc.chat.recent_messages(3)
-    if orc.knowledge_enabled and len(recent_messages) >= 3:
-        orc.knowledge.consolidate_memory_async(recent_messages)
-
-
-@register_hook("on_turn_end")
-def _hook_deferred_conversation_summary(orc, *, reporter_just_ran: bool = False) -> None:
-    """Run LLM summarization after the reply is delivered so it never blocks stream start."""
-    if reporter_just_ran:
-        return
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    if not getattr(orc, "knowledge_enabled", True):
-        return  # knowledge=false style card — skip summary to avoid cross-session leakage
-    limit = getattr(CFG, "MODEL_MAX_TURNS", 10)
-    history = list(orc.get_context())
-    existing_summary = str(getattr(orc, "conversation_summary", "") or "")
-    llm = orc.llm
-    cancel_token = getattr(orc, "cancel_token", None)
-    compressor = orc.conversation_compressor
-
-    def _run() -> None:
-        try:
-            result = compressor.compress_history(
-                history=history,
-                existing_summary=existing_summary,
-                max_turns=limit,
-                llm=llm,
-                cancel_token=cancel_token,
-            )
-            if result.summarization_used and result.summary != existing_summary:
-                orc.update_conversation_summary(result.summary)
-                orc.ui.put(("agent_log", "   -> Conversation summary updated."))
-        except OperationCancelled:
-            pass
-        except Exception:
-            pass
-
-    threading.Thread(target=_run, daemon=True).start()
-
-
-@register_hook("on_turn_end")
-def _hook_refresh_profile_knowledge(orc, *, reporter_just_ran: bool = False) -> None:
-    del reporter_just_ran
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    profile_messages = orc.chat.recent_messages(8)
-    if orc.knowledge_enabled and len(profile_messages) >= 4:
-        orc.knowledge.update_knowledge_async(profile_messages)
-
-
-@register_hook("on_turn_end")
-def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> None:
-    notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
-    if str(notice.get("kind") or "").strip().lower() == "file_target_confirmation_cancelled":
-        try:
-            orc.chat.remove_hidden_system_message(_LATEST_RUNTIME_CONTEXT_PREFIX)
-        except AttributeError:
-            pass
-        return
-    _upsert_latest_runtime_context(orc, reporter_just_ran=reporter_just_ran)
-
-
-@register_hook("on_turn_end")
-def _hook_upsert_pending_file_target_confirmation(orc, *, reporter_just_ran: bool = False) -> None:
-    del reporter_just_ran
-    payload = dict(getattr(orc, "pending_file_target_confirmation", {}) or {})
-    if payload:
-        message = build_pending_file_target_confirmation_message(payload)
-        try:
-            orc.chat.upsert_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX, message)
-        except AttributeError:
-            orc.chat.append_message({"role": "system", "content": message, "hidden": True})
-        return
-    try:
-        orc.chat.remove_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX)
-    except AttributeError:
-        pass
-
-
-@register_hook("on_turn_end")
-def _hook_upsert_last_turn_explanation_context(orc, *, reporter_just_ran: bool = False) -> None:
-    snapshot: dict[str, Any] | None
-    if str(getattr(orc, "route_interceptor", "") or "").strip().upper() == "EXPLAIN":
-        snapshot = activate_last_turn_explanation_snapshot(
-            extract_last_turn_explanation_snapshot(orc.get_context())
-        )
-    else:
-        snapshot = build_last_turn_explanation_snapshot(orc, reporter_just_ran=reporter_just_ran)
-    if not snapshot:
-        return
-    payload = build_last_turn_explanation_message(snapshot)
-    try:
-        orc.chat.upsert_hidden_system_message(LAST_TURN_EXPLANATION_PREFIX, payload)
-    except AttributeError:
-        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
 
 
 def _finish_persona_fast_path(
@@ -821,31 +689,6 @@ def _merge_secretary_system_prompt(base_prompt: str, latest_runtime_context: str
     if prompt:
         return prompt + "\n\n" + runtime
     return runtime
-
-
-@register_hook("on_pre_route")
-def _hook_note_pre_route_user_msg(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
-    del recent_history
-    orc.stats_collector.note_user_msg(orc.turn_stats, orc.user_msg)
-
-
-@register_hook("on_pre_route")
-def _hook_record_user_turn_once(orc, *, recent_history: list[dict[str, Any]] | None = None) -> None:
-    del recent_history
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    # Only ingest the user turn once per logical turn — not on re-routes.
-    # When [ROUTER] loops back through phase_route, orc.user_msg is unchanged;
-    # calling ingest_user_turn again would refresh a just-cleared intent entry
-    # and make it impossible to clear via commands.
-    msg_to_ingest = str(orc.user_msg or "").strip()
-    if not msg_to_ingest or getattr(orc, "_last_ingested_user_msg", None) == msg_to_ingest:
-        return
-    try:
-        orc.prompt_context.record_user_turn(msg_to_ingest)
-        orc._last_ingested_user_msg = msg_to_ingest
-    except Exception:
-        pass
 
 
 def phase_route(orc) -> None:

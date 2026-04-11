@@ -1070,6 +1070,19 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ---
 
+### 13.21 Hook Extraction (Pre-roadmap #4) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- All remaining feature hooks now self-register in their owning modules instead of living in `orchestrator_phases.py`.
+- `orchestrator_phases.py` contains zero `@register_hook` decorators. It only fires hook events.
+- The live hook inventory in this repo is broader than the earlier task sheet implied: the extracted hooks now live in `memory/world_model.py`, `core/engines/conversation_compressor.py`, `core/engines/context_pack.py`, `core/file_target_confirmation.py`, `core/turn_explanation.py`, `core/engines/stats_collector.py`, and `core/prompt_context.py`, alongside the already-existing `change_journal.py` and `proactive_monitor.py` hooks.
+- `core.feature_hooks.list_hooks()` now exposes the active registry for validation.
+
+**Files:** `core/orchestrator_phases.py` (decorators removed); `core/feature_hooks.py` (`list_hooks()`); `memory/world_model.py`; `core/engines/conversation_compressor.py`; `core/engines/context_pack.py`; `core/file_target_confirmation.py`; `core/turn_explanation.py`; `core/engines/stats_collector.py`; `core/prompt_context.py`
+
+---
+
 ## 14. TTS Pipeline
 
 Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.
