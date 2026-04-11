@@ -55,5 +55,5 @@ PIPER_CODE_DUMP.txt
 data/change_journal.json
 data/stats.jsonl
 data/users/
-notes/coder-log.md
 data/benchmarks/results/
+data/reference/user_notes/
