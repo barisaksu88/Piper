@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from pathlib import Path
@@ -40,6 +41,8 @@ from core.stream_filter import stream_thinking_filter
 from llm.llm_server_client import LLMClientError
 from core.runtime_control import OperationCancelled
 from tools.vision import VisionError, generate_stream_with_image_attachment, generate_with_image_attachment
+
+_LOG = logging.getLogger(__name__)
 
 FALLBACK_SECRETARY = "You are a Router. Output JSON: {decision: 'CHAT' or 'TASK', card: {goal, context}}."
 SEARCH_RESULT_PREFIX = "Background search complete for '"
@@ -1751,13 +1754,9 @@ def _persona_recall_allowed(
 
 
 def _debug_log_stream(tokens, label: str):
-    """Yield every token from *tokens* while printing a debug line per token.
-
-    Only called when ``CFG.DEBUG_STREAMING_PIPELINE`` is True so there is no
-    runtime cost in normal operation.
-    """
+    """Yield every token from *tokens* while emitting a debug log per token."""
     for token in tokens:
-        print(f"[{label}] {repr(token)}", flush=True)
+        _LOG.debug("[%s] %r", label, token)
         yield token
 
 
@@ -1786,17 +1785,14 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
                 max_tokens=int(getattr(CFG, "PERSONA_MAX_TOKENS", 700)),
                 cancel_token=orc.cancel_token,
             )
-        # Wrap raw stream with PIPE-IN trace when pipeline debug is on.
-        _raw = _debug_log_stream(stream, "PIPE-IN") if CFG.DEBUG_STREAMING_PIPELINE else stream
+        _raw = _debug_log_stream(stream, "PIPE-IN") if _LOG.isEnabledFor(logging.DEBUG) else stream
         for display_delta in stream_thinking_filter(_raw):
-            if CFG.DEBUG_STREAMING_PIPELINE:
-                print(f"[FILTER-OUT] {repr(display_delta)}", flush=True)
+            _LOG.debug("[FILTER-OUT] %r", display_delta)
 
             full_answer += display_delta
             if not allow_recall or visible_stream_started:
                 if display_delta:
-                    if CFG.DEBUG_STREAMING_PIPELINE:
-                        print(f"[QUEUE-PUT] len={len(full_answer)}", flush=True)
+                    _LOG.debug("[QUEUE-PUT] len=%d", len(full_answer))
                     orc.ui.put(("assistant_stream_delta", {"text": display_delta}))
                 continue
 
@@ -1846,16 +1842,14 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
             max_tokens=int(getattr(CFG, "PERSONA_MAX_TOKENS", 700)),
             cancel_token=orc.cancel_token,
         )
-        _raw = _debug_log_stream(stream, "PIPE-IN") if CFG.DEBUG_STREAMING_PIPELINE else stream
+        _raw = _debug_log_stream(stream, "PIPE-IN") if _LOG.isEnabledFor(logging.DEBUG) else stream
         for display_delta in stream_thinking_filter(_raw):
-            if CFG.DEBUG_STREAMING_PIPELINE:
-                print(f"[FILTER-OUT] {repr(display_delta)}", flush=True)
+            _LOG.debug("[FILTER-OUT] %r", display_delta)
 
             full_answer += display_delta
             if not allow_recall or visible_stream_started:
                 if display_delta:
-                    if CFG.DEBUG_STREAMING_PIPELINE:
-                        print(f"[QUEUE-PUT] len={len(full_answer)}", flush=True)
+                    _LOG.debug("[QUEUE-PUT] len=%d", len(full_answer))
                     orc.ui.put(("assistant_stream_delta", {"text": display_delta}))
                 continue
 

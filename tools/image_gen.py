@@ -3,6 +3,7 @@
 Handles Image Generation & Editing via ComfyUI API.
 """
 
+import logging
 import subprocess
 import time
 import json
@@ -16,6 +17,7 @@ from core.runtime_control import CancellationToken, OperationCancelled
 
 # Configuration moved to config.py
 COMFY_PORT = 8188
+_LOG = logging.getLogger(__name__)
 
 class ImageGenerator:
     def __init__(self, data_dir: Path):
@@ -33,7 +35,7 @@ class ImageGenerator:
             cancel_token.raise_if_cancelled()
 
     def _wait_for_server(self, cancel_token: CancellationToken | None = None):
-        print("[ImageGen] Waiting for ComfyUI API...")
+        _LOG.info("[ImageGen] Waiting for ComfyUI API...")
         start = time.time()
         while time.time() - start < 120:
             self._raise_if_cancelled(cancel_token)
@@ -41,7 +43,7 @@ class ImageGenerator:
                 req = urllib.request.Request(f"http://127.0.0.1:{COMFY_PORT}/system_stats", method='GET')
                 with urllib.request.urlopen(req, timeout=1) as resp:
                     if resp.status == 200:
-                        print("[ImageGen] ComfyUI Ready.")
+                        _LOG.info("[ImageGen] ComfyUI Ready.")
                         return True
             except:
                 time.sleep(1)
@@ -52,12 +54,12 @@ class ImageGenerator:
             req = urllib.request.Request(f"http://127.0.0.1:{COMFY_PORT}/system_stats", method='GET')
             with urllib.request.urlopen(req, timeout=1) as resp:
                 if resp.status == 200:
-                    print("[ImageGen] ComfyUI already running.")
+                    _LOG.info("[ImageGen] ComfyUI already running.")
                     return
         except:
             pass
 
-        print("[ImageGen] Starting ComfyUI Silent...")
+        _LOG.info("[ImageGen] Starting ComfyUI Silent...")
         python_exe = self.comfy_dir / "python_embeded" / "python.exe"
         if not python_exe.exists(): python_exe = "python"
 
@@ -66,11 +68,11 @@ class ImageGenerator:
         try:
             self.process = subprocess.Popen(cmd, cwd=str(self.comfy_dir / "ComfyUI"), creationflags=0x08000000)
         except Exception as e:
-            print(f"[ImageGen] Failed to start: {e}")
+            _LOG.error("[ImageGen] Failed to start: %s", e)
 
     def stop_server(self):
         if self.process:
-            print("[ImageGen] Stopping ComfyUI...")
+            _LOG.info("[ImageGen] Stopping ComfyUI...")
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
@@ -125,7 +127,7 @@ class ImageGenerator:
                 result = json.loads(resp.read())
             
             prompt_id = result.get('prompt_id')
-            print(f"[ImageGen] Job queued ({prompt_id}). Monitoring...")
+            _LOG.info("[ImageGen] Job queued (%s). Monitoring...", prompt_id)
             
             fname = self._poll_for_result(prompt_id, cancel_token=cancel_token)
             if fname:
@@ -159,7 +161,7 @@ class ImageGenerator:
 
         input_path = self.comfy_dir / "ComfyUI" / "input" / self.last_image_name
         shutil.copy(src_path, input_path)
-        print(f"[ImageGen] Prepared input image: {self.last_image_name}")
+        _LOG.info("[ImageGen] Prepared input image: %s", self.last_image_name)
 
         self.start_server()
         if not self._wait_for_server(cancel_token=cancel_token):
@@ -201,7 +203,7 @@ class ImageGenerator:
                 result = json.loads(resp.read())
             
             prompt_id = result.get('prompt_id')
-            print(f"[ImageGen] Edit Job queued ({prompt_id}). Monitoring...")
+            _LOG.info("[ImageGen] Edit Job queued (%s). Monitoring...", prompt_id)
             
             fname = self._poll_for_result(prompt_id, prefix="PiperEdit", cancel_token=cancel_token)
             if fname:

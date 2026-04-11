@@ -736,6 +736,7 @@ class Config:
             ["example.com", "iana.org", "apache.org", "w3.org", "python.org", "rfc-editor.org", "localhost", "127.0.0.1"],
         )
     )
+    LOG_LEVEL: str = os.environ.get("PIPER_LOG_LEVEL", "INFO").upper()
     DEBUG_LLM_HTTP_PAYLOADS: bool = _env_flag("PIPER_DEBUG_LLM_HTTP_PAYLOADS", False)
     # Prompt debug is light enough to keep on by default; full HTTP payload dumps stay opt-in.
     DEBUG_LLM_PROMPTS: bool = _env_flag("PIPER_DEBUG_LLM_PROMPTS", True)

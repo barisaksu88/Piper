@@ -6,6 +6,7 @@ Uses ChromaDB for storage and SentenceTransformers for embeddings.
 
 import json
 import os
+import logging
 import math
 import threading
 import datetime
@@ -19,6 +20,8 @@ try:
 except ImportError:
     chromadb = None
     embedding_functions = None
+
+_LOG = logging.getLogger(__name__)
 
 def _get_deterministic_id(text: str) -> str:
     """Creates a stable ID based on content to prevent duplicates."""
@@ -50,7 +53,7 @@ class PiperBrain:
         self._vector_init_error = ""
         self._vector_ready = False
 
-        print("[Brain] Initializing Long-Term Memory...")
+        _LOG.info("[Brain] Initializing Long-Term Memory...")
 
         self.embedding_func = None
         self.client = None
@@ -59,12 +62,12 @@ class PiperBrain:
 
         if self._vector_memory_available:
             self.start_vector_warmup()
-            print("[Brain] Fallback memory ready. Vector warm-up started in background.")
-            print(f"[Brain] Memory Ready. Current fallback entries: {len(self._fallback_entries)}")
+            _LOG.info("[Brain] Fallback memory ready. Vector warm-up started in background.")
+            _LOG.info("[Brain] Memory Ready. Current fallback entries: %d", len(self._fallback_entries))
             return
 
-        print("[Brain] ChromaDB unavailable. Using lightweight local fallback memory.")
-        print(f"[Brain] Memory Ready. Current entries: {len(self._fallback_entries)}")
+        _LOG.info("[Brain] ChromaDB unavailable. Using lightweight local fallback memory.")
+        _LOG.info("[Brain] Memory Ready. Current entries: %d", len(self._fallback_entries))
 
     @property
     def vector_ready(self) -> bool:
@@ -111,15 +114,15 @@ class PiperBrain:
             self._sync_fallback_to_vector()
             try:
                 entry_count = int(collection.count())
-                print(f"[Brain] Vector memory ready. Current entries: {entry_count}")
+                _LOG.info("[Brain] Vector memory ready. Current entries: %d", entry_count)
             except Exception:
-                print("[Brain] Vector memory ready.")
+                _LOG.info("[Brain] Vector memory ready.")
         except Exception as exc:
             with self._vector_init_lock:
                 self._vector_init_failed = True
                 self._vector_init_error = str(exc)
-            print("[Brain] Vector warm-up failed. Staying on lightweight fallback memory.")
-            print(f"[Brain] Vector init error: {exc}")
+            _LOG.warning("[Brain] Vector warm-up failed. Staying on lightweight fallback memory.")
+            _LOG.warning("[Brain] Vector init error: %s", exc)
 
     def _sync_fallback_to_vector(self) -> None:
         if self.collection is None:
@@ -143,7 +146,7 @@ class PiperBrain:
         try:
             self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
         except Exception as exc:
-            print(f"[Brain] Vector fallback sync failed: {exc}")
+            _LOG.warning("[Brain] Vector fallback sync failed: %s", exc)
 
     def _load_fallback_entries(self) -> list[dict]:
         if not self._fallback_store_path.exists():
@@ -282,7 +285,7 @@ class PiperBrain:
                     )
                     return # Done. Updated existing memory.
         except Exception as e:
-            print(f"[Brain] Deduplication check failed: {e}")
+            _LOG.warning("[Brain] Deduplication check failed: %s", e)
 
         # 3. CREATE NEW (Force Deterministic ID)
         # This handles race conditions for identical text.
@@ -295,7 +298,7 @@ class PiperBrain:
                 metadatas=[meta]
             )
         except Exception as e:
-            print(f"[Brain] Error remembering: {e}")
+            _LOG.warning("[Brain] Error remembering: %s", e)
 
     def recall(self, query: str, n_results: int = 10) -> List[Dict]:
         """Search memory for relevant info with Exponential Decay."""
@@ -353,7 +356,7 @@ class PiperBrain:
             return valid_memories[:n_results]
             
         except Exception as e:
-            print(f"[Brain] Recall error: {e}")
+            _LOG.warning("[Brain] Recall error: %s", e)
             return self._fallback_recall(query, n_results=n_results)
 
 # Cache brains by their backing data dir so multiple user silos can coexist

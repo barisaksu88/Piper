@@ -3,6 +3,7 @@
 Online Search Tool using DuckDuckGo + Jina.ai Reader.
 """
 
+import logging
 import urllib.request
 import ssl
 import json
@@ -27,6 +28,8 @@ except ImportError:
 
 from config import CFG, Config
 # Daily facts removed
+
+_LOG = logging.getLogger(__name__)
 
 _NEWS_QUERY_HINT_RE = re.compile(r"(?i)\b(news|latest|current|recent|headline|headlines)\b")
 _SEARCH_PREFIX_RE = re.compile(
@@ -159,7 +162,7 @@ def _collect_search_results(
 def perform_search(query: str, data_dir, log_callback=None, cancel_token: CancellationToken | None = None):
     # Helper to log to both Console and UI
     def log(msg):
-        print(msg)
+        _LOG.info("%s", msg)
         if log_callback:
             log_callback(msg)
             

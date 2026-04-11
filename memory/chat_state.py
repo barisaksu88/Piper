@@ -15,12 +15,15 @@ This module is intentionally UI-agnostic.
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
 from .storage import append_jsonl, load_recent_turns, now_ts
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass
@@ -156,7 +159,7 @@ class ChatState:
             with self.memory_path.open("w", encoding="utf-8") as f:
                 f.write("")
         except Exception as e:
-            print(f"[ChatState] Error wiping memory file: {e}")
+            _LOG.warning("[ChatState] Error wiping memory file: %s", e)
 
     def new_session(self) -> None:
         """Start a fresh session.

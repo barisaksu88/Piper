@@ -1083,6 +1083,19 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ---
 
+### 13.22 Structured Logging (Pre-roadmap #5) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- `print()` calls were replaced with the Python logging module across `core/`, `memory/`, `tools/`, and `llm/`.
+- The old streaming debug print guards were removed from `core/`; debug level is now the filter.
+- `config.py` now exposes `LOG_LEVEL` via `PIPER_LOG_LEVEL` (default `INFO`).
+- `app.py` configures `logging.basicConfig()` before the main Piper imports so module loggers have a consistent root configuration from startup.
+
+**Files:** `app.py` (root logging config); `config.py` (`LOG_LEVEL`); `memory/brain.py`; `tools/image_gen.py`; `llm/boot.py`; `core/orchestrator_phases.py`; `core/agent.py`; `tools/stt.py`; `core/style.py`; `core/debug_tools.py`; `tools/search.py`; `core/pipeline.py`; `core/environment_service.py`; `core/environment.py`; `memory/stores.py`; `memory/chat_state.py`
+
+---
+
 ## 14. TTS Pipeline
 
 Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.

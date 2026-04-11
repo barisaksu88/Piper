@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import logging
+
+from config import CFG
+
+logging.basicConfig(
+    level=getattr(logging, CFG.LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 import atexit
 import os
 import queue
 import sys
 from pathlib import Path
 
-from config import CFG
 from core.agent import AgentBrain
 from core.codex_bridge import probe_codex_support
 from core.environment_service import EnvironmentService

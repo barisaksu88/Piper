@@ -5,9 +5,12 @@ External style sheets for Piper (character styles).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -179,9 +182,9 @@ class StyleManager:
         try:
             self.styles_dir.mkdir(parents=True, exist_ok=True)
             self._pref_file.write_text(self.active_filename, encoding="utf-8")
-            print(f"[Style] Saved preference: {self.active_filename} to {self._pref_file}") # DEBUG
+            _LOG.debug("[Style] Saved preference: %s to %s", self.active_filename, self._pref_file)
         except Exception as e:
-            print(f"[Style] Error saving preference: {e}")
+            _LOG.warning("[Style] Error saving preference: %s", e)
 
     @property
     def active_path(self) -> Path:

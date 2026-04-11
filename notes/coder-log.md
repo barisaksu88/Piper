@@ -5474,3 +5474,9 @@ Four structural problems fixed across a single session:
   - added `core.feature_hooks.list_hooks()` for registry validation
   - note: the task sheet's hook inventory was stale; the live repo already had `change_journal.py` and `proactive_monitor.py` self-registering hooks, so the final hook count is higher than 9
   - added `TRIGGER_FLOW.md` §13.21 for the hook extraction pass
+
+- Structured logging pass:
+  - replaced repo `print()` calls in `core/`, `memory/`, `tools/`, and `llm/` with module loggers
+  - removed `DEBUG_STREAMING_PIPELINE` branching from `core/`; debug level is now the filter for stream trace logs
+  - added `config.LOG_LEVEL` (`PIPER_LOG_LEVEL`, default `INFO`)
+  - configured `logging.basicConfig()` at the top of `app.py`

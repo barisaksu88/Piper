@@ -4,6 +4,7 @@ Piper's Agentic Brain.
 Parses LLM output for Menu/Tool tags and executes Python actions.
 """
 
+import logging
 import json
 import re
 import os
@@ -21,6 +22,8 @@ from memory.state_owner import SharedStateOwner
 from core.runtime_control import CancellationToken, OperationCancelled
 from tools.registry import get_tool_spec
 from tools.workspace_runtime import WorkspaceToolRuntime
+
+_LOG = logging.getLogger(__name__)
 
 @dataclass
 class AgentAction:
@@ -137,7 +140,7 @@ class AgentBrain:
                 },
             )
         except Exception as e:
-            print(f"[Agent] Archive memory failed: {e}")
+            _LOG.warning("[Agent] Archive memory failed: %s", e)
 
     def _reconcile_transient_operational_change(
         self,
@@ -160,12 +163,12 @@ class AgentBrain:
                 scheduled_date=scheduled_date,
             )
         except Exception as exc:
-            print(f"[Agent] Transient state reconcile failed: {exc}")
+            _LOG.warning("[Agent] Transient state reconcile failed: %s", exc)
     def cleanup_old_events(self) -> int:
         """Removes events that have passed. Returns count of removed events."""
         removed_count = self.event_store.cleanup_old_events(now=datetime.datetime.now())
         if removed_count > 0:
-            print(f"[Agent] Cleaned up {removed_count} old events.")
+            _LOG.info("[Agent] Cleaned up %d old events.", removed_count)
         return removed_count
 
     @staticmethod

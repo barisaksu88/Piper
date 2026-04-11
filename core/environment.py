@@ -1,6 +1,7 @@
 ﻿# core/environment.py
 import datetime
 import json
+import logging
 import ssl  # FIX: Added import
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,8 @@ from core.environment_service import EnvironmentService
 from core.operational_state_service import OperationalStateService
 from memory.state_owner import SharedStateOwner
 from memory.stores import EventStore, TaskStore
+
+_LOG = logging.getLogger(__name__)
 
 def get_time_str() -> str:
     now = datetime.datetime.now()
@@ -72,7 +75,7 @@ def get_weather(city: str = "Istanbul") -> str:
             return f"{temp}°C, {desc}"
 
     except Exception as e:
-        print(f"[ENV] Weather Error (Open-Meteo): {e}")
+        _LOG.warning("[ENV] Weather Error (Open-Meteo): %s", e)
         return "N/A"
 
 def get_upcoming_events(data_dir: Path, *, event_store: Optional[EventStore] = None) -> str:

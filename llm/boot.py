@@ -3,6 +3,7 @@
 Handles initialization of the LLM server.
 """
 
+import logging
 import os
 import re
 import subprocess
@@ -22,6 +23,7 @@ except ImportError:
 
 
 PostBootTask = tuple[str, Callable[[], object]]
+_LOG = logging.getLogger(__name__)
 
 class BootManager:
     def __init__(
@@ -42,24 +44,24 @@ class BootManager:
     def pause_server(self):
         """Stops the LLM server to free VRAM."""
         if self.process and self.process.poll() is None:
-            print("[Boot] Pausing LLM Server...")
+            self.log("[Boot] Pausing LLM Server...")
             try:
                 self.process.terminate()
                 self.process.wait(timeout=10)
-                print("[Boot] Server Paused.")
+                self.log("[Boot] Server Paused.")
             except Exception as e:
-                print(f"[Boot] Error pausing: {e}")
+                self.log(f"[Boot] Error pausing: {e}")
             finally:
                 self._close_server_log_handle()
 
     def resume_server(self):
         """Restarts the server."""
         if not (self.process and self.process.poll() is None):
-            print("[Boot] Resuming LLM Server...")
+            self.log("[Boot] Resuming LLM Server...")
             self.run_sequence(run_post_boot_tasks=False) # Restarts logic
             
     def log(self, message: str):
-        print(message)
+        _LOG.info("%s", message)
         if self.ui_queue:
             self.ui_queue.put(("boot_log", message))
 
@@ -325,7 +327,7 @@ class BootManager:
 
     def shutdown(self):
         if self.process and self.process.poll() is None:
-            print("[System] Terminating LLM Server...")
+            self.log("[System] Terminating LLM Server...")
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)

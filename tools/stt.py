@@ -5,6 +5,7 @@ Speech-to-Text using Faster-Whisper.
 
 from __future__ import annotations
 
+import logging
 import os
 import numpy as np
 
@@ -12,6 +13,7 @@ _sd = None
 _sounddevice_error: Exception | None = None
 _WhisperModel = None
 _whisper_import_error: Exception | None = None
+_LOG = logging.getLogger(__name__)
 
 
 def _load_sounddevice():
@@ -60,7 +62,7 @@ class STTEngine:
             return
         whisper_model_cls = _load_whisper_model_class()
 
-        print("[STT] Loading Model...")
+        _LOG.info("[STT] Loading Model...")
         self.model = whisper_model_cls("base", device="cpu", compute_type="float32")
 
     def start_recording(self):
@@ -122,7 +124,11 @@ class STTEngine:
             )
             self._stream.start()
             self._sample_rate = target_sr
-            print(f"[STT] Recording from device {input_device_index}: {selected_device['name']}")
+            _LOG.info(
+                "[STT] Recording from device %s: %s",
+                input_device_index,
+                selected_device["name"],
+            )
         except Exception as e:
             self._recording = False
             self._stream = None
@@ -168,7 +174,7 @@ class STTEngine:
             return "".join([seg.text for seg in segments]).strip()
             
         except Exception as e:
-            print(f"[STT] Error: {e}")
+            _LOG.warning("[STT] Error: %s", e)
             return ""
 
 _engine = None

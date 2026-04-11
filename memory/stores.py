@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import threading
 import time
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_LOG = logging.getLogger(__name__)
 
 
 class JsonStoreError(RuntimeError):
@@ -75,9 +78,10 @@ class JsonDictStore:
                         json.dumps(data, indent=2, ensure_ascii=False),
                     )
                     if archived is not None:
-                        print(
-                            f"[JsonStore] Recovered {self.path.name} from backup. "
-                            f"Archived corrupt copy to {archived.name}."
+                        _LOG.warning(
+                            "[JsonStore] Recovered %s from backup. Archived corrupt copy to %s.",
+                            self.path.name,
+                            archived.name,
                         )
                     return data
                 except Exception as backup_exc:

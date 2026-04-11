@@ -8,6 +8,7 @@ Chat pipeline:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from typing import Callable, List, Optional
 from config import CFG
 from tools.registry import get_registered_tool_names
 from tools.tts import log_tts_error
+
+_LOG = logging.getLogger(__name__)
 
 
 # -----------------
@@ -282,8 +285,7 @@ class ChatPipeline:
 
         if kind == "delta":
             if not self._stream_active:
-                if CFG.DEBUG_STREAMING_PIPELINE:
-                    print(f"[STREAM] delta DROPPED (_stream_active=False): {payload!r:.40}", flush=True)
+                _LOG.debug("[STREAM] delta DROPPED (_stream_active=False): %.40r", payload)
                 return
 
             # Lazy TTS start: open the TTS stream on the first real delta so

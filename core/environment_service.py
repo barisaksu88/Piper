@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import ssl
 import urllib.request
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ except ImportError:
     psutil = None
 
 from memory.state_owner import SharedStateOwner
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -79,7 +82,7 @@ class EnvironmentService:
                 desc = "Unknown"
             return f"{temp}°C, {desc}"
         except Exception as exc:
-            print(f"[EnvironmentService] Weather Error (Open-Meteo): {exc}")
+            _LOG.warning("[EnvironmentService] Weather Error (Open-Meteo): %s", exc)
             return "N/A"
 
     def snapshot(self) -> EnvironmentSnapshot:

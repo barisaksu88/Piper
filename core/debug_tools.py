@@ -13,11 +13,13 @@ independently without hunting through a combined log:
 All writes use os.fsync() so the file is on disk before the LLM call
 begins — no stale reads from a partially-flushed OS buffer.
 """
+import logging
 import os
 import time
 from pathlib import Path
 from typing import List, Dict
 
+_LOG = logging.getLogger(__name__)
 
 def log_prompt_debug(
     debug_path: Path,
@@ -53,7 +55,7 @@ def log_prompt_debug(
                 pass  # fsync may be unavailable on some virtual FS
 
     except Exception as e:
-        print(f"[DebugTools] Error writing prompt log: {e}")
+        _LOG.warning("[DebugTools] Error writing prompt log: %s", e)
 
 def log_agent_thought(
     debug_path: Path,
@@ -68,4 +70,4 @@ def log_agent_thought(
             f.write(f"TOOL: {tool}\n")
             f.write(f"RESULT: {result[:500]}...\n\n")
     except Exception as e:
-        print(f"[DebugTools] Error writing agent log: {e}")
+        _LOG.warning("[DebugTools] Error writing agent log: %s", e)
