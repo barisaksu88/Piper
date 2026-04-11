@@ -296,6 +296,10 @@ class StatsCollector:
         verification: str,
         status: str,
         effective_success: bool,
+        step_count: int = 0,
+        action_count: int = 0,
+        timeout_hit: bool = False,
+        action_budget_hit: bool = False,
     ) -> None:
         if state is None:
             return
@@ -313,6 +317,10 @@ class StatsCollector:
                 "verification": str(verification or "").strip().upper() or "FAILED",
                 "status": str(status or "").strip(),
                 "effective_success": bool(effective_success),
+                "step_count": int(step_count or 0),
+                "action_count": int(action_count or 0),
+                "timeout_hit": bool(timeout_hit),
+                "action_budget_hit": bool(action_budget_hit),
             }
         )
 
@@ -509,6 +517,8 @@ class StatsCollector:
         if state.persona_error:
             return "FAILED"
         if state.stages:
+            if bool((state.stages[-1] or {}).get("timeout_hit")):
+                return "TIMEOUT"
             verdict = str((state.stages[-1] or {}).get("verification") or "").strip().upper()
             if verdict in {"VERIFIED", "PARTIAL", "FAILED"}:
                 return verdict

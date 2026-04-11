@@ -23,6 +23,18 @@ class ScratchpadFormatter:
     _BROWSER_OBSERVATION_LIMIT = 1200
 
     @staticmethod
+    def _stage_timeout_hit(stage_entries: Iterable[str] | None) -> bool:
+        return any("=== STAGE TIMEOUT ===" in str(entry or "") for entry in (stage_entries or []))
+
+    @staticmethod
+    def _stage_action_budget_hit(stage_entries: Iterable[str] | None) -> bool:
+        return any("=== ACTION BUDGET EXHAUSTED ===" in str(entry or "") for entry in (stage_entries or []))
+
+    @staticmethod
+    def _status_override_counts_as_success(status_override: str) -> bool:
+        return str(status_override or "").strip().upper().startswith("PAUSED / AWAITING USER")
+
+    @staticmethod
     def format_stage_header(stage_num: int, stage: Dict) -> str:
         goal = stage.get("stage_goal", "Unknown")
         stype = stage.get("stage_type", "Unknown")
@@ -277,8 +289,13 @@ RESULT: {pack.status}{detail}"""
                 stage=stage,
             )
 
+        stage_entries_list = list(stage_entries) if stage_entries is not None else None
         if status_override:
             status = status_override
+        elif not success and ScratchpadFormatter._stage_timeout_hit(stage_entries_list):
+            status = "TIMEOUT"
+        elif not success and ScratchpadFormatter._stage_action_budget_hit(stage_entries_list):
+            status = "ACTION BUDGET EXHAUSTED"
         elif success:
             if stage_type == "IMAGE_WORK":
                 status = "IMAGE GENERATED"
@@ -292,7 +309,7 @@ RESULT: {pack.status}{detail}"""
             status = "FAILED / INCOMPLETE"
 
         extracted = SummaryEngine.extract_observation_detail(
-            SummaryEngine.select_outcome_detail(stage_type, list(stage_entries) if stage_entries is not None else None, last_observation)
+            SummaryEngine.select_outcome_detail(stage_type, stage_entries_list, last_observation)
         )
         from core.contracts import StageOutcomePack
 
@@ -300,13 +317,13 @@ RESULT: {pack.status}{detail}"""
         if stage_type_upper == "FILE_WORK":
             allow_persona_reroute = not ScratchpadFormatter._has_terminal_missing_named_file_target_failure(
                 stage=stage,
-                stage_entries=list(stage_entries) if stage_entries is not None else None,
+                stage_entries=stage_entries_list,
             )
 
         return StageOutcomePack(
             status=status,
             detail=extracted,
-            effective_success=bool(success or status_override),
+            effective_success=bool(success or ScratchpadFormatter._status_override_counts_as_success(status_override)),
             allow_persona_reroute=allow_persona_reroute,
         )
 

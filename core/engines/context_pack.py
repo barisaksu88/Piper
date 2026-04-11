@@ -412,7 +412,11 @@ class ContextPackEngine:
             # Typed verification is authoritative for task-turn success/failure.
             outcome_failed = not bool(getattr(verification_result, "effective_success", False))
         else:
-            outcome_failed = "FAILED / INCOMPLETE" in outcome_upper or "RESULT: FAILED" in outcome_upper
+            stage_status_upper = str(SummaryEngine.extract_stage_status(scratchpad) or "").strip().upper()
+            outcome_failed = (
+                stage_status_upper in {"FAILED / INCOMPLETE", "TIMEOUT", "ACTION BUDGET EXHAUSTED"}
+                or "RESULT: FAILED" in outcome_upper
+            )
         outcome_paused = "PAUSED / AWAITING USER" in outcome_upper
         proposal_answer = SummaryEngine.extract_proposal(scratchpad)
         exact_file_read_answer = SummaryEngine.extract_exact_file_read(scratchpad)

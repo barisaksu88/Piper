@@ -1613,6 +1613,10 @@ def phase_manager(orc) -> None:
             verification=verification_verdict,
             status=str(getattr(outcome_pack, "status", "") or pause_status or ""),
             effective_success=bool(true_success),
+            step_count=int(stage_metrics.get("step_count") or 0),
+            action_count=int(stage_metrics.get("action_count") or 0),
+            timeout_hit=bool(stage_metrics.get("timeout_hit")),
+            action_budget_hit=bool(stage_metrics.get("action_budget_hit")),
         )
         outcome_text = ScratchpadFormatter.format_outcome(
             stage_num,

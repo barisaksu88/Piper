@@ -94,20 +94,40 @@ class StageExecutor:
         self.terminal_missing_file_target = ""
         self._stage_all_mutated_paths: list[str] = []
         self._computer_use_stage_evidence: dict[str, Any] = {}
+        self._stage_action_count = 0
+        self._stage_timeout_hit = False
+        self._stage_action_budget_hit = False
 
     def _log_dashboard(self, text: str):
         """Logs a clean message to the UI Dashboard."""
         self.ui.put(("status_widget_dashboard_activity", text))
 
-    def _record_stage_metrics(self, *, stage_started_at: float, planner_time_s: float, step_count: int) -> None:
+    def _record_stage_metrics(
+        self,
+        *,
+        stage_started_at: float,
+        planner_time_s: float,
+        step_count: int,
+        action_count: int | None = None,
+        timeout_hit: bool = False,
+        action_budget_hit: bool = False,
+    ) -> None:
         stage_total_ms = max(0.0, (time.perf_counter() - stage_started_at) * 1000.0)
         planner_ms = max(0.0, planner_time_s * 1000.0)
         executor_ms = max(0.0, stage_total_ms - planner_ms)
+        resolved_action_count = int(
+            self._stage_action_count if action_count is None else action_count
+        )
+        resolved_timeout_hit = bool(timeout_hit or self._stage_timeout_hit)
+        resolved_action_budget_hit = bool(action_budget_hit or self._stage_action_budget_hit)
         self._last_stage_metrics = {
             "stage_total_ms": round(stage_total_ms, 3),
             "planner_ms": round(planner_ms, 3),
             "executor_ms": round(executor_ms, 3),
             "step_count": int(step_count),
+            "action_count": resolved_action_count,
+            "timeout_hit": resolved_timeout_hit,
+            "action_budget_hit": resolved_action_budget_hit,
         }
 
     @staticmethod
@@ -242,6 +262,26 @@ class StageExecutor:
             or self.pause_requested
         )
 
+    def _budget_exit_state_note(self, *, action_count: int) -> str:
+        if int(action_count or 0) <= 0:
+            return "No tool action had executed before the budget exit."
+        mutated_paths = [str(path).strip() for path in (self._stage_all_mutated_paths or []) if str(path).strip()]
+        if mutated_paths:
+            label = ", ".join(mutated_paths[:4])
+            return (
+                f"{int(action_count)} tool actions had already executed before the budget exit. "
+                f"Workspace mutations were already applied to: {label}."
+            )
+        if self._last_successful_tool_name:
+            return (
+                f"{int(action_count)} tool actions had already executed before the budget exit. "
+                f"Last successful tool: {self._last_successful_tool_name}."
+            )
+        return (
+            f"{int(action_count)} tool actions had already executed before the budget exit, "
+            "but no verified workspace mutation was recorded."
+        )
+
     # _should_block_code_file_write_text / _should_block_redundant_exact_read
     # → FileWorkEngine.should_block()
 
@@ -263,10 +303,17 @@ class StageExecutor:
         self._raise_if_cancelled()
         
         max_steps = max(1, int(getattr(CFG, "EXECUTOR_MAX_STEPS", 12) or 12))
+        max_runtime = float(getattr(CFG, "EXECUTOR_MAX_STAGE_RUNTIME_S", 120.0) or 120.0)
+        if max_runtime <= 0.0:
+            max_runtime = 120.0
+        max_actions = max(1, int(getattr(CFG, "EXECUTOR_MAX_ACTIONS_PER_STAGE", 15) or 15))
         step_count = 0
+        action_count = 0
         stage_started_at = time.perf_counter()
         planner_time_s = 0.0
         success = False
+        timeout_hit = False
+        action_budget_hit = False
         self._last_file_verdict = ""
         self._last_verification = None
         self.pause_requested = False
@@ -286,6 +333,9 @@ class StageExecutor:
         # every file touched across all tool calls, not just the final one.
         self._stage_all_mutated_paths: list[str] = []
         self._computer_use_stage_evidence = new_computer_use_stage_evidence(stage)
+        self._stage_action_count = 0
+        self._stage_timeout_hit = False
+        self._stage_action_budget_hit = False
         # R-5: tracks whether the constraints schema reminder has been sent
         # for this stage so we only fire it once before falling through.
         _constraints_reminder_sent = False
@@ -318,6 +368,57 @@ class StageExecutor:
             step_count += 1
             self.ui.put(("status_widget_mode", "THINKING"))
             self.ui.put(("status_widget_step", f"Stage {stage_num}/{total_stages} | Step {step_count}"))
+
+            stage_elapsed = time.perf_counter() - stage_started_at
+            if stage_elapsed > max_runtime:
+                timeout_hit = True
+                self._stage_timeout_hit = True
+                budget_state_note = self._budget_exit_state_note(action_count=action_count)
+                timeout_note = (
+                    "=== STAGE TIMEOUT ===\n"
+                    f"Stage exceeded the {max_runtime:.0f}s wall-clock budget after {step_count} steps "
+                    f"and {stage_elapsed:.1f}s elapsed. The task may be too complex for a single stage.\n"
+                    f"{budget_state_note}"
+                )
+                self.scratchpad.append(timeout_note)
+                self.ui.put(("agent_log", f"   -> STAGE TIMEOUT: {stage_elapsed:.1f}s exceeded {max_runtime:.0f}s budget"))
+                self._log_dashboard(f"Stage timed out after {stage_elapsed:.1f}s ({step_count} steps).")
+                self._emit_runtime_signal(
+                    kind="stage_timeout",
+                    severity="warning",
+                    source="executor",
+                    summary=f"Stage timed out after {stage_elapsed:.1f}s.",
+                    details=f"Wall-clock stage budget ({max_runtime:.0f}s) exhausted.",
+                    stage=stage,
+                    step=step_count,
+                    count=step_count,
+                )
+                break
+
+            if action_count >= max_actions:
+                action_budget_hit = True
+                self._stage_action_budget_hit = True
+                budget_state_note = self._budget_exit_state_note(action_count=action_count)
+                action_note = (
+                    "=== ACTION BUDGET EXHAUSTED ===\n"
+                    f"Stage exceeded the {max_actions} action budget after {step_count} steps "
+                    f"and {action_count} tool actions. The task may require decomposition into smaller stages.\n"
+                    f"{budget_state_note}"
+                )
+                self.scratchpad.append(action_note)
+                self.ui.put(("agent_log", f"   -> ACTION BUDGET EXHAUSTED: {action_count} actions reached {max_actions} limit"))
+                self._log_dashboard(f"Stage exhausted action budget ({action_count} actions, {step_count} steps).")
+                self._emit_runtime_signal(
+                    kind="action_budget_exhausted",
+                    severity="warning",
+                    source="executor",
+                    summary=f"Stage exhausted the {max_actions} action budget.",
+                    details=f"Planner consumed {action_count} tool actions in {step_count} steps.",
+                    stage=stage,
+                    step=step_count,
+                    count=action_count,
+                )
+                break
 
             planner_input = PlannerBoundary.validate_input(stage, objective=objective)
 
@@ -856,6 +957,8 @@ class StageExecutor:
                 tool_tag = self._inject_browser_stage_context(tool_tag, stage)
             action = self.brain.parse_and_execute(tool_tag, cancel_token=self.cancel_token)
             self._raise_if_cancelled()
+            action_count += 1
+            self._stage_action_count = action_count
 
             parsed_tag = str(action.tag or "").upper()
             if action.action_type != "TOOL" or parsed_tag != base_tag:
@@ -1209,7 +1312,7 @@ class StageExecutor:
                 else:
                     self._consecutive_fails = 0  # Reset if inspector says continue
 
-        if not success and FileStagePolicy.stage_requires_file_verification(stage):
+        if not success and not (timeout_hit or action_budget_hit) and FileStagePolicy.stage_requires_file_verification(stage):
             current_check = self.file_checker.verify_current_file_stage_state(stage, self._last_successful_tool_result)
             current_verdict = str((current_check or {}).get("verdict", "")).upper()
             if current_verdict == "VERIFIED":
@@ -1225,6 +1328,7 @@ class StageExecutor:
                 return True, self.scratchpad
         if (
             not success
+            and not (timeout_hit or action_budget_hit)
             and FileStagePolicy.stage_requires_analysis_report(stage)
             and self._latest_stage_has_proposal()
             and FileStagePolicy.is_file_read_result(self._last_successful_tool_name, self._last_successful_tool_result)
@@ -1240,6 +1344,7 @@ class StageExecutor:
         # stage is a boundary violation, not a task failure.
         if (
             not success
+            and not (timeout_hit or action_budget_hit)
             and FileStagePolicy.stage_is_non_mutating_file_stage(stage)
             and isinstance(self._last_successful_tool_result, dict)
             and str(self._last_successful_tool_result.get("action", "")).lower() == "extension_inventory"

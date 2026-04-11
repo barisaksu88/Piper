@@ -217,6 +217,14 @@ For each stage in StageCard:
     │   │                                                        │
     │   │  Per-step loop:                                        │
     │       │                                                    │
+    │       ├── Stage budget guards (top of iteration)           │
+    │       │       ├── wall-clock budget                        │
+    │       │       │   `EXECUTOR_MAX_STAGE_RUNTIME_S`           │
+    │       │       ├── action budget                            │
+    │       │       │   `EXECUTOR_MAX_ACTIONS_PER_STAGE`         │
+    │       │       └── existing step budget                     │
+    │       │           `EXECUTOR_MAX_STEPS`                     │
+    │       │                                                    │
     │       ├── Planner LLM call                                 │
     │       │       └── PlannerDecision → tool + args            │
     │       │                                                    │
@@ -235,6 +243,13 @@ For each stage in StageCard:
     │       │       └── IMAGE_WORK      → image_gen tools        │
     │       │                                                    │
     │       ├── Observation recorded in Scratchpad               │
+    │       │       Budget exits append explicit scratchpad      │
+    │       │       markers (`STAGE TIMEOUT`,                    │
+    │       │       `ACTION BUDGET EXHAUSTED`) so persona        │
+    │       │       reports the failure honestly.                │
+    │       │       Timeout exits also record whether tool       │
+    │       │       actions had already executed and whether     │
+    │       │       workspace mutations were already applied.    │
     │       │                                                    │
     │       ├── VerificationEngine.should_verify()?              │
     │       │       ├── YES → VerificationEngine.evaluate()      │
