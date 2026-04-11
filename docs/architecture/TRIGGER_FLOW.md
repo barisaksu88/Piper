@@ -1037,6 +1037,37 @@ The manifest path is stored on the change-journal entry for that turn (`rollback
 
 **Files:** `core/engines/rollback_engine.py` (new — `record_manifest`, `invert_manifest`, `is_bulk_action`, `_prune_old_manifests`); `core/executor.py` (post-bulk-op manifest write, `completed_rollback_manifests` list, `_current_turn_id` propagated from phase); `core/engines/change_journal.py` (`rollback_manifests` field on entry, `mark_entry_undone` method); `core/orchestrator_phases.py` (manifest collection, hook args, `phase_undo` manifest-first path); `data/rollback/` (manifest store); `scripts/bulk_rollback_manifest_smoke_test.py` (11-case smoke test)
 
+### 13.19 Execution Budget — Wall-Clock and Action-Count Stage Limits ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+**Problem:**
+
+The executor's only stage limit was `EXECUTOR_MAX_STEPS = 12`. No wall-clock timeout existed. A hung LLM call or a planner loop issuing repeated "continue" actions could burn unbounded time and inference tokens, leaving the workspace in a partial state with no clear signal.
+
+**Design:**
+
+Two new env-overridable budget constants in `config.py`: `EXECUTOR_MAX_STAGE_RUNTIME_S` (wall-clock) and `EXECUTOR_MAX_ACTIONS_PER_STAGE` (action count). Both are checked at the top of each step iteration — after control returns from an LLM call but never mid-stream, so in-flight inference is never interrupted.
+
+On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE TIMEOUT` or `ACTION BUDGET EXHAUSTED`) and records mutation state: whether no tool had yet executed, whether tool actions had already run, and whether known workspace mutations had already occurred. A timeout after a real file move is reported with that context, not as a clean no-op failure.
+
+`TIMEOUT` is a distinct terminal outcome in `stats_collector.py` — not folded into generic `FAILED`. `step_count`, `action_count`, `timeout_hit`, and `action_budget_hit` are recorded per stage. The signal flows through `orchestrator_phases.py`, `scratchpad_formatter.py`, and `context_pack.py` so persona receives accurate failure context.
+
+**Files:** `config.py` (`EXECUTOR_MAX_STAGE_RUNTIME_S`, `EXECUTOR_MAX_ACTIONS_PER_STAGE`); `core/executor.py` (budget guards, mutation-state annotation); `core/engines/stats_collector.py` (`TIMEOUT` outcome, new per-stage fields); `core/orchestrator_phases.py` (timeout signal forwarding); `core/scratchpad_formatter.py` (TIMEOUT in stage status); `core/engines/context_pack.py` (TIMEOUT as failed execution outcome); `scripts/executor_budget_smoke_test.py` (timeout-before-action, timeout-after-action, action-budget exhaustion cases)
+
+---
+
+### 13.20 Data Hygiene Rules (Pre-roadmap #3) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- `AGENTS.md` now includes §10A: binary payload prohibition, unbounded-file prohibition, and write-path rotation as a doctrine rule.
+- `stats.jsonl` now prunes to `history_limit` lines on write, using a temp-file plus atomic rename instead of leaving disk growth unbounded.
+- No `bytes_b64` write paths remain in the codebase. The only surviving reference is the legacy undo read handler in `change_journal.py`, which skips old entries safely.
+- The repo sweep also capped other JSONL write surfaces discovered during the audit: persisted chat memory and Codex escalation logs now prune on write too.
+
+**Files:** `AGENTS.md` (§10A doctrine); `memory/storage.py` (shared JSONL tail-prune helper); `core/engines/stats_collector.py` (write-side rotation); `memory/chat_state.py` (bounded `memory.jsonl` writes); `core/engineering_support.py` (bounded `codex_escalations.jsonl` writes)
+
 ---
 
 ## 14. TTS Pipeline
@@ -1104,39 +1135,4 @@ audio out
 **Non-streaming path** (`_split_3stage`, used by direct `speak()` calls):
 - Splits on `[.!?;]\s+|\n+` into sentence-sized chunks (≤260 chars each)
 - Packs sentences into 3 logical pipeline chunks: fast-start (~100 chars), normal (~500 chars), remainder
-- Three-chunk design allows synthesis of chunk 2 to overlap with playback of chunk 1
-
-### Stage direction processing
-
-`*action*` markers in persona output are intercepted by `StageDirectionProcessor` in `ChatPipeline` before text reaches the TTS engine:
-
-| Marker pattern | Behaviour |
-|---|---|
-| `*sigh*`, `*laugh*`, etc. | Flush current text utterance, then play matching `data/sfx/*.wav` |
-| `*softly*`, `*sternly*`, etc. | Prepend semantic text cue before next utterance |
-| `*smirk*`, `*pause*` | Insert "… " pause token into text stream |
-
-SFX playback is ordered relative to the surrounding text via the shared `_job_q` (SFX jobs sit in-queue between the text jobs that surround them).
-
-### Backend chain
-
-| Priority | Backend | Class | Notes |
-|---|---|---|---|
-| 1 (primary) | Kokoro ONNX | `_KokoroEngine` | `kokoro-v1.0.onnx` + `voices-v1.0.bin`; lazy model load |
-| 2 (fallback) | Kokoro Torch | `_KokoroTorchEngine` | Subprocess worker; HF hub `hexgrad/Kokoro-82M`; Windows probe patch |
-| 3 (last resort) | Windows SAPI | `_WindowsSystemSpeechEngine` | `pyttsx3`; system-installed voices only |
-
-Backend is selected per synthesis job; if the primary engine raises an exception the synth worker steps down the chain automatically.
-
-### Epoch-based cancellation
-
-Each `stop()` call increments `_epoch`. The synthesis worker checks epoch before pushing to `_audio_q`; any job whose epoch is older than the current value is silently discarded. This ensures a hard stop (e.g. user interrupts mid-sentence) drains cleanly without deadlock.
-
-### Configuration keys
-
-`config.py`: `TTS_ENABLED`, `TTS_BACKEND` (`"auto"`), `TTS_VOICE` (`"af_heart"`), `TTS_SPEED` (`0.85`), `TTS_KOKORO_TIMEOUT_S`, `TTS_KOKORO_TORCH_READY_WAIT_S`, `TTS_KOKORO_HF_REPO_ID`, `KOKORO_DIR`, `KOKORO_MODEL`, `KOKORO_VOICES`.
-
-### Key files
-
-`tools/tts.py` — TTS singleton, all three backend engines, `_StreamChunker`, `_split_3stage`, synth/play workers, epoch tracking; `core/pipeline.py` — `ChatPipeline`, `TagScrubber`, `StageDirectionProcessor`, number cleaning; `ui/controller_queue.py` — UI event pump, 60fps delta throttle; `core/orchestrator_phases.py` — persona stream emission; `app.py` — singleton init (`get_tts(TTSConfig(...))`); `scripts/tts_windows_probe.py` — latency benchmark tool
-
+- Three-chunk design allows synthesis of chunk 2 to overlap wit

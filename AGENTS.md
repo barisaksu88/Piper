@@ -255,6 +255,20 @@ Direct multi-module file access is prohibited.
 
 ---
 
+# 10A. DATA HYGIENE RULES
+
+- **No binary payloads in JSON.** Files whose extension is in `BINARY_EXTENSIONS`
+  must be stored as `metadata_only`. This is enforced in `change_journal.py`.
+- **No unbounded data files.** Every file that grows on write must have a
+  hard cap enforced on the write path — not just a read limit.
+  - `change_journal.json`: capped by `MAX_SNAPSHOT_CONTENT_CHARS` (1 000 000 chars)
+    and `metadata_only` for binaries.
+  - `stats.jsonl`: capped by `history_limit` lines (default 500), pruned on write.
+- **Rotation is a write-path concern.** Pruning happens at write time, not
+  during reads. A read limit alone is insufficient.
+
+---
+
 # 11. TOOL DEFINITIONS
 
 Tool metadata should exist in a single source of truth.

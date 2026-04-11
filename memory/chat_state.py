@@ -35,6 +35,7 @@ class ChatState:
 
     memory_path: Path
     session_marker_prefix: str = "=== New session"
+    history_limit: int = 500
 
     messages: List[Dict[str, str]] = field(default_factory=list)
     
@@ -62,7 +63,11 @@ class ChatState:
             self.messages.extend(loaded)
 
     def persist_turn(self, role: str, content: str) -> None:
-        append_jsonl(self.memory_path, {"ts": now_ts(), "role": role, "content": content})
+        append_jsonl(
+            self.memory_path,
+            {"ts": now_ts(), "role": role, "content": content},
+            max_lines=self.history_limit,
+        )
 
     def append(self, role: str, content: str) -> None:
         with self._lock:

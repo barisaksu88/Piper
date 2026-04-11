@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from dataclasses import asdict, dataclass, field
@@ -8,12 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from memory.storage import append_jsonl, ensure_parent
+from memory.storage import append_jsonl, ensure_parent, prune_jsonl_tail
 
 
 _PENDING_SEARCH_ATTR = "_piper_pending_search_turn_stats"
 _PENDING_SEARCH_OWNER_ATTR = "_piper_pending_search_turn_stats_owner"
 _STARTUP_CHECKED_PATHS: set[str] = set()
+_LOG = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -352,6 +354,8 @@ class StatsCollector:
         self.finalize_outcome(state, outcome=outcome, detail=detail)
         record = state.to_record()
         append_jsonl(self.stats_path, record)
+        if prune_jsonl_tail(self.stats_path, max_lines=self.history_limit):
+            _LOG.debug("stats.jsonl pruned to %d lines", self.history_limit)
         self._check_latest_record(reason="turn")
         return record
 

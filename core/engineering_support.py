@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.contracts import EscalationDecision, RouteDecision, RuntimeSignal
+from memory.storage import append_jsonl
 
 
 def _utc_timestamp() -> str:
@@ -49,12 +50,6 @@ def _normalized_signal(signal: RuntimeSignal) -> RuntimeSignal:
     return payload
 
 
-def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-
 def build_codex_support_payload(
     *,
     reason: str,
@@ -95,9 +90,10 @@ def build_codex_support_payload(
 
 
 class EngineeringEscalationDetector:
-    def __init__(self, log_path: Path, *, max_signals: int = 80) -> None:
+    def __init__(self, log_path: Path, *, max_signals: int = 80, history_limit: int = 200) -> None:
         self.log_path = Path(log_path)
         self.max_signals = max(12, int(max_signals))
+        self.history_limit = max(50, int(history_limit or 200))
         self.signals: list[RuntimeSignal] = []
         self.latest_decision: EscalationDecision | None = None
         self._last_auto_signature = ""
@@ -263,7 +259,7 @@ class EngineeringEscalationDetector:
             dashboard_tail=dashboard_tail,
             status_snapshot=status_snapshot,
         )
-        _append_jsonl(self.log_path, payload)
+        append_jsonl(self.log_path, payload, max_lines=self.history_limit)
         decision: EscalationDecision = {
             "decision": "ask_codex",
             "reason": reason,
