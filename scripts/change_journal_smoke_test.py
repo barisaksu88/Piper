@@ -24,6 +24,10 @@ class ChangeJournalSmokeReport:
     interceptor_ok: bool
     overwrite_restored: bool
     create_removed: bool
+    binary_metadata_only: bool
+    large_text_metadata_only: bool
+    no_bytes_b64_written: bool
+    legacy_bytes_b64_graceful: bool
     entry_count: int
     latest_undone: bool
 
@@ -75,16 +79,104 @@ def run_smoke() -> ChangeJournalSmokeReport:
             and not (workspace / "undo_tree" / "nested").exists()
             and not (workspace / "undo_tree").exists()
         )
+        recorded_entries = journal.load_entries()
+
+        binary_path = workspace / "images" / "undo_binary.png"
+        binary_path.parent.mkdir(parents=True, exist_ok=True)
+        binary_path.write_bytes(b"\x89PNG\r\n\x1a\nbinary")
+        binary_capture = journal.prepare_file_op_capture(
+            '{"action":"write_text","path":"images/undo_binary.png","content":"ignored"}',
+            workspace,
+        )
+        binary_snapshot = dict(((binary_capture or {}).get("snapshots") or [{}])[0])
+        binary_metadata_only = (
+            str(binary_snapshot.get("snapshot_type") or "") == "metadata_only"
+            and int(binary_snapshot.get("size") or 0) == binary_path.stat().st_size
+            and "bytes_b64" not in binary_snapshot
+            and "content" not in binary_snapshot
+        )
+
+        large_text_path = workspace / "text_files" / "undo_large.txt"
+        large_text_path.parent.mkdir(parents=True, exist_ok=True)
+        large_text_path.write_text("a" * 1_000_100, encoding="utf-8")
+        large_text_capture = journal.prepare_file_op_capture(
+            '{"action":"write_text","path":"text_files/undo_large.txt","content":"ignored"}',
+            workspace,
+        )
+        large_text_snapshot = dict(((large_text_capture or {}).get("snapshots") or [{}])[0])
+        large_text_metadata_only = (
+            str(large_text_snapshot.get("snapshot_type") or "") == "metadata_only"
+            and bool(large_text_snapshot.get("truncated"))
+            and "bytes_b64" not in large_text_snapshot
+            and "content" not in large_text_snapshot
+        )
+
+        no_bytes_b64_written = '"bytes_b64"' not in (data_dir / "change_journal.json").read_text(encoding="utf-8")
+
+        legacy_entries = [
+            {
+                "turn_id": "legacy-turn",
+                "timestamp": "2026-04-11T00:00:00.000+00:00",
+                "user_msg": "legacy undo",
+                "task_goal": "Restore legacy file snapshot",
+                "task_success": True,
+                "operations": [
+                    {
+                        "action": "write_text",
+                        "summary": "Overwrote legacy.txt.",
+                        "requested_paths": ["text_files/legacy.txt"],
+                        "evidence_paths": ["text_files/legacy.txt"],
+                        "snapshots": [
+                            {
+                                "path": "text_files/legacy.txt",
+                                "kind": "file",
+                                "bytes_b64": "aGVsbG8=",
+                            }
+                        ],
+                    }
+                ],
+                "primary_paths": ["text_files/legacy.txt"],
+                "undone_at": "",
+                "undo_last_status": "",
+                "undo_last_error": "",
+            }
+        ]
+        journal.save_entries(legacy_entries)
+        (workspace / "text_files").mkdir(parents=True, exist_ok=True)
+        legacy_path = workspace / "text_files" / "legacy.txt"
+        legacy_path.write_text("current", encoding="utf-8")
+        legacy_undo = journal.undo_latest(workspace)
+        legacy_bytes_b64_graceful = (
+            str(legacy_undo.get("status") or "") == "FAILED"
+            and legacy_path.read_text(encoding="utf-8") == "current"
+            and "legacy" in str(legacy_undo.get("detail") or "").lower()
+        )
+
+        journal.save_entries(recorded_entries)
 
         entries = journal.load_entries()
         latest = journal.peek_latest_entry() or {}
         interceptor_ok = bool(detect_route_interceptor("undo that"))
-        success = interceptor_ok and overwrite_restored and create_removed and len(entries) == 2 and bool(str(latest.get("undone_at") or "").strip())
+        success = (
+            interceptor_ok
+            and overwrite_restored
+            and create_removed
+            and binary_metadata_only
+            and large_text_metadata_only
+            and no_bytes_b64_written
+            and legacy_bytes_b64_graceful
+            and len(entries) == 2
+            and bool(str(latest.get("undone_at") or "").strip())
+        )
         return ChangeJournalSmokeReport(
             success=bool(success),
             interceptor_ok=bool(interceptor_ok),
             overwrite_restored=bool(overwrite_restored),
             create_removed=bool(create_removed),
+            binary_metadata_only=bool(binary_metadata_only),
+            large_text_metadata_only=bool(large_text_metadata_only),
+            no_bytes_b64_written=bool(no_bytes_b64_written),
+            legacy_bytes_b64_graceful=bool(legacy_bytes_b64_graceful),
             entry_count=len(entries),
             latest_undone=bool(str(latest.get("undone_at") or "").strip()),
         )
@@ -106,6 +198,10 @@ def main() -> int:
         print(f"INTERCEPTOR_OK: {report.interceptor_ok}")
         print(f"OVERWRITE_RESTORED: {report.overwrite_restored}")
         print(f"CREATE_REMOVED: {report.create_removed}")
+        print(f"BINARY_METADATA_ONLY: {report.binary_metadata_only}")
+        print(f"LARGE_TEXT_METADATA_ONLY: {report.large_text_metadata_only}")
+        print(f"NO_BYTES_B64_WRITTEN: {report.no_bytes_b64_written}")
+        print(f"LEGACY_BYTES_B64_GRACEFUL: {report.legacy_bytes_b64_graceful}")
         print(f"ENTRY_COUNT: {report.entry_count}")
         print(f"LATEST_UNDONE: {report.latest_undone}")
     return 0 if report.success else 1

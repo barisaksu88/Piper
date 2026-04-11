@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import sys
 from dataclasses import asdict, dataclass
@@ -100,7 +99,8 @@ def _seed_mistaken_delete_state(harness: PiperHarness) -> None:
                                 {
                                     "path": "b.txt",
                                     "kind": "file",
-                                    "bytes_b64": base64.b64encode(b"hello").decode("ascii"),
+                                    "size": 5,
+                                    "content": "hello",
                                 }
                             ],
                         }

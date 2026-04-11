@@ -770,6 +770,24 @@ Before any supported mutating FILE_OP fires, the executor snapshots the original
 
 For `write` / `edit`, the pre-mutation file snapshot is captured. For `delete`, the deleted path snapshot is captured. For `move` / `rename` / `copy`, the destination snapshot is captured and `move` also snapshots the source so it can be restored. Missing parent directories created by the task are journaled too, so undo can remove them when they were introduced by the mutation.
 
+Snapshot payload rules:
+- Text files under the journal cap store inline `content` so ordinary edits remain meaningfully undoable.
+- Binary extensions and oversized files do not store inline bytes. They are recorded as `snapshot_type: "metadata_only"` plus `size`, and oversized text snapshots also set `truncated: true`.
+- Directories store structural state only (`kind: "directory"`), not recursive embedded file payloads.
+- Legacy journal entries that still contain `bytes_b64` are tolerated at undo time, but they are not considered automatically restorable anymore; undo fails honestly instead of crashing.
+
+Example text snapshot:
+
+```json
+{"path": "notes/todo.txt", "kind": "file", "size": 42, "content": "buy milk\ncall mom\n"}
+```
+
+Example metadata-only snapshot:
+
+```json
+{"path": "PiperGen_00025_.png", "kind": "file", "size": 312345, "snapshot_type": "metadata_only"}
+```
+
 **Edge cases:**
 - **Overwrite:** if a `write` targets a file that already exists, the original content is captured before the overwrite fires. Undo restores the original content, not a blank file.
 - **Partial batch failure:** the journal records only operations that were successfully executed. If a task had three mutations and the third failed, the journal entry contains two operations. Undo reverses only those two.
@@ -784,7 +802,9 @@ For `write` / `edit`, the pre-mutation file snapshot is captured. For `delete`, 
 
 **Journal retention:** Last 10 task turns retained. Older entries are dropped on append.
 
-**Files:** `core/engines/change_journal.py` (owner); `core/executor.py` (pre-mutation capture hook); `core/orchestrator.py` (journal owner wiring); `core/orchestrator_phases.py` (new `phase_undo()` and undo availability notice); `core/routing/route_normalizer.py` (UNDO interceptor recognition); `data/change_journal.json` (rolling store)
+**Hook ownership:** The journal write hook self-registers from `core/engines/change_journal.py` via the feature-hook registry on `on_task_verified`. `orchestrator_phases.py` only fires the hook chain; it does not own the journal callback.
+
+**Files:** `core/engines/change_journal.py` (owner, snapshot policy, `on_task_verified` hook); `core/executor.py` (pre-mutation capture hook); `core/orchestrator.py` (journal owner wiring); `core/orchestrator_phases.py` (`phase_undo()` and undo availability notice); `core/routing/route_normalizer.py` (UNDO interceptor recognition); `data/change_journal.json` (rolling store)
 
 ---
 

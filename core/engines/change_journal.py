@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import base64
 import json
+import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from core.feature_hooks import register_hook
 from memory.storage import ensure_parent
 from tools.file_ops import (
     FileOpError,
@@ -15,6 +16,47 @@ from tools.file_ops import (
     parse_normalized_payload as parse_file_op_payload,
     resolve_workspace_path,
 )
+
+
+MAX_SNAPSHOT_CONTENT_CHARS = 1_000_000
+BINARY_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".ico",
+        ".webp",
+        ".svg",
+        ".wav",
+        ".mp3",
+        ".ogg",
+        ".flac",
+        ".m4a",
+        ".onnx",
+        ".bin",
+        ".gguf",
+        ".pt",
+        ".pth",
+        ".safetensors",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".7z",
+        ".rar",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+    }
+)
+_LOG = logging.getLogger(__name__)
 
 
 def _utc_now_iso() -> str:
@@ -28,14 +70,6 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
     else:
         path.unlink()
-
-
-def _encode_bytes(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")
-
-
-def _decode_bytes(data: str) -> bytes:
-    return base64.b64decode(str(data or "").encode("ascii"))
 
 
 def _path_depth(path: str) -> int:
@@ -325,24 +359,61 @@ class ChangeJournal:
         if not full_path.exists():
             return {"path": normalized, "kind": "absent"}
         if full_path.is_dir():
-            entries: list[dict[str, Any]] = [{"rel": "", "kind": "dir"}]
-            for child in sorted(full_path.rglob("*")):
-                rel = child.relative_to(full_path).as_posix()
-                if child.is_dir():
-                    entries.append({"rel": rel, "kind": "dir"})
-                elif child.is_file():
-                    entries.append(
-                        {
-                            "rel": rel,
-                            "kind": "file",
-                            "bytes_b64": _encode_bytes(child.read_bytes()),
-                        }
-                    )
-            return {"path": normalized, "kind": "dir", "entries": entries}
+            return {"path": normalized, "kind": "directory"}
+
+        size = 0
+        try:
+            size = int(full_path.stat().st_size)
+        except Exception:
+            size = 0
+        suffix = full_path.suffix.lower()
+        if suffix in BINARY_EXTENSIONS:
+            return {
+                "path": normalized,
+                "kind": "file",
+                "size": size,
+                "snapshot_type": "metadata_only",
+            }
+        if size >= MAX_SNAPSHOT_CONTENT_CHARS:
+            return {
+                "path": normalized,
+                "kind": "file",
+                "size": size,
+                "snapshot_type": "metadata_only",
+                "truncated": True,
+            }
+
+        try:
+            content = full_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return {
+                "path": normalized,
+                "kind": "file",
+                "size": size,
+                "snapshot_type": "metadata_only",
+            }
+        except Exception:
+            return {
+                "path": normalized,
+                "kind": "file",
+                "size": size,
+                "snapshot_type": "metadata_only",
+            }
+
+        if len(content) > MAX_SNAPSHOT_CONTENT_CHARS:
+            return {
+                "path": normalized,
+                "kind": "file",
+                "size": size,
+                "snapshot_type": "metadata_only",
+                "truncated": True,
+            }
+
         return {
             "path": normalized,
             "kind": "file",
-            "bytes_b64": _encode_bytes(full_path.read_bytes()),
+            "size": size,
+            "content": content,
         }
 
     @staticmethod
@@ -356,28 +427,35 @@ class ChangeJournal:
             _remove_path(full_path)
             return rel_path
         if kind == "file":
+            if "bytes_b64" in snapshot:
+                _LOG.warning("Skipping legacy bytes_b64 file snapshot for %s during undo.", rel_path)
+                raise ValueError("legacy file content snapshot is no longer restorable automatically")
+            snapshot_type = str(snapshot.get("snapshot_type") or "").strip().lower()
+            if snapshot_type == "metadata_only":
+                size = snapshot.get("size")
+                if bool(snapshot.get("truncated")):
+                    raise ValueError(
+                        f"file was modified but content was too large to journal"
+                        + (f" (size {size} bytes)" if size not in (None, "") else "")
+                    )
+                raise ValueError(
+                    "file was modified but content was not journaled"
+                    + (f" (size {size} bytes)" if size not in (None, "") else "")
+                )
+            if "content" not in snapshot:
+                raise ValueError("file snapshot is missing restorable content")
             _remove_path(full_path)
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_bytes(_decode_bytes(str(snapshot.get("bytes_b64") or "")))
+            full_path.write_text(str(snapshot.get("content") or ""), encoding="utf-8")
             return rel_path
-        if kind == "dir":
+        if kind in {"dir", "directory"}:
             _remove_path(full_path)
             full_path.mkdir(parents=True, exist_ok=True)
-            entries = [dict(item) for item in (snapshot.get("entries") or []) if isinstance(item, dict)]
-            dir_entries = [entry for entry in entries if str(entry.get("kind") or "").strip().lower() == "dir"]
-            file_entries = [entry for entry in entries if str(entry.get("kind") or "").strip().lower() == "file"]
-            for entry in sorted(dir_entries, key=lambda item: _path_depth(str(item.get("rel") or ""))):
-                rel = str(entry.get("rel") or "").strip()
-                if not rel:
-                    continue
-                (full_path / rel).mkdir(parents=True, exist_ok=True)
-            for entry in file_entries:
-                rel = str(entry.get("rel") or "").strip()
-                if not rel:
-                    continue
-                target = full_path / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(_decode_bytes(str(entry.get("bytes_b64") or "")))
+            if snapshot.get("entries"):
+                _LOG.warning(
+                    "Skipping legacy directory entry payload for %s during undo; restoring empty directory only.",
+                    rel_path,
+                )
             return rel_path
         raise ValueError(f"Unsupported snapshot kind: {kind}")
 
@@ -427,3 +505,27 @@ class ChangeJournal:
                     if candidate and candidate not in seen:
                         seen.append(candidate)
         return seen[:8]
+
+
+@register_hook("on_task_verified")
+def _hook_record_change_journal(
+    orc,
+    *,
+    completed_change_operations: list[dict[str, Any]] | None = None,
+    completed_rollback_manifests: list[str] | None = None,
+    completed_all_stages: bool = False,
+    task_failed: bool = False,
+    task_paused: bool = False,
+) -> None:
+    operations = [dict(item) for item in (completed_change_operations or []) if isinstance(item, dict)]
+    manifests = [str(p) for p in (completed_rollback_manifests or []) if str(p).strip()]
+    task_success = bool(completed_all_stages and not task_failed and not task_paused)
+    orc.last_change_journal_entry = orc.change_journal.record_turn(
+        turn_id=str(getattr(getattr(orc, "turn_stats", None), "turn_id", "") or ""),
+        user_msg=str(getattr(orc, "user_msg", "") or ""),
+        task_goal=str((orc.context_card or {}).get("goal") or ""),
+        task_success=task_success,
+        operations=operations,
+        rollback_manifests=manifests,
+    )
+    orc.undo_notice_pending = bool(orc.last_change_journal_entry) and task_success
