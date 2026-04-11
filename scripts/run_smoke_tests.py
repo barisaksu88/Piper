@@ -92,8 +92,11 @@ def filter_tests(
     *,
     category: str | None,
     patterns: list[str],
+    skip_harness: bool,
 ) -> list[SmokeTest]:
     selected = list(tests)
+    if skip_harness:
+        selected = [test for test in selected if "harness" not in test.filename.lower()]
     if category:
         category_upper = category.upper()
         selected = [test for test in selected if test.category == category_upper]
@@ -192,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--category", help="Run only tests in this category")
     parser.add_argument("--list", action="store_true", dest="list_only", help="List discovered tests and categories, then exit")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure or timeout")
+    parser.add_argument("--skip-harness", action="store_true", help="Exclude tests whose filename contains 'harness'")
     parser.add_argument("--verbose", "-v", action="store_true", help="Stream per-test stdout/stderr")
     parser.add_argument("--timeout", type=float, default=60.0, help="Per-test timeout in seconds (default: 60)")
     return parser
@@ -199,7 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    tests = filter_tests(discover_tests(), category=args.category, patterns=args.patterns)
+    tests = filter_tests(
+        discover_tests(),
+        category=args.category,
+        patterns=args.patterns,
+        skip_harness=bool(args.skip_harness),
+    )
 
     if args.list_only:
         for test in tests:

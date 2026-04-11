@@ -1122,8 +1122,9 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 - Unified smoke test runner: `scripts/run_smoke_tests.py`
 - Discovers all `*_smoke_test.py` files in `scripts/` automatically.
-- Supports `--category`, `--list`, `--fail-fast`, `--verbose`, `--timeout`, and positional `fnmatch` patterns.
+- Supports `--category`, `--list`, `--fail-fast`, `--skip-harness`, `--verbose`, `--timeout`, and positional `fnmatch` patterns.
 - Categorizes tests by filename prefix so targeted runs stay simple and consistent.
+- `--skip-harness` is the lightweight fast-path filter: it excludes tests whose filename contains `harness` without requiring a full suite-audit metadata system.
 
 **Files:** `scripts/run_smoke_tests.py`; `docs/architecture/TRIGGER_FLOW.md`
 

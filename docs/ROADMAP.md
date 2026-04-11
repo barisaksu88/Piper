@@ -217,6 +217,23 @@ Use local static fixture pages or a tightly controlled local test app first. Avo
 
 ---
 
+**Tiered smoke-suite audit (after computer use v0 stabilizes)**
+
+The current unified smoke runner is useful, but the suite still mixes fast deterministic checks with heavier harness-backed and llama-backed tests. After browser computer use is stable and boring, add a real tier system so default runs stay high-signal without hiding the broader integration surface.
+
+**Deferred on purpose:**
+- do **not** build this during active `computer use v0` churn
+- first rely on the lightweight runner filter (`--skip-harness`) for a fast default path
+- only do the full audit once the volatile harness tier has settled enough that classification will stick
+
+**Planned shape (needs full spec before build):**
+- stable default tier for fast, reliable smoke tests
+- opt-in extended tier for slower integration coverage
+- quarantined tier for known-flaky or currently-red tests
+- per-test timeout overrides and short reason strings for quarantined exclusions
+
+---
+
 **Desktop computer use expansion (phase 2)**
 
 After browser-only computer use is stable and boring, extend `ComputerUseEngine` with a desktop backend for native apps.

@@ -5487,3 +5487,5 @@ Four structural problems fixed across a single session:
   - added `scripts/run_smoke_tests.py` as a unified smoke runner for `scripts/*_smoke_test.py`
   - supports discovery, category filtering, fnmatch pattern filtering, fail-fast mode, verbose streaming, and per-test timeouts
   - added `TRIGGER_FLOW.md` §13.24 to document the unified smoke runner
+  - added `--skip-harness` as the lightweight fast-path filter so default runs can exclude `*harness*` tests without pretending we already have a full tiered suite metadata system
+  - queued the fuller smoke-suite audit as a roadmap item to do after `computer use v0` stabilizes
