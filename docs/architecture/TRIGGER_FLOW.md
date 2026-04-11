@@ -22,10 +22,12 @@ phase_route  ──────────────────────�
     │                                                              │
     │  Pre-LLM bypass checks (no model call):                      │
     ├── pending search payload in history? ──────► next: REPORTER  │
-    ├── document chat heuristic? ────────────────► next: DOC_FOCUS │
-    ├── live screen visual query? ───────────────► next: PERSONA   │
+    ├── proactive trigger? ──────────────────────► next: PERSONA   │
+    ├── route interceptor (UNDO/REMINDER/EXPLAIN)? ─► interceptor  │
     ├── environment query (date/time/day)? ───────► next: PERSONA  │
-    └── operational state query (events/tasks)? ─► next: PERSONA  │
+    ├── operational state query (events/tasks)? ─► next: PERSONA   │
+    ├── document chat heuristic? ────────────────► next: DOC_FOCUS │
+    └── live screen visual query? ───────────────► next: PERSONA   │
     │                                                              │
     │  Router LLM call (if no pre-LLM match)                       │
     │  → normalize_route_decision()                                │
@@ -105,10 +107,16 @@ Before routing, the orchestrator:
 ### Pre-LLM bypass checks (no model call):
 
 1. **Pending search payload** in recent history → skip router, jump to `REPORTER`
-2. **Document chat heuristic** matches user message + ingested documents → force `CHAT`, jump to `DOC_FOCUS`
-3. **Live screen visual query** → force `CHAT`, jump to `PERSONA`
+2. **Proactive trigger** (reminder fire-at reached) → force `CHAT`, jump to `PERSONA` — the trigger message becomes the user message and the proactive system notice is attached for persona context.
+3. **Route interceptor** (keyword-based early exit) → jump to interceptor-specific stage. Interceptors include:
+   - `UNDO` → `phase_undo` → `PERSONA`
+   - `REMINDER_SET` → `phase_reminder_set` → `PERSONA`
+   - `EXPLAIN` → `phase_explain` → `PERSONA`
+   Interceptors are detected by `detect_route_interceptor()` in `core/routing/route_normalizer.py` before any LLM call.
 4. **Environment query** (current date / time / day-of-week questions) → force `CHAT`, jump to `PERSONA` — answered directly from `[ENVIRONMENT]` block, never routed to `SEARCH`. The shared predicate lives in `core/routing/environment_queries.py`; `phase_route()` enforces the first true bypass, with `route_normalizer.py` and `phase_search()` acting as safety-net guards.
 5. **Operational state query** (events, tasks, schedule reads) → force `CHAT`, jump to `PERSONA` — `prompt_context.build_readonly_state_answer()` is called deterministically; if it returns a non-empty answer the router LLM is skipped entirely and the answer is delivered via the `phase_persona` fast path. This prevents the LLM router from misclassifying read queries as `TASK` regardless of phrasing. Mutation requests (add/remove/reschedule) are excluded by `build_readonly_answer`'s own gate and fall through to normal routing.
+6. **Document chat heuristic** matches user message + ingested documents → force `CHAT`, jump to `DOC_FOCUS`
+7. **Live screen visual query** → force `CHAT`, jump to `PERSONA`
 
 ### Router history construction
 
@@ -1093,6 +1101,18 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 - `app.py` configures `logging.basicConfig()` before the main Piper imports so module loggers have a consistent root configuration from startup.
 
 **Files:** `app.py` (root logging config); `config.py` (`LOG_LEVEL`); `memory/brain.py`; `tools/image_gen.py`; `llm/boot.py`; `core/orchestrator_phases.py`; `core/agent.py`; `tools/stt.py`; `core/style.py`; `core/debug_tools.py`; `tools/search.py`; `core/pipeline.py`; `core/environment_service.py`; `core/environment.py`; `memory/stores.py`; `memory/chat_state.py`
+
+---
+
+### 13.23 Doc Sync (Pre-roadmap #7) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- §1 top-level flow diagram now matches the actual `phase_route()` bypass order.
+- §2 pre-LLM bypass list now includes the missing proactive trigger and route interceptor steps and matches the live code order.
+- This was a documentation-only sync; no `.py` files were changed.
+
+**Files:** `docs/architecture/TRIGGER_FLOW.md`
 
 ---
 
