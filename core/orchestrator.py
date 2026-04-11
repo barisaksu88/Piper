@@ -4,6 +4,10 @@ The Executive Board Loop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
 from config import CFG
 from core.contracts import EscalationDecision, RuntimeSignal
 from core.engines.change_journal import ChangeJournal
@@ -20,45 +24,72 @@ from core.orchestrator_phases import (
     phase_search,
     phase_undo,
 )
-from core.runtime_control import CancellationToken, OperationCancelled
+from core.runtime_control import OperationCancelled
 from core.engines import proactive_monitor as _proactive_monitor_registration  # noqa: F401
+
+
+@dataclass(frozen=True)
+class OrchestratorConfig:
+    # -- Core LLM + Memory --
+    llm: Any
+    brain: Any
+    knowledge: Any
+    prompt_context: Any
+
+    # -- Chat + Style --
+    chat: Any
+    styles: Any
+
+    # -- Pipeline + UI --
+    pipeline: Any
+    ui: Any
+    get_context: Any
+    boot: Any
+
+    # -- Tools --
+    img_gen: Any
+
+    # -- Live Screen --
+    live_screen: Any | None = None
+
+    # -- Search State (controller-owned lambdas) --
+    cancel_token: Any | None = None
+    retain_cancel_token: Any | None = None
+    release_cancel_token: Any | None = None
+    is_search_in_flight: Any | None = None
+    retain_search_in_flight: Any | None = None
+    release_search_in_flight: Any | None = None
+    current_search_query: Any | None = None
+
+    # -- Paths --
+    conversation_summary_path: Path | None = None
 
 
 class Orchestrator:
     """Manages the flow between Routing, Planning, and Speaking."""
 
-    def __init__(self, llm_client, agent_brain, knowledge_mgr, style_mgr,
-        chat_state, pipeline, ui_queue, get_context_fn, boot_mgr, img_gen,
-                 prompt_context_service,
-                 live_screen=None,
-                 conversation_summary_path=None,
-                 cancel_token: CancellationToken | None = None,
-                 retain_cancel_token_fn=None,
-                 release_cancel_token_fn=None,
-                 is_search_in_flight_fn=None,
-                 retain_search_in_flight_fn=None,
-                 release_search_in_flight_fn=None,
-                 current_search_query_fn=None):
-        self.llm = llm_client
-        self.brain = agent_brain
-        self.knowledge = knowledge_mgr
-        self.styles = style_mgr
-        self.chat = chat_state
-        self.pipeline = pipeline
-        self.ui = ui_queue
-        self.get_context = get_context_fn
-        self.boot = boot_mgr
-        self.img_gen = img_gen
-        self.prompt_context = prompt_context_service
-        self.live_screen = live_screen
-        self.conversation_summary_path = conversation_summary_path or CFG.CONVERSATION_SUMMARY_PATH
-        self.cancel_token = cancel_token
-        self.retain_cancel_token = retain_cancel_token_fn or (lambda token: None)
-        self.release_cancel_token = release_cancel_token_fn or (lambda token: None)
-        self.is_search_in_flight = is_search_in_flight_fn or (lambda: False)
-        self.retain_search_in_flight = retain_search_in_flight_fn or (lambda query="": None)
-        self.release_search_in_flight = release_search_in_flight_fn or (lambda: None)
-        self.current_search_query = current_search_query_fn or (lambda: "")
+    def __init__(self, cfg: OrchestratorConfig) -> None:
+        self._cfg = cfg
+        self.llm = cfg.llm
+        self.brain = cfg.brain
+        self.knowledge = cfg.knowledge
+        self.prompt_context = cfg.prompt_context
+        self.chat = cfg.chat
+        self.styles = cfg.styles
+        self.pipeline = cfg.pipeline
+        self.ui = cfg.ui
+        self.get_context = cfg.get_context
+        self.boot = cfg.boot
+        self.img_gen = cfg.img_gen
+        self.live_screen = cfg.live_screen
+        self.conversation_summary_path = cfg.conversation_summary_path or CFG.CONVERSATION_SUMMARY_PATH
+        self.cancel_token = cfg.cancel_token
+        self.retain_cancel_token = cfg.retain_cancel_token or (lambda token: None)
+        self.release_cancel_token = cfg.release_cancel_token or (lambda token: None)
+        self.is_search_in_flight = cfg.is_search_in_flight or (lambda: False)
+        self.retain_search_in_flight = cfg.retain_search_in_flight or (lambda query="": None)
+        self.release_search_in_flight = cfg.release_search_in_flight or (lambda: None)
+        self.current_search_query = cfg.current_search_query or (lambda: "")
 
         self.ss = None
         self.temperature = 0.7
@@ -293,40 +324,6 @@ class Orchestrator:
         self.ui.put(("stats_view_refresh", ""))
 
 
-def run_agent_loop(
-    llm_client,
-    agent_brain,
-    knowledge_mgr,
-    style_mgr,
-    chat_state,
-    pipeline,
-    ui_queue,
-    get_current_context_fn,
-    boot_mgr,
-    img_gen,
-    prompt_context_service,
-    live_screen=None,
-    conversation_summary_path=None,
-    cancel_token: CancellationToken | None = None,
-    retain_cancel_token_fn=None,
-    release_cancel_token_fn=None,
-    is_search_in_flight_fn=None,
-    retain_search_in_flight_fn=None,
-    release_search_in_flight_fn=None,
-    current_search_query_fn=None,
-):
-    orc = Orchestrator(
-        llm_client, agent_brain, knowledge_mgr, style_mgr,
-        chat_state, pipeline, ui_queue, get_current_context_fn, boot_mgr, img_gen,
-        prompt_context_service=prompt_context_service,
-        live_screen=live_screen,
-        conversation_summary_path=conversation_summary_path,
-        cancel_token=cancel_token,
-        retain_cancel_token_fn=retain_cancel_token_fn,
-        release_cancel_token_fn=release_cancel_token_fn,
-        is_search_in_flight_fn=is_search_in_flight_fn,
-        retain_search_in_flight_fn=retain_search_in_flight_fn,
-        release_search_in_flight_fn=release_search_in_flight_fn,
-        current_search_query_fn=current_search_query_fn,
-    )
+def run_agent_loop(orc_cfg: OrchestratorConfig) -> None:
+    orc = Orchestrator(orc_cfg)
     orc.run()

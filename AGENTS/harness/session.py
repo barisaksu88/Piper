@@ -19,7 +19,7 @@ from core.engineering_support import build_manual_codex_snapshot
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
 from core.operational_state_service import OperationalStateService
-from core.orchestrator import run_agent_loop
+from core.orchestrator import OrchestratorConfig, run_agent_loop
 from core.pipeline import ChatPipeline
 from core.prompt_context import PromptContextService
 from core.style import StyleManager
@@ -600,22 +600,24 @@ class PiperHarness:
     def _run_agent_loop(self) -> None:
         try:
             run_agent_loop(
-                llm_client=self.llm,
-                agent_brain=self.agent_brain,
-                knowledge_mgr=self.knowledge_mgr,
-                style_mgr=self.style_mgr,
-                chat_state=self.chat_state,
-                pipeline=self.pipeline,
-                ui_queue=self.ui_queue,
-                get_current_context_fn=self.chat_state.for_model,
-                boot_mgr=self.boot_mgr,
-                img_gen=self.img_gen,
-                prompt_context_service=self.prompt_context_service,
-                conversation_summary_path=_current_conversation_summary_path(self),
-                is_search_in_flight_fn=self.is_search_in_flight,
-                retain_search_in_flight_fn=self.retain_search_in_flight,
-                release_search_in_flight_fn=self.release_search_in_flight,
-                current_search_query_fn=self.current_search_query,
+                OrchestratorConfig(
+                    llm=self.llm,
+                    brain=self.agent_brain,
+                    knowledge=self.knowledge_mgr,
+                    prompt_context=self.prompt_context_service,
+                    chat=self.chat_state,
+                    styles=self.style_mgr,
+                    pipeline=self.pipeline,
+                    ui=self.ui_queue,
+                    get_context=self.chat_state.for_model,
+                    boot=self.boot_mgr,
+                    img_gen=self.img_gen,
+                    conversation_summary_path=_current_conversation_summary_path(self),
+                    is_search_in_flight=self.is_search_in_flight,
+                    retain_search_in_flight=self.retain_search_in_flight,
+                    release_search_in_flight=self.release_search_in_flight,
+                    current_search_query=self.current_search_query,
+                )
             )
         except Exception as exc:
             self.ui_queue.put(("error", f"Harness Orchestrator Error: {exc}"))

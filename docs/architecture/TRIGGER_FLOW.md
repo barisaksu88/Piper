@@ -1130,6 +1130,22 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ---
 
+### 13.25 Orchestrator Dependency Injection (Roadmap S-1) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- `OrchestratorConfig` frozen dataclass holds all constructor dependencies.
+- `Orchestrator.__init__()` accepts single `OrchestratorConfig` parameter.
+- `run_agent_loop()` accepts single `OrchestratorConfig` parameter.
+- `PiperController.build_orchestrator_config()` assembles config from controller state.
+- All `orc.X` attribute names remain unchanged, so phase code did not need downstream edits.
+- All 3 call sites now receive the user-specific `conversation_summary_path`; search reporter and proactive reminder no longer fall back to the global default path.
+- Dead code: `_current_conversation_summary_path()` removed from `controller_actions.py`; the user-runtime summary path is inlined in `build_orchestrator_config()`.
+
+**Files:** `core/orchestrator.py`; `ui/controller.py`; `ui/controller_actions.py`; `docs/architecture/TRIGGER_FLOW.md`
+
+---
+
 ## 14. TTS Pipeline
 
 Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.

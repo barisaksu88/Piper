@@ -764,6 +764,36 @@ class PiperController:
     def _messages_for_model(self) -> List[Dict[str, str]]:
         return self.chat_state.for_model()
 
+    def build_orchestrator_config(
+        self,
+        *,
+        cancel_token: CancellationToken | None = None,
+    ) -> "OrchestratorConfig":
+        from core.orchestrator import OrchestratorConfig
+
+        return OrchestratorConfig(
+            llm=self.llm,
+            brain=self.agent_brain,
+            knowledge=self.knowledge_mgr,
+            prompt_context=self.prompt_context_service,
+            chat=self.chat_state,
+            styles=self.style_mgr,
+            pipeline=self.pipeline,
+            ui=self.ui_queue,
+            get_context=self._messages_for_model,
+            boot=self.boot_mgr,
+            img_gen=self.img_gen,
+            live_screen=self.live_screen,
+            cancel_token=cancel_token,
+            retain_cancel_token=self.retain_cancel_token,
+            release_cancel_token=self.release_cancel_token,
+            is_search_in_flight=self.is_search_in_flight,
+            retain_search_in_flight=self.retain_search_in_flight,
+            release_search_in_flight=self.release_search_in_flight,
+            current_search_query=self.current_search_query,
+            conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
+        )
+
     def create_cancel_token(self) -> CancellationToken:
         return CancellationToken()
 

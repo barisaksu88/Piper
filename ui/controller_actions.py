@@ -39,13 +39,6 @@ def _clear_conversation_summary_file_at(path: Path | None = None) -> None:
         pass
 
 
-def _current_conversation_summary_path(controller) -> Path:
-    try:
-        return Path(controller.user_runtime.current_conversation_summary_path())
-    except Exception:
-        return CFG.CONVERSATION_SUMMARY_PATH
-
-
 def _refresh_active_user_style(controller) -> None:
     try:
         style_filename = str(controller.user_runtime.current_style_filename() or "").strip()
@@ -204,28 +197,7 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
     controller.retain_cancel_token(token)
     try:
         token.raise_if_cancelled()
-        run_agent_loop(
-            llm_client=controller.llm,
-            agent_brain=controller.agent_brain,
-            knowledge_mgr=controller.knowledge_mgr,
-            style_mgr=controller.style_mgr,
-            chat_state=controller.chat_state,
-            pipeline=controller.pipeline,
-            ui_queue=controller.ui_queue,
-            get_current_context_fn=controller._messages_for_model,
-            boot_mgr=controller.boot_mgr,
-            img_gen=controller.img_gen,
-            prompt_context_service=controller.prompt_context_service,
-            live_screen=controller.live_screen,
-            conversation_summary_path=_current_conversation_summary_path(controller),
-            cancel_token=token,
-            retain_cancel_token_fn=controller.retain_cancel_token,
-            release_cancel_token_fn=controller.release_cancel_token,
-            is_search_in_flight_fn=controller.is_search_in_flight,
-            retain_search_in_flight_fn=controller.retain_search_in_flight,
-            release_search_in_flight_fn=controller.release_search_in_flight,
-            current_search_query_fn=controller.current_search_query,
-        )
+        run_agent_loop(controller.build_orchestrator_config(cancel_token=token))
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "Stop completed."))
     except Exception as exc:
@@ -523,7 +495,7 @@ def on_new_session(controller) -> None:
         controller.tts.stop()
     except Exception:
         pass
-    _clear_conversation_summary_file_at(_current_conversation_summary_path(controller))
+    _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
     controller.chat_state.new_session()
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
@@ -535,7 +507,7 @@ def on_new_session(controller) -> None:
 
 
 def on_clear(controller) -> None:
-    _clear_conversation_summary_file_at(_current_conversation_summary_path(controller))
+    _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
     controller.chat_state.clear()
     controller.session_meta = "Session: active"
     controller.stage_meta = ""
@@ -922,27 +894,7 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
             acquired_lock = True
             if isinstance(cancel_token, CancellationToken):
                 cancel_token.raise_if_cancelled()
-            run_agent_loop(
-                llm_client=controller.llm,
-                agent_brain=controller.agent_brain,
-                knowledge_mgr=controller.knowledge_mgr,
-                style_mgr=controller.style_mgr,
-                chat_state=controller.chat_state,
-                pipeline=controller.pipeline,
-                ui_queue=controller.ui_queue,
-                get_current_context_fn=controller._messages_for_model,
-                boot_mgr=controller.boot_mgr,
-                img_gen=controller.img_gen,
-                prompt_context_service=controller.prompt_context_service,
-                live_screen=controller.live_screen,
-                cancel_token=cancel_token,
-                retain_cancel_token_fn=controller.retain_cancel_token,
-                release_cancel_token_fn=controller.release_cancel_token,
-                is_search_in_flight_fn=controller.is_search_in_flight,
-                retain_search_in_flight_fn=controller.retain_search_in_flight,
-                release_search_in_flight_fn=controller.release_search_in_flight,
-                current_search_query_fn=controller.current_search_query,
-            )
+            run_agent_loop(controller.build_orchestrator_config(cancel_token=cancel_token))
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
         except Exception as exc:
@@ -987,27 +939,7 @@ def trigger_proactive_reminder(controller, reminder: Dict[str, object]) -> bool:
                 token.raise_if_cancelled()
             acquired_lock = True
             token.raise_if_cancelled()
-            run_agent_loop(
-                llm_client=controller.llm,
-                agent_brain=controller.agent_brain,
-                knowledge_mgr=controller.knowledge_mgr,
-                style_mgr=controller.style_mgr,
-                chat_state=controller.chat_state,
-                pipeline=controller.pipeline,
-                ui_queue=controller.ui_queue,
-                get_current_context_fn=controller._messages_for_model,
-                boot_mgr=controller.boot_mgr,
-                img_gen=controller.img_gen,
-                prompt_context_service=controller.prompt_context_service,
-                live_screen=controller.live_screen,
-                cancel_token=token,
-                retain_cancel_token_fn=controller.retain_cancel_token,
-                release_cancel_token_fn=controller.release_cancel_token,
-                is_search_in_flight_fn=controller.is_search_in_flight,
-                retain_search_in_flight_fn=controller.retain_search_in_flight,
-                release_search_in_flight_fn=controller.release_search_in_flight,
-                current_search_query_fn=controller.current_search_query,
-            )
+            run_agent_loop(controller.build_orchestrator_config(cancel_token=token))
             completed_normally = True
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Reminder canceled."))

@@ -5489,3 +5489,16 @@ Four structural problems fixed across a single session:
   - added `TRIGGER_FLOW.md` §13.24 to document the unified smoke runner
   - added `--skip-harness` as the lightweight fast-path filter so default runs can exclude `*harness*` tests without pretending we already have a full tiered suite metadata system
   - queued the fuller smoke-suite audit as a roadmap item to do after `computer use v0` stabilizes
+
+- Orchestrator DI pass:
+  - added `core.orchestrator.OrchestratorConfig` and switched `Orchestrator.__init__()` / `run_agent_loop()` to a single config parameter
+  - added `PiperController.build_orchestrator_config()` so the UI action layer no longer threads 20+ orchestrator dependencies through every call site
+  - updated the 3 live UI call sites in `ui/controller_actions.py` to use the builder and removed `_current_conversation_summary_path()`
+  - important correction: the task sheet claimed the harness did not touch `run_agent_loop()`, but `AGENTS/harness/session.py` still did; that caller also had to be migrated to `OrchestratorConfig`
+  - validation:
+    - `python3 -m compileall core/ ui/ scripts/ AGENTS/harness/` — pass
+    - `python3 -c "from core.orchestrator import OrchestratorConfig; print('OK')"` — pass
+    - `./.venv/Scripts/python.exe scripts/proactive_monitor_smoke_test.py --json` — pass
+    - `./.venv/Scripts/python.exe scripts/file_edit_smoke_test.py --json --keep-data-copy` — first turn passes through the refactored orchestrator path; later turns still hit existing suite/runtime instability
+  - current limitation:
+    - `scripts/run_smoke_tests.py --skip-harness` is not a trustworthy green gate in the current environment yet; after the harness caller fix, the broad pack still reports many unrelated model/runtime reds, so do not use its aggregate result alone as evidence against this DI refactor
