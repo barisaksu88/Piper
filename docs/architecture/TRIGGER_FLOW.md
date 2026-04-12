@@ -1104,45 +1104,60 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ---
 
-### 13.23 Doc Sync (Pre-roadmap #7) ✓ IMPLEMENTED
+### 13.23 Doc Sync — §2 Bypass Order ✓ IMPLEMENTED
 
 **Status:** Implemented.
 
-- §1 top-level flow diagram now matches the actual `phase_route()` bypass order.
-- §2 pre-LLM bypass list now includes the missing proactive trigger and route interceptor steps and matches the live code order.
-- This was a documentation-only sync; no `.py` files were changed.
+- §2 pre-LLM bypass checks reordered to match actual `phase_route()` code order.
+- Added missing steps: proactive trigger (step 2) and route interceptor (step 3, covering UNDO / REMINDER_SET / EXPLAIN).
+- §1 top-level flow diagram updated to match.
+- Code was already correct; this was a documentation-only fix.
 
-**Files:** `docs/architecture/TRIGGER_FLOW.md`
+**Files:** `docs/architecture/TRIGGER_FLOW.md` (§1 diagram, §2 bypass list)
 
 ---
 
-### 13.24 Test Visibility (Pre-roadmap #6) ✓ IMPLEMENTED
+### 13.24 Test Visibility ✓ IMPLEMENTED
 
 **Status:** Implemented.
 
 - Unified smoke test runner: `scripts/run_smoke_tests.py`
-- Discovers all `*_smoke_test.py` files in `scripts/` automatically.
-- Supports `--category`, `--list`, `--fail-fast`, `--skip-harness`, `--verbose`, `--timeout`, and positional `fnmatch` patterns.
-- Categorizes tests by filename prefix so targeted runs stay simple and consistent.
-- `--skip-harness` is the lightweight fast-path filter: it excludes tests whose filename contains `harness` without requiring a full suite-audit metadata system.
+- Discovers all `*_smoke_test.py` files in `scripts/` automatically. Non-test files (harnesses, workers, fixtures) are excluded by the glob pattern.
+- Supports `--category`, `--list`, `--fail-fast`, `--verbose`, `--timeout`, and positional fnmatch patterns for targeted runs.
+- Categorises tests by filename prefix (FILE_WORK, COMPUTER_USE, ROUTING, PERSONA, etc.) with GENERAL as the catch-all.
+- `--skip-harness` excludes any test whose filename contains `harness`, giving a fast default signal without the LLM-backed integration tests. Rationale recorded in `notes/coder-log.md`.
+- Full tiered classification (smoke / extended / quarantined) deferred to a later roadmap slot after the computer-use suite stabilises.
 
-**Files:** `scripts/run_smoke_tests.py`; `docs/architecture/TRIGGER_FLOW.md`
+**Files:** `scripts/run_smoke_tests.py` (new); `notes/coder-log.md` (rationale entry)
 
 ---
 
-### 13.25 Orchestrator Dependency Injection (Roadmap S-1) ✓ IMPLEMENTED
+### 13.25 Orchestrator Dependency Injection ✓ IMPLEMENTED
 
 **Status:** Implemented.
 
-- `OrchestratorConfig` frozen dataclass holds all constructor dependencies.
-- `Orchestrator.__init__()` accepts single `OrchestratorConfig` parameter.
-- `run_agent_loop()` accepts single `OrchestratorConfig` parameter.
-- `PiperController.build_orchestrator_config()` assembles config from controller state.
-- All `orc.X` attribute names remain unchanged, so phase code did not need downstream edits.
-- All 3 call sites now receive the user-specific `conversation_summary_path`; search reporter and proactive reminder no longer fall back to the global default path.
-- Dead code: `_current_conversation_summary_path()` removed from `controller_actions.py`; the user-runtime summary path is inlined in `build_orchestrator_config()`.
+- `OrchestratorConfig` frozen dataclass holds all constructor dependencies, grouped into logical clusters (LLM + memory, chat + style, pipeline + UI, tools, search-state callables, paths).
+- `Orchestrator.__init__()` accepts a single `OrchestratorConfig` parameter. All `orc.X` attribute names are unchanged — zero downstream changes in `orchestrator_phases.py`.
+- `run_agent_loop()` accepts a single `OrchestratorConfig` parameter.
+- `PiperController.build_orchestrator_config()` assembles the config from controller state. `conversation_summary_path` resolution is inlined directly (`self.user_runtime.current_conversation_summary_path()`) to avoid a circular import with `controller_actions.py`.
+- All three UI call sites in `controller_actions.py` replaced with `controller.build_orchestrator_config()`. As a side effect, the search-reporter and proactive-reminder call sites now consistently receive the user-specific summary path rather than falling back to the global default.
+- `AGENTS/harness/session.py` updated (missed by the original task sheet — caught during implementation).
 
-**Files:** `core/orchestrator.py`; `ui/controller.py`; `ui/controller_actions.py`; `docs/architecture/TRIGGER_FLOW.md`
+**Files:** `core/orchestrator.py` (`OrchestratorConfig` dataclass, simplified `__init__`, simplified `run_agent_loop()`); `ui/controller.py` (`build_orchestrator_config()`); `ui/controller_actions.py` (three call sites); `AGENTS/harness/session.py` (harness caller updated)
+
+---
+
+### 13.26 Config Hot-Reload (Roadmap S-4) ✓ IMPLEMENTED
+
+**Status:** Implemented.
+
+- `CFG` is now a live `LiveConfig` proxy over the frozen `Config`, so existing `from config import CFG` call sites continue to work while runtime-safe fields can change between turns.
+- `LiveConfig.reload_if_stale()` watches `data/state/config_override.json`, accepts only scalar overrides, enforces a 10 KB size guard, ignores restart-only keys (`ROOT_DIR`, `DATA_DIR`, `MEMORY_PATH`, `LLAMA_SERVER_REASONING_BUDGET`), and reverts overrides when the file is deleted.
+- `LlamaServerClient.reconnect()` hot-swaps HTTP client settings under the request lock, and `PiperController` subscribes to config changes so updated LLM client settings and `LOG_LEVEL` take effect without a process restart.
+- `Orchestrator.run()` checks for stale overrides at the start of each turn and logs the reloaded keys so config reload remains explicit and honest in the runtime flow.
+- Public `Config` class attrs such as `MODEL_PATH` and `MMPROJ_PATH` are mirrored alongside dataclass fields, so legacy `CFG.X` access and override/revert behavior stay compatible.
+
+**Files:** `config.py` (`LiveConfig`, override watcher, revert path); `llm/llm_server_client.py` (`reconnect()`); `ui/controller.py` (config change subscriber + LLM/log-level refresh); `core/orchestrator.py` (turn-start reload check)
 
 ---
 
@@ -1211,4 +1226,38 @@ audio out
 **Non-streaming path** (`_split_3stage`, used by direct `speak()` calls):
 - Splits on `[.!?;]\s+|\n+` into sentence-sized chunks (≤260 chars each)
 - Packs sentences into 3 logical pipeline chunks: fast-start (~100 chars), normal (~500 chars), remainder
-- Three-chunk design allows synthesis of chunk 2 to overlap wit
+- Three-chunk design allows synthesis of chunk 2 to overlap with playback of chunk 1
+
+### Stage direction processing
+
+`*action*` markers in persona output are intercepted by `StageDirectionProcessor` in `ChatPipeline` before text reaches the TTS engine:
+
+| Marker pattern | Behaviour |
+|---|---|
+| `*sigh*`, `*laugh*`, etc. | Flush current text utterance, then play matching `data/sfx/*.wav` |
+| `*softly*`, `*sternly*`, etc. | Prepend semantic text cue before next utterance |
+| `*smirk*`, `*pause*` | Insert "… " pause token into text stream |
+
+SFX playback is ordered relative to the surrounding text via the shared `_job_q` (SFX jobs sit in-queue between the text jobs that surround them).
+
+### Backend chain
+
+| Priority | Backend | Class | Notes |
+|---|---|---|---|
+| 1 (primary) | Kokoro ONNX | `_KokoroEngine` | `kokoro-v1.0.onnx` + `voices-v1.0.bin`; lazy model load |
+| 2 (fallback) | Kokoro Torch | `_KokoroTorchEngine` | Subprocess worker; HF hub `hexgrad/Kokoro-82M`; Windows probe patch |
+| 3 (last resort) | Windows SAPI | `_WindowsSystemSpeechEngine` | `pyttsx3`; system-installed voices only |
+
+Backend is selected per synthesis job; if the primary engine raises an exception the synth worker steps down the chain automatically.
+
+### Epoch-based cancellation
+
+Each `stop()` call increments `_epoch`. The synthesis worker checks epoch before pushing to `_audio_q`; any job whose epoch is older than the current value is silently discarded. This ensures a hard stop (e.g. user interrupts mid-sentence) drains cleanly without deadlock.
+
+### Configuration keys
+
+`config.py`: `TTS_ENABLED`, `TTS_BACKEND` (`"auto"`), `TTS_VOICE` (`"af_heart"`), `TTS_SPEED` (`0.85`), `TTS_KOKORO_TIMEOUT_S`, `TTS_KOKORO_TORCH_READY_WAIT_S`, `TTS_KOKORO_HF_REPO_ID`, `KOKORO_DIR`, `KOKORO_MODEL`, `KOKORO_VOICES`.
+
+### Key files
+
+`tools/tts.py` — TTS singleton, all three backend engines, `_StreamChunker`, `_split_3stage`, synth/play workers, epoch tracking; `core/pipeline.py` — `ChatPipeline`, `TagScrubber`, `StageDirectionProcessor`, number cleaning; `ui/controller_queue.py` — UI event pump, 60fps delta throttle; `core/orchestrator_phases.py` — persona stream emission; `app.py` — singleton init (`get_tts(TTSConfig(...))`); `scripts/tts_windows_probe.py` — latency benchmark tool
