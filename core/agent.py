@@ -340,6 +340,36 @@ class AgentBrain:
                 execute_result=result,
             )
 
+        browser_op_match = re.search(r'\[BROWSER_OP\](.*?)\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
+        if browser_op_match:
+            payload_text = browser_op_match.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+        if re.search(r'\[BROWSER_OP\]', text, re.IGNORECASE):
+            parts = re.split(r'\[BROWSER_OP\]', text, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2 and parts[1].strip():
+                payload_text = parts[1].replace("[/BROWSER_OP]", "").strip()
+                result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+                return AgentAction(
+                    action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+                )
+        malformed_browser_op_match = re.search(r'\[BROWSER_OP\s+(.*?)\s*\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
+        if malformed_browser_op_match:
+            payload_text = malformed_browser_op_match.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+        malformed_browser_op_inline = re.search(r'\[BROWSER_OP\s+(.+)\]\s*$', text, re.DOTALL | re.IGNORECASE)
+        if malformed_browser_op_inline:
+            payload_text = malformed_browser_op_inline.group(1).strip()
+            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
+            return AgentAction(
+                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
+            )
+
         # 2. CHECK SINGLE TAGS
         # FIX: Added re.DOTALL to allow matching tags that contain newlines (like code blocks)
         match = re.search(r'\[([A-Za-z_]+)(?::\s*(.*?))?\]', text, re.DOTALL)
