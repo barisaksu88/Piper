@@ -87,6 +87,15 @@ def discover_tests() -> list[SmokeTest]:
     return tests
 
 
+def _uses_piper_harness(path: Path) -> bool:
+    """Return True if the test file imports PiperHarness (needs a live LLM)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return "PiperHarness" in text
+    except Exception:
+        return False
+
+
 def filter_tests(
     tests: Iterable[SmokeTest],
     *,
@@ -96,7 +105,11 @@ def filter_tests(
 ) -> list[SmokeTest]:
     selected = list(tests)
     if skip_harness:
-        selected = [test for test in selected if "harness" not in test.filename.lower()]
+        selected = [
+            test for test in selected
+            if "harness" not in test.filename.lower()
+            and not _uses_piper_harness(test.path)
+        ]
     if category:
         category_upper = category.upper()
         selected = [test for test in selected if test.category == category_upper]
