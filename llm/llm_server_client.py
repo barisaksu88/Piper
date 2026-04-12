@@ -136,6 +136,11 @@ class LlamaServerClient:
         self.cfg = cfg
         self._request_lock = threading.Lock()
 
+    def reconnect(self, new_cfg: LlamaServerConfig) -> None:
+        """Hot-swap the server config for the next request."""
+        with self._request_lock:
+            self.cfg = new_cfg
+
     def _acquire_request_lock(self, cancel_token: CancellationToken | None = None) -> None:
         # llama.cpp shares KV/cache state across slots; overlapping Piper requests
         # can trip "Context size has been exceeded" even when each prompt is valid.

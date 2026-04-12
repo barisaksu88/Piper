@@ -5,6 +5,7 @@ The Executive Board Loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,9 @@ from core.orchestrator_phases import (
 )
 from core.runtime_control import OperationCancelled
 from core.engines import proactive_monitor as _proactive_monitor_registration  # noqa: F401
+
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -215,6 +219,11 @@ class Orchestrator:
         self.save_conversation_summary()
 
     def run(self):
+        _reloaded = CFG.reload_if_stale()
+        if _reloaded:
+            _LOG.info("Config hot-reloaded: %s", ", ".join(_reloaded))
+            self.ui.put(("status_widget_dashboard_activity", f"Config reloaded: {', '.join(_reloaded)}"))
+
         # Load style with config defaults as fallbacks.
         # StyleManager will use the style file's values if present, otherwise use these defaults.
         self.ss = self.styles.load(0.7, CFG.TTS_VOICE, CFG.TTS_SPEED)

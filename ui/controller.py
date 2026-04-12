@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -67,6 +68,7 @@ from memory.vision_session import VisionSessionMemory
 
 
 RESTART_EXIT_CODE = 85
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -300,6 +302,7 @@ class PiperController:
             dispatch_callback=lambda reminder: trigger_proactive_reminder_action(self, reminder),
             log_callback=self.safe_log,
         )
+        CFG.on_change(self._on_config_changed)
 
     def _text_view_min_height(self, text_tag: str) -> int:
         if text_tag == self.tags.boot_log_text:
@@ -793,6 +796,37 @@ class PiperController:
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
         )
+
+    def _on_config_changed(self, changed_keys: list[str]) -> None:
+        """Handle live config updates."""
+        llm_reconnect_fields = {
+            "LLAMA_SERVER_URL",
+            "LLAMA_SERVER_MODEL",
+            "LLAMA_SERVER_TIMEOUT_S",
+            "LLAMA_SERVER_STREAM_READ_TIMEOUT_S",
+            "MODEL_PATH",
+            "MMPROJ_PATH",
+        }
+        if llm_reconnect_fields.intersection(changed_keys):
+            from llm.llm_server_client import LlamaServerConfig
+
+            new_llm_cfg = LlamaServerConfig(
+                base_url=str(getattr(CFG, "LLAMA_SERVER_URL", "http://127.0.0.1:8080")),
+                model=str(getattr(CFG, "LLAMA_SERVER_MODEL", "qwen")),
+                temperature=float(getattr(CFG, "TEMPERATURE", 0.7)),
+                max_tokens=int(getattr(CFG, "MAX_TOKENS", 2048)),
+                timeout_s=float(getattr(CFG, "LLAMA_SERVER_TIMEOUT_S", 300.0)),
+                stream_read_timeout_s=float(getattr(CFG, "LLAMA_SERVER_STREAM_READ_TIMEOUT_S", 30.0)),
+                debug_path=CFG.LLM_HTTP_PAYLOAD_DEBUG_PATH if getattr(CFG, "DEBUG_LLM_HTTP_PAYLOADS", False) else None,
+            )
+            self.llm.reconnect(new_llm_cfg)
+            _LOG.info("LLM client reconnected with updated config")
+
+        if "LOG_LEVEL" in changed_keys:
+            logging.getLogger().setLevel(getattr(logging, getattr(CFG, "LOG_LEVEL", "INFO"), logging.INFO))
+            _LOG.info("Log level changed to %s", getattr(CFG, "LOG_LEVEL", "INFO"))
+
+        self.ui_queue.put(("config_reloaded", changed_keys))
 
     def create_cancel_token(self) -> CancellationToken:
         return CancellationToken()

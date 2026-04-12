@@ -1,5 +1,24 @@
 # Coder Log
 
+## 2026-04-12
+
+### Config hot-reload needs to mirror Config class attrs, not only dataclass fields
+
+Problem:
+- `CFG = LiveConfig(Config())` made hot-reload possible, but the first pass only copied dataclass fields
+- several live config values used across the repo, including `MODEL_PATH`, `MMPROJ_PATH`, `LLAMA_SERVER_EXE`, `COMFY_DIR`, and `KOKORO_DIR`, are public `Config` class attributes instead of dataclass fields
+
+Root cause:
+- `config.py`
+  - `LiveConfig` initially treated `Config` like a plain frozen dataclass and missed the extra public class-level values
+  - revert logic also needs the same public-value collector or delete-and-revert will not fully restore the process defaults
+
+Fix:
+- `config.py`
+  - `LiveConfig._public_values()` now collects both dataclass fields and public non-callable, non-property class attrs via `getattr(source, name)`
+  - `reload_if_stale()` still filters restart-only keys (`DATA_DIR`, `ROOT_DIR`, `MEMORY_PATH`, `LLAMA_SERVER_REASONING_BUDGET`)
+  - `_revert_overrides()` now restores those public attrs too, so deleting `data/state/config_override.json` cleanly returns `MODEL_PATH` and similar values to the original process defaults
+
 ## 2026-04-11
 
 ### Added executor stage wall-clock and action budgets with explicit timeout semantics

@@ -1,5 +1,5 @@
 ﻿# config.py
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as dc_fields
 import json
 import sys
 import os
@@ -7,6 +7,7 @@ import shutil
 import fnmatch
 import re
 from pathlib import Path
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 # --- PATH SETUP ---
@@ -861,4 +862,127 @@ class Config:
     SEARCH_CONTENT_SLICE_LENGTH: int = 1500
 
 
-CFG = Config()
+class LiveConfig:
+    """Mutable config holder wrapping a frozen Config.
+
+    Drop-in replacement: ``CFG.field_name`` still works via ``__getattr__``.
+    """
+
+    def __init__(self, initial: Config) -> None:
+        self._data: dict[str, Any] = self._public_values(initial)
+        self._config_class = type(initial)
+        self._listeners: list[Callable[[list[str]], None]] = []
+        self._override_path: Path = data_state_path(
+            Path(self._data.get("DATA_DIR", ROOT_DIR / "data")),
+            "config_override.json",
+        )
+        self._override_mtime: float = 0.0
+
+    @staticmethod
+    def _public_values(source: Config) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for f in dc_fields(source):
+            if not f.name.startswith("_"):
+                values[f.name] = getattr(source, f.name)
+        for name, value in vars(type(source)).items():
+            if name.startswith("_") or name in values:
+                continue
+            if isinstance(value, property) or callable(value):
+                continue
+            values[name] = getattr(source, name)
+        return values
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name in self._data:
+            return self._data[name]
+        class_value = getattr(self._config_class, name, None)
+        if class_value is not None and not isinstance(class_value, property) and not callable(class_value):
+            return class_value
+        prop = getattr(self._config_class, name, None)
+        if isinstance(prop, property):
+            return prop.fget(self)
+        raise AttributeError(f"Config has no field '{name}'")
+
+    @staticmethod
+    def _coerce_override_value(current: Any, new_value: Any) -> Any:
+        if isinstance(current, Path) and isinstance(new_value, str):
+            return Path(new_value)
+        return new_value
+
+    def update(self, overrides: dict[str, Any]) -> list[str]:
+        """Apply overrides and return the list of changed keys."""
+        changed: list[str] = []
+        for key, value in overrides.items():
+            if key.startswith("_"):
+                continue
+            if key not in self._data:
+                continue
+            coerced = self._coerce_override_value(self._data[key], value)
+            if self._data[key] != coerced:
+                self._data[key] = coerced
+                changed.append(key)
+        if changed:
+            self._notify(changed)
+        return changed
+
+    def on_change(self, listener: Callable[[list[str]], None]) -> None:
+        self._listeners.append(listener)
+
+    def _notify(self, changed: list[str]) -> None:
+        for fn in self._listeners:
+            try:
+                fn(changed)
+            except Exception:
+                pass
+
+    def reload_if_stale(self) -> list[str]:
+        """Reload `data/state/config_override.json` if its mtime changed."""
+        if not self._override_path.exists():
+            if self._override_mtime > 0:
+                self._override_mtime = 0.0
+                return self._revert_overrides()
+            return []
+        try:
+            stat_result = self._override_path.stat()
+        except OSError:
+            return []
+        current_mtime = stat_result.st_mtime
+        if current_mtime == self._override_mtime:
+            return []
+        self._override_mtime = current_mtime
+        if stat_result.st_size > 10240:
+            return []
+        try:
+            payload = json.loads(self._override_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if not isinstance(payload, dict):
+            return []
+        # config_override.json intentionally accepts only scalar-style overrides.
+        restart_only = {"ROOT_DIR", "DATA_DIR", "MEMORY_PATH", "LLAMA_SERVER_REASONING_BUDGET"}
+        safe_overrides = {
+            key: value
+            for key, value in payload.items()
+            if key not in restart_only
+            and not key.startswith("_")
+            and not isinstance(value, (dict, list))
+        }
+        return self.update(safe_overrides)
+
+    def _revert_overrides(self) -> list[str]:
+        """Revert overridden fields back to the current process defaults."""
+        defaults = Config()
+        default_values = self._public_values(defaults)
+        changed: list[str] = []
+        for name, default_value in default_values.items():
+            if name in self._data and self._data[name] != default_value:
+                self._data[name] = default_value
+                changed.append(name)
+        if changed:
+            self._notify(changed)
+        return changed
+
+
+CFG = LiveConfig(Config())
