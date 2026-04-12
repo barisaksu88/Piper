@@ -219,6 +219,9 @@ class _HarnessDataOverlay:
         object.__setattr__(CFG, "MEMORY_PATH", self.data_dir / "state" / "memory.jsonl")
         object.__setattr__(CFG, "INSTRUCTIONS_PATH", self.data_dir / "prompts" / "instructions.txt")
         object.__setattr__(CFG, "CODEX_AUTO_REPAIR_ENABLED", False)
+        # Ensure state/ exists — a fresh CI checkout won't have it and harness
+        # scripts that seed tasks.json / events.json will crash otherwise.
+        (self.data_dir / "state").mkdir(parents=True, exist_ok=True)
         self._reset_runtime_caches()
 
     def _clear_debug_files(self) -> None:

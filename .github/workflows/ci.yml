@@ -41,21 +41,4 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run isolated smoke tests
-        shell: bash
-        run: |
-          failed=0
-          # Run smoke tests that don't need a running LLM server or hardware
-          for test in scripts/*_smoke_test.py; do
-            echo "::group::$(basename "$test")"
-            if python "$test"; then
-              echo "PASS: $test"
-            else
-              echo "::error::FAIL: $test"
-              failed=$((failed + 1))
-            fi
-            echo "::endgroup::"
-          done
-          if [ "$failed" -gt 0 ]; then
-            echo "::error::$failed smoke test(s) failed"
-            exit 1
-          fi
+        run: python scripts/run_smoke_tests.py --skip-harness --fail-fast
