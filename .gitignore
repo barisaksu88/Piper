@@ -34,6 +34,9 @@ data/vector_store/
 # ── Benchmark artifacts ───────────────────────────────────────────────────────
 data/benchmarks/bench_pids.txt
 
+# ── Harness artifacts ─────────────────────────────────────────────────────────
+data/harness/results/enhanced_browser_demo/
+
 # ── User workspace (agent-generated files, not source) ────────────────────────
 data/workspace/
 

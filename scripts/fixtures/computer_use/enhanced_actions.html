@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Enhanced Actions Fixture</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.45;
+      margin: 0;
+      color: #1f2933;
+      background: #f5f7fb;
+    }
+
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 120px;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 1px solid #d8e1eb;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    .field {
+      display: block;
+      margin: 14px 0;
+    }
+
+    .field label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      max-width: 360px;
+      padding: 10px 12px;
+      border: 1px solid #9fb0c3;
+      border-radius: 10px;
+      font-size: 15px;
+      background: #ffffff;
+    }
+
+    iframe {
+      width: 100%;
+      min-height: 260px;
+      border: 1px solid #9fb0c3;
+      border-radius: 12px;
+      background: #ffffff;
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .status-pill {
+      background: #edf4ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .scroll-spacer {
+      height: 1400px;
+      background:
+        linear-gradient(180deg, rgba(191, 219, 254, 0.25), rgba(226, 232, 240, 0.15)),
+        repeating-linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.08) 32px, transparent 32px, transparent 64px);
+      border-radius: 18px;
+      border: 1px dashed #9fb0c3;
+      margin-top: 18px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1 id="headline">Enhanced Actions Fixture</h1>
+      <p id="intro">
+        This page is used to verify screenshot, scroll, key presses, dropdowns, checks, uploads, iframe traversal, and session recording.
+      </p>
+      <div class="status-grid">
+        <div class="status-pill" id="load-status">Load state: waiting</div>
+        <div class="status-pill" id="scroll-status">Scroll Y: 0</div>
+        <div class="status-pill" id="key-status">Last key: none</div>
+        <div class="status-pill" id="select-status">Selected option: none</div>
+        <div class="status-pill" id="check-status">Checkbox is not checked</div>
+        <div class="status-pill" id="upload-status">Uploaded file: none</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="field">
+        <label for="keyboard-target">Keyboard Target</label>
+        <input id="keyboard-target" type="text" value="" autocomplete="off" autofocus />
+      </div>
+
+      <div class="field">
+        <label for="demo-select">Demo Select</label>
+        <select id="demo-select" name="demo-select">
+          <option value="">Choose an option</option>
+          <option value="alpha">Alpha</option>
+          <option value="beta">Beta</option>
+          <option value="gamma">Gamma</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="demo-check">Demo Checkbox</label>
+        <input id="demo-check" type="checkbox" />
+      </div>
+
+      <div class="field">
+        <label for="demo-upload">Demo Upload</label>
+        <input id="demo-upload" type="file" />
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Embedded Content</h2>
+      <iframe id="demo-frame" name="demo-frame" src="iframe_panel.html" title="Demo iframe"></iframe>
+    </section>
+
+    <section class="card">
+      <h2>Scroll Zone</h2>
+      <p>
+        The large section below exists so the browser engine can verify scrolling and capture a longer screenshot.
+      </p>
+      <div class="scroll-spacer"></div>
+      <p id="scroll-anchor">Scroll anchor reached.</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const loadStatus = document.getElementById("load-status");
+      const scrollStatus = document.getElementById("scroll-status");
+      const keyStatus = document.getElementById("key-status");
+      const selectEl = document.getElementById("demo-select");
+      const selectStatus = document.getElementById("select-status");
+      const checkEl = document.getElementById("demo-check");
+      const checkStatus = document.getElementById("check-status");
+      const uploadEl = document.getElementById("demo-upload");
+      const uploadStatus = document.getElementById("upload-status");
+      const keyboardTarget = document.getElementById("keyboard-target");
+
+      function updateScroll() {
+        scrollStatus.textContent = "Scroll Y: " + Math.round(window.scrollY);
+      }
+
+      window.addEventListener("load", function () {
+        loadStatus.textContent = "Load state: ready";
+        updateScroll();
+      });
+
+      window.addEventListener("scroll", updateScroll, { passive: true });
+
+      keyboardTarget.addEventListener("keydown", function (event) {
+        keyStatus.textContent = "Last key: " + event.key;
+      });
+
+      selectEl.addEventListener("change", function () {
+        const value = selectEl.value || "none";
+        selectStatus.textContent = "Selected option: " + value;
+      });
+
+      checkEl.addEventListener("change", function () {
+        checkStatus.textContent = checkEl.checked ? "Checkbox is checked" : "Checkbox is not checked";
+      });
+
+      uploadEl.addEventListener("change", function () {
+        const file = uploadEl.files && uploadEl.files[0];
+        uploadStatus.textContent = file ? "Uploaded file: " + file.name : "Uploaded file: none";
+      });
+    }());
+  </script>
+</body>
+</html>
