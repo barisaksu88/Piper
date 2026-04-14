@@ -32,6 +32,15 @@ def new_stage_evidence(stage: dict[str, Any] | None = None) -> dict[str, Any]:
         "download_details": [],
         "field_values": {},
         "element_inventory": [],
+        "screenshots": [],
+        "key_presses": [],
+        "select_options": [],
+        "check_actions": [],
+        "uploads": [],
+        "context_id": "",
+        "iframes": [],
+        "iframe_extracts": [],
+        "recording_exports": [],
     }
 
 
@@ -125,6 +134,86 @@ def update_stage_evidence(evidence: dict[str, Any], tool_result: Any) -> dict[st
         if normalized and normalized not in inventory:
             inventory.append(normalized)
 
+    # --- New action evidence: screenshot, key_press, select_option, check, upload ---
+    if action == "screenshot":
+        screenshots = evidence.setdefault("screenshots", [])
+        saved_path = str(tool_result.get("saved_path") or "").strip()
+        if saved_path:
+            screenshots.append({
+                "saved_path": saved_path,
+                "image_size_bytes": int(tool_result.get("image_size_bytes") or 0),
+                "selector": str(tool_result.get("selector") or "").strip(),
+            })
+
+    if action == "key_press":
+        key_presses = evidence.setdefault("key_presses", [])
+        key_val = str(tool_result.get("key") or "").strip()
+        if key_val:
+            key_presses.append({"key": key_val})
+
+    if action == "select_option":
+        select_options = evidence.setdefault("select_options", [])
+        select_entry = {
+            "selector": str(tool_result.get("selector") or "").strip(),
+            "selected_value": str(tool_result.get("selected_value") or "").strip(),
+            "selected_label": str(tool_result.get("selected_label") or "").strip(),
+        }
+        if any(select_entry.values()):
+            select_options.append(select_entry)
+
+    if action in ("check", "uncheck"):
+        check_actions = evidence.setdefault("check_actions", [])
+        check_entry = {
+            "action": action,
+            "selector": str(tool_result.get("selector") or "").strip(),
+            "field_value": str(tool_result.get("field_value") or "").strip(),
+        }
+        check_actions.append(check_entry)
+
+    if action == "upload_file":
+        uploads = evidence.setdefault("uploads", [])
+        upload_entry = {
+            "selector": str(tool_result.get("selector") or "").strip(),
+            "uploaded_file": str(tool_result.get("uploaded_file") or "").strip(),
+            "uploaded_filename": str(tool_result.get("uploaded_filename") or "").strip(),
+        }
+        if any(upload_entry.values()):
+            uploads.append(upload_entry)
+
+    # --- Context isolation ---
+    if action == "new_context":
+        context_id = str(tool_result.get("context_id") or "").strip()
+        if context_id:
+            evidence["context_id"] = context_id
+
+    # --- Iframe traversal ---
+    if action == "list_iframes":
+        iframes = evidence.setdefault("iframes", [])
+        for iframe_info in tool_result.get("iframes") or []:
+            if isinstance(iframe_info, dict):
+                iframes.append(iframe_info)
+
+    if action == "extract_iframe_text":
+        iframe_extracts = evidence.setdefault("iframe_extracts", [])
+        iframe_extract_text = str(tool_result.get("extracted_text") or "").strip()
+        if iframe_extract_text:
+            iframe_extracts.append({
+                "iframe_url": str(tool_result.get("iframe_url") or "").strip(),
+                "iframe_name": str(tool_result.get("iframe_name") or "").strip(),
+                "text": iframe_extract_text,
+                "topic": str(tool_result.get("topic") or "").strip(),
+            })
+
+    # --- Session recording ---
+    if action == "export_recording":
+        recording_exports = evidence.setdefault("recording_exports", [])
+        recording_entry = {
+            "context_id": str(tool_result.get("context_id") or "").strip(),
+            "action_count": int(tool_result.get("action_count") or 0),
+            "saved_path": str(tool_result.get("saved_path") or "").strip(),
+        }
+        recording_exports.append(recording_entry)
+
     return evidence
 
 
@@ -147,6 +236,9 @@ def evaluate_stage(stage: dict[str, Any], evidence: dict[str, Any]) -> Verificat
     require_extract = bool(meta.get("require_extract"))
     require_form_fill = bool(meta.get("require_form_fill"))
     require_navigation = bool(meta.get("require_navigation"))
+    require_screenshot = bool(meta.get("require_screenshot"))
+    require_upload = bool(meta.get("require_upload"))
+    require_select = bool(meta.get("require_select"))
     report_title = bool(meta.get("report_title"))
     report_status_text = bool(meta.get("report_status_text"))
 
@@ -246,7 +338,46 @@ def evaluate_stage(stage: dict[str, Any], evidence: dict[str, Any]) -> Verificat
             else:
                 missing.append("extract the requested on-page information")
 
-    if not require_download and not require_extract and not require_form_fill and not require_navigation:
+    if require_screenshot:
+        screenshots = [item for item in (evidence.get("screenshots") or []) if isinstance(item, dict)]
+        if screenshots:
+            satisfied.append(f"captured screenshot ({len(screenshots)} total)")
+        else:
+            missing.append("capture a screenshot of the browser page")
+
+    if require_upload:
+        uploads = [item for item in (evidence.get("uploads") or []) if isinstance(item, dict)]
+        if uploads:
+            uploaded_names = ", ".join(str(item.get("uploaded_filename") or "?") for item in uploads)
+            satisfied.append(f"uploaded file(s): {uploaded_names}")
+        else:
+            missing.append("upload the requested file")
+
+    if require_select:
+        select_options = [item for item in (evidence.get("select_options") or []) if isinstance(item, dict)]
+        if select_options:
+            satisfied.append(f"selected dropdown option ({len(select_options)} selection(s))")
+        else:
+            missing.append("select the requested dropdown option")
+
+    require_iframe_extract = bool(meta.get("require_iframe_extract"))
+    require_context = bool(meta.get("require_context"))
+
+    if require_iframe_extract:
+        iframe_extracts = [item for item in (evidence.get("iframe_extracts") or []) if isinstance(item, dict)]
+        if iframe_extracts:
+            satisfied.append(f"extracted text from {len(iframe_extracts)} iframe(s)")
+        else:
+            missing.append("extract text from the requested iframe")
+
+    if require_context:
+        context_id = str(evidence.get("context_id") or "").strip()
+        if context_id:
+            satisfied.append(f"created isolated browser context {context_id}")
+        else:
+            missing.append("create an isolated browser context")
+
+    if not require_download and not require_extract and not require_form_fill and not require_navigation and not require_screenshot and not require_upload and not require_select and not require_iframe_extract and not require_context:
         current_url = str(evidence.get("current_url") or "").strip()
         if current_url:
             satisfied.append(f"opened browser page {current_url}")
@@ -256,7 +387,7 @@ def evaluate_stage(stage: dict[str, Any], evidence: dict[str, Any]) -> Verificat
     if not missing:
         return VerificationResult.verified(_build_summary(satisfied), checker_path="RULES")
 
-    if satisfied or extracts or downloads or field_values or inventory or evidence.get("current_url"):
+    if satisfied or extracts or downloads or field_values or inventory or evidence.get("current_url") or evidence.get("screenshots") or evidence.get("uploads") or evidence.get("select_options") or evidence.get("iframe_extracts") or evidence.get("context_id"):
         detail = "Partial browser progress: " + "; ".join(satisfied) if satisfied else "Partial browser progress recorded."
         return VerificationResult.partial(
             f"{detail} Missing: {', '.join(missing)}.",
@@ -305,6 +436,65 @@ def build_verified_payload(stage: dict[str, Any], evidence: dict[str, Any], veri
             }
             for item in inventory
             if str(item.get("selector") or "").strip() or str(item.get("text") or "").strip()
+        ],
+        "screenshots": [
+            {
+                "saved_path": str(item.get("saved_path") or "").strip(),
+                "image_size_bytes": int(item.get("image_size_bytes") or 0),
+            }
+            for item in (evidence.get("screenshots") or [])
+            if isinstance(item, dict) and str(item.get("saved_path") or "").strip()
+        ],
+        "key_presses": [
+            str(item.get("key") or "").strip()
+            for item in (evidence.get("key_presses") or [])
+            if isinstance(item, dict) and str(item.get("key") or "").strip()
+        ],
+        "select_options": [
+            {
+                "selector": str(item.get("selector") or "").strip(),
+                "selected_value": str(item.get("selected_value") or "").strip(),
+                "selected_label": str(item.get("selected_label") or "").strip(),
+            }
+            for item in (evidence.get("select_options") or [])
+            if isinstance(item, dict)
+        ],
+        "uploads": [
+            {
+                "selector": str(item.get("selector") or "").strip(),
+                "uploaded_filename": str(item.get("uploaded_filename") or "").strip(),
+            }
+            for item in (evidence.get("uploads") or [])
+            if isinstance(item, dict)
+        ],
+        "context_id": str(evidence.get("context_id") or "").strip(),
+        "iframes": [
+            {
+                "name": str(item.get("name") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "selector": str(item.get("selector") or "").strip(),
+            }
+            for item in (evidence.get("iframes") or [])
+            if isinstance(item, dict)
+        ],
+        "iframe_extracts": [
+            {
+                "iframe_url": str(item.get("iframe_url") or "").strip(),
+                "iframe_name": str(item.get("iframe_name") or "").strip(),
+                "text": str(item.get("text") or "").strip(),
+                "topic": str(item.get("topic") or "").strip(),
+            }
+            for item in (evidence.get("iframe_extracts") or [])
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ],
+        "recording_exports": [
+            {
+                "context_id": str(item.get("context_id") or "").strip(),
+                "action_count": int(item.get("action_count") or 0),
+                "saved_path": str(item.get("saved_path") or "").strip(),
+            }
+            for item in (evidence.get("recording_exports") or [])
+            if isinstance(item, dict)
         ],
     }
     if requested_topic:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
@@ -203,6 +204,9 @@ class _BrowserSessionState:
     page_text: str = ""
     allowed_domains: list[str] = field(default_factory=list)
     field_values: dict[str, str] = field(default_factory=dict)
+    action_log: list[dict[str, Any]] = field(default_factory=list)
+    context_id: str = ""
+    recording_enabled: bool = False
 
 
 class ComputerUseEngine:
@@ -219,11 +223,109 @@ class ComputerUseEngine:
         self._page = None
         self._playwright_owner_thread: threading.Thread | None = None
         self._playwright_lock = threading.RLock()
+        self._context_isolation_enabled: bool = False
+        self._active_context_id: str = ""
+
+    # ------------------------------------------------------------------
+    # Context isolation: create a fresh browser context per task/stage
+    # ------------------------------------------------------------------
+
+    def new_context(self, *, context_id: str = "", recording: bool = False) -> str:
+        """Create a fresh browser context for task isolation.
+
+        Closes any existing Playwright page/context, then creates a new
+        isolated browser context.  Returns the context_id assigned.
+        If *context_id* is empty a unique one is generated.
+
+        When *recording* is True the session's action_log is activated and
+        all subsequent browser actions are appended to it.
+        """
+        with self._playwright_lock:
+            # Close existing page/context but keep browser process alive
+            if self._page is not None:
+                try:
+                    self._page.close()
+                except Exception:
+                    pass
+                self._page = None
+            if self._context is not None:
+                try:
+                    self._context.close()
+                except Exception:
+                    pass
+                self._context = None
+
+            if not context_id:
+                import uuid
+                context_id = str(uuid.uuid4())[:8]
+
+            self._active_context_id = context_id
+            self._session.context_id = context_id
+            self._session.recording_enabled = recording
+            if recording:
+                self._session.action_log = []
+
+            # Reset session state for the new context
+            self._session.current_url = ""
+            self._session.current_title = ""
+            self._session.current_html = ""
+            self._session.page_text = ""
+            self._session.nodes = []
+            self._session.field_values = {}
+            self._session.allowed_domains = []
+
+            return context_id
+
+    def get_context_id(self) -> str:
+        """Return the current context ID (empty string if no context set)."""
+        return self._active_context_id
+
+    # ------------------------------------------------------------------
+    # Session recording: append actions & export
+    # ------------------------------------------------------------------
+
+    def _record_action(self, action: str, payload: dict[str, Any], result: dict[str, Any]) -> None:
+        """Append an action record to the session action_log if recording is enabled."""
+        if not self._session.recording_enabled:
+            return
+        import time
+        self._session.action_log.append({
+            "ts": int(time.time() * 1000),
+            "context_id": self._active_context_id,
+            "action": action,
+            "selector": str(payload.get("selector") or "").strip(),
+            "payload_keys": sorted(k for k in payload if k != "action" and payload.get(k) is not None),
+            "status": str(result.get("status") or ""),
+            "current_url": str(result.get("current_url") or ""),
+        })
+
+    def get_action_log(self) -> list[dict[str, Any]]:
+        """Return a copy of the accumulated action log."""
+        return list(self._session.action_log)
+
+    def export_recording(self) -> dict[str, Any]:
+        """Export the full session recording as a serialisable dict.
+
+        The recording contains the context_id, the full action log,
+        and a snapshot of the final field_values — enough to replay
+        or audit the session.
+        """
+        return {
+            "context_id": self._active_context_id,
+            "recording_enabled": self._session.recording_enabled,
+            "action_count": len(self._session.action_log),
+            "actions": list(self._session.action_log),
+            "field_values": dict(self._session.field_values),
+            "final_url": self._session.current_url,
+            "final_title": self._session.current_title,
+        }
 
     def shutdown(self) -> None:
         with self._playwright_lock:
             self._reset_playwright_session()
             self._session = _BrowserSessionState()
+            self._active_context_id = ""
+            self._context_isolation_enabled = False
 
     def suspend(self) -> None:
         with self._playwright_lock:
@@ -1444,13 +1546,14 @@ class ComputerUseEngine:
             )
 
         try:
-            if action not in {"goto_url", "open_page"} and not str(self._session.current_url or "").strip():
+            if action not in {"goto_url", "open_page", "new_context", "export_recording"} and not str(self._session.current_url or "").strip():
                 self._ensure_active_page_for_action(payload, cancel_token=cancel_token)
             handler = getattr(self, f"_handle_{action}", None)
             if handler is None:
                 raise BrowserOpError(f"Unsupported BROWSER_OP action: {action}")
             result = handler(payload, cancel_token=cancel_token)
             self._raise_if_cancelled(cancel_token)
+            self._record_action(action, payload, result)
             return result
         except BrowserScopeError as exc:
             return self._result(status="BLOCKED", action=action, summary=str(exc), backend=self._session.backend or "")
@@ -1960,3 +2063,469 @@ class ComputerUseEngine:
             result["download_label"] = download_label
         result["source_href"] = target
         return result
+
+    def _handle_screenshot(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        full_page = bool(payload.get("full_page", False))
+        save_path_val = str(payload.get("save_path") or "").strip()
+
+        page = self._ensure_playwright_page()
+
+        # Determine save path
+        if save_path_val:
+            save_path = self.workspace / save_path_val
+        else:
+            import time
+            ts = int(time.time() * 1000)
+            save_path = self.session_dir / f"screenshot_{ts}.png"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Take screenshot
+        if selector:
+            selector = self._normalize_selector_for_current_page(selector)
+            element = page.locator(selector).first
+            element.screenshot(path=str(save_path), timeout=10000)
+        else:
+            page.screenshot(path=str(save_path), full_page=full_page, timeout=15000)
+
+        # Read and encode
+        img_bytes = save_path.read_bytes()
+        img_b64 = base64.b64encode(img_bytes).decode("ascii")
+
+        return self._result(
+            status="EXECUTED",
+            action="screenshot",
+            summary=f"Captured screenshot to {save_path.name}",
+            backend="playwright",
+            saved_path=str(save_path),
+            image_base64=img_b64,
+            image_size_bytes=len(img_bytes),
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "screenshot", "saved_path": str(save_path)},
+        )
+
+    def _handle_scroll(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        direction = str(payload.get("direction") or "down").strip().lower()
+        amount = str(payload.get("amount") or "page").strip().lower()
+        selector = str(payload.get("selector") or "").strip()
+        pixels = int(payload.get("pixels") or 0)
+
+        page = self._ensure_playwright_page()
+
+        if selector:
+            # Scroll to element
+            selector = self._normalize_selector_for_current_page(selector)
+            page.locator(selector).first.scroll_into_view_if_needed(timeout=10000)
+            scroll_desc = f"scrolled to element {selector}"
+        elif amount == "page":
+            # Scroll by one viewport height
+            viewport_height = page.viewport_size.get("height", 800) if page.viewport_size else 800
+            delta = viewport_height if direction == "down" else -viewport_height
+            page.evaluate(f"window.scrollBy(0, {delta})")
+            scroll_desc = f"scrolled {direction} one page"
+        elif pixels > 0:
+            delta = pixels if direction == "down" else -pixels
+            page.evaluate(f"window.scrollBy(0, {delta})")
+            scroll_desc = f"scrolled {direction} by {pixels}px"
+        elif direction == "top":
+            page.evaluate("window.scrollTo(0, 0)")
+            scroll_desc = "scrolled to top"
+        elif direction == "bottom":
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            scroll_desc = "scrolled to bottom"
+        else:
+            # Default: scroll down one page
+            viewport_height = page.viewport_size.get("height", 800) if page.viewport_size else 800
+            page.evaluate(f"window.scrollBy(0, {viewport_height})")
+            scroll_desc = f"scrolled {direction} one page"
+
+        return self._result(
+            status="EXECUTED",
+            action="scroll",
+            summary=scroll_desc,
+            backend="playwright",
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "scroll", "direction": direction},
+        )
+
+    def _handle_key_press(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        key = str(payload.get("key") or "").strip()
+        if not key:
+            raise BrowserOpError("BROWSER_OP key_press requires a 'key' field (e.g. Enter, Tab, Escape, Control+a).")
+
+        page = self._ensure_playwright_page()
+        page.keyboard.press(key, timeout=10000)
+
+        return self._result(
+            status="EXECUTED",
+            action="key_press",
+            summary=f"Pressed key: {key}",
+            backend="playwright",
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            key=key,
+            verification={"kind": "key_press", "key": key},
+        )
+
+    def _handle_select_option(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        value = str(payload.get("value") or "").strip()
+        label = str(payload.get("label") or "").strip()
+        index = payload.get("index")
+
+        if not selector:
+            raise BrowserOpError("BROWSER_OP select_option requires a 'selector' for the <select> element.")
+        if not any((value, label, index is not None)):
+            raise BrowserOpError("BROWSER_OP select_option requires 'value', 'label', or 'index' to identify the option.")
+
+        selector = self._normalize_selector_for_current_page(selector)
+        page = self._ensure_playwright_page()
+        select_el = page.locator(selector).first
+
+        if value:
+            select_el.select_option(value=value, timeout=10000)
+            selected_desc = f"selected value '{value}'"
+        elif label:
+            select_el.select_option(label=label, timeout=10000)
+            selected_desc = f"selected label '{label}'"
+        else:
+            select_el.select_option(index=int(index), timeout=10000)
+            selected_desc = f"selected index {index}"
+
+        self._session.field_values[selector] = value or label or str(index)
+
+        return self._result(
+            status="EXECUTED",
+            action="select_option",
+            summary=f"Select dropdown {selector}: {selected_desc}",
+            backend="playwright",
+            selector=selector,
+            selected_value=value or "",
+            selected_label=label or "",
+            field_value=value or label or str(index or ""),
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "select_option", "selector": selector, "value": value, "label": label},
+        )
+
+    def _handle_check(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        if not selector:
+            raise BrowserOpError("BROWSER_OP check requires a 'selector' for the checkbox/radio element.")
+        selector = self._normalize_selector_for_current_page(selector)
+
+        page = self._ensure_playwright_page()
+        page.locator(selector).first.check(timeout=10000)
+        self._session.field_values[selector] = "checked"
+
+        return self._result(
+            status="EXECUTED",
+            action="check",
+            summary=f"Checked {selector}",
+            backend="playwright",
+            selector=selector,
+            field_value="checked",
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "check", "selector": selector},
+        )
+
+    def _handle_uncheck(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        if not selector:
+            raise BrowserOpError("BROWSER_OP uncheck requires a 'selector' for the checkbox element.")
+        selector = self._normalize_selector_for_current_page(selector)
+
+        page = self._ensure_playwright_page()
+        page.locator(selector).first.uncheck(timeout=10000)
+        self._session.field_values[selector] = "unchecked"
+
+        return self._result(
+            status="EXECUTED",
+            action="uncheck",
+            summary=f"Unchecked {selector}",
+            backend="playwright",
+            selector=selector,
+            field_value="unchecked",
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "uncheck", "selector": selector},
+        )
+
+    def _handle_upload_file(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        file_path = str(payload.get("file_path") or "").strip()
+        if not selector:
+            raise BrowserOpError("BROWSER_OP upload_file requires a 'selector' for the file input element.")
+        if not file_path:
+            raise BrowserOpError("BROWSER_OP upload_file requires a 'file_path' for the file to upload.")
+
+        # Resolve relative paths against workspace
+        upload_src = Path(file_path)
+        if not upload_src.is_absolute():
+            upload_src = self.workspace / file_path
+        if not upload_src.exists():
+            raise BrowserOpError(f"Upload file not found: {upload_src}")
+
+        selector = self._normalize_selector_for_current_page(selector)
+        page = self._ensure_playwright_page()
+        page.locator(selector).first.set_input_files(str(upload_src), timeout=10000)
+        self._session.field_values[selector] = str(upload_src.name)
+
+        return self._result(
+            status="EXECUTED",
+            action="upload_file",
+            summary=f"Uploaded {upload_src.name} to {selector}",
+            backend="playwright",
+            selector=selector,
+            uploaded_file=str(upload_src),
+            uploaded_filename=str(upload_src.name),
+            field_value=str(upload_src.name),
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "upload_file", "selector": selector, "filename": str(upload_src.name)},
+        )
+
+    def _handle_wait_for_load(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        state = str(payload.get("state") or "networkidle").strip().lower()
+        timeout_ms = int(payload.get("timeout") or 30000)
+
+        if state not in ("load", "domcontentloaded", "networkidle"):
+            raise BrowserOpError(
+                f"Invalid wait_for_load state '{state}'. Must be 'load', 'domcontentloaded', or 'networkidle'."
+            )
+
+        page = self._ensure_playwright_page()
+        page.wait_for_load_state(state, timeout=timeout_ms)
+
+        return self._result(
+            status="EXECUTED",
+            action="wait_for_load",
+            summary=f"Waited for load state: {state}",
+            backend="playwright",
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "wait_for_load", "state": state},
+        )
+
+    # ------------------------------------------------------------------
+    # Enhancement #8: Browser context isolation
+    # ------------------------------------------------------------------
+
+    def _handle_new_context(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        context_id = str(payload.get("context_id") or "").strip()
+        recording = bool(payload.get("recording", False))
+
+        assigned_id = self.new_context(context_id=context_id, recording=recording)
+
+        # If Playwright is running, create a new context within the existing browser
+        with self._playwright_lock:
+            if self._browser is not None and self._playwright is not None:
+                try:
+                    self._context = self._browser.new_context(accept_downloads=True)
+                    self._page = self._context.new_page()
+                    self._context_isolation_enabled = True
+                except Exception as exc:
+                    raise BrowserOpError(f"Failed to create isolated browser context: {exc}") from exc
+
+        return self._result(
+            status="EXECUTED",
+            action="new_context",
+            summary=f"Created fresh browser context: {assigned_id}",
+            backend="playwright" if self._browser else "none",
+            context_id=assigned_id,
+            recording_enabled=recording,
+            verification={"kind": "new_context", "context_id": assigned_id},
+        )
+
+    # ------------------------------------------------------------------
+    # Enhancement #9: Iframe traversal
+    # ------------------------------------------------------------------
+
+    def _handle_list_iframes(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        page = self._ensure_playwright_page()
+
+        # Discover all iframes on the current page
+        frame_infos: list[dict[str, str]] = []
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            frame_info: dict[str, str] = {
+                "name": str(frame.name or ""),
+                "url": str(frame.url or ""),
+            }
+            # Try to get a selector for the iframe element
+            try:
+                iframe_element = frame.frame_element()
+                if iframe_element is not None:
+                    element_id = iframe_element.get_attribute("id")
+                    element_name = iframe_element.get_attribute("name")
+                    element_src = iframe_element.get_attribute("src")
+                    if element_id:
+                        frame_info["selector"] = f"iframe#{element_id}"
+                    elif element_name:
+                        frame_info["selector"] = f"iframe[name='{self._escape_css_attr_value(element_name)}']"
+                    elif element_src:
+                        frame_info["selector"] = f"iframe[src='{self._escape_css_attr_value(element_src)}']"
+            except Exception:
+                pass
+            frame_infos.append(frame_info)
+
+        return self._result(
+            status="EXECUTED",
+            action="list_iframes",
+            summary=f"Found {len(frame_infos)} iframe(s) on the page",
+            backend="playwright",
+            iframes=frame_infos,
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={"kind": "list_iframes", "count": len(frame_infos)},
+        )
+
+    def _handle_extract_iframe_text(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        selector = str(payload.get("selector") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        url_match = str(payload.get("url") or "").strip()
+        topic = str(payload.get("topic") or "").strip()
+
+        if not any((selector, name, url_match)):
+            raise BrowserOpError(
+                "BROWSER_OP extract_iframe_text requires 'selector', 'name', or 'url' to identify the target iframe."
+            )
+
+        page = self._ensure_playwright_page()
+
+        # Find the target frame
+        target_frame = None
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            if name and str(frame.name or "") == name:
+                target_frame = frame
+                break
+            if url_match and url_match in str(frame.url or ""):
+                target_frame = frame
+                break
+            if selector:
+                try:
+                    iframe_element = frame.frame_element()
+                    if iframe_element is not None:
+                        element_id = str(iframe_element.get_attribute("id") or "")
+                        element_name_attr = str(iframe_element.get_attribute("name") or "")
+                        if selector == f"iframe#{element_id}" or selector == f"iframe[name='{element_name_attr}']":
+                            target_frame = frame
+                            break
+                except Exception:
+                    pass
+
+        if target_frame is None:
+            raise BrowserOpError(
+                f"Could not find iframe matching selector='{selector}', name='{name}', or url='{url_match}'."
+            )
+
+        # Extract text content from the iframe
+        try:
+            iframe_text = str(target_frame.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            ) or "").strip()
+        except Exception as exc:
+            raise BrowserOpError(f"Could not extract text from iframe: {exc}") from exc
+
+        iframe_title = ""
+        try:
+            iframe_title = str(target_frame.title() or "").strip()
+        except Exception:
+            pass
+
+        # If topic is specified, try to extract relevant section
+        extracted_text = iframe_text
+        if topic and iframe_text:
+            topic_result = self._extract_topic_text_from_blocks(
+                blocks=self._build_local_topic_blocks_from_text(iframe_text, iframe_title),
+                title=iframe_title,
+                topic=topic,
+            )
+            if topic_result:
+                extracted_text = str(topic_result.get("extracted_text") or iframe_text).strip()
+
+        return self._result(
+            status="EXECUTED",
+            action="extract_iframe_text",
+            summary=f"Extracted text from iframe (url: {target_frame.url[:80]})",
+            backend="playwright",
+            extracted_text=extracted_text,
+            iframe_url=str(target_frame.url or ""),
+            iframe_name=str(target_frame.name or ""),
+            iframe_title=iframe_title,
+            topic=topic,
+            current_url=str(page.url or ""),
+            title=str(page.title() or ""),
+            verification={
+                "kind": "extract_iframe_text",
+                "iframe_url": str(target_frame.url or ""),
+                "text_length": len(extracted_text),
+            },
+        )
+
+    def _build_local_topic_blocks_from_text(self, text: str, title: str) -> list[dict[str, Any]]:
+        """Build topic-rankable blocks from plain text (e.g. iframe content).
+
+        Splits the text into paragraph-like blocks and wraps them with
+        minimal metadata so that _extract_topic_text_from_blocks can rank
+        them against a requested topic.
+        """
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+        blocks: list[dict[str, Any]] = []
+        for idx, para in enumerate(paragraphs):
+            # Use first line as a pseudo-heading if it's short
+            first_line = para.split("\n", 1)[0].strip()
+            tag = "h2" if len(first_line) < 80 and idx == 0 else "p"
+            blocks.append({
+                "tag": tag,
+                "text": para,
+                "selector": f"iframe-block-{idx}",
+            })
+        return blocks
+
+    # ------------------------------------------------------------------
+    # Enhancement #10: Session recording export
+    # ------------------------------------------------------------------
+
+    def _handle_export_recording(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        save_path_val = str(payload.get("save_path") or "").strip()
+
+        recording = self.export_recording()
+
+        # Optionally persist to disk
+        saved_path = ""
+        if save_path_val:
+            save_path = self.workspace / save_path_val
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            save_path.write_text(json.dumps(recording, indent=2, ensure_ascii=False), encoding="utf-8")
+            saved_path = str(save_path)
+
+        return self._result(
+            status="EXECUTED",
+            action="export_recording",
+            summary=f"Exported recording with {recording['action_count']} action(s)",
+            backend="playwright" if self._browser else "none",
+            context_id=recording["context_id"],
+            action_count=recording["action_count"],
+            recording=recording,
+            saved_path=saved_path,
+            verification={"kind": "export_recording", "context_id": recording["context_id"], "action_count": recording["action_count"]},
+        )
