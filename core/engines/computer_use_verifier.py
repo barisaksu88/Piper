@@ -41,6 +41,7 @@ def new_stage_evidence(stage: dict[str, Any] | None = None) -> dict[str, Any]:
         "iframes": [],
         "iframe_extracts": [],
         "recording_exports": [],
+        "history_navigation": {},
     }
 
 
@@ -214,6 +215,12 @@ def update_stage_evidence(evidence: dict[str, Any], tool_result: Any) -> dict[st
         }
         recording_exports.append(recording_entry)
 
+    if action == "go_back":
+        evidence["history_navigation"] = {
+            "current_url_before_action": str(tool_result.get("current_url_before_action") or "").strip(),
+            "previous_url": str(tool_result.get("previous_url") or "").strip(),
+        }
+
     return evidence
 
 
@@ -239,6 +246,7 @@ def evaluate_stage(stage: dict[str, Any], evidence: dict[str, Any]) -> Verificat
     require_screenshot = bool(meta.get("require_screenshot"))
     require_upload = bool(meta.get("require_upload"))
     require_select = bool(meta.get("require_select"))
+    history_navigation = str(meta.get("history_navigation") or "").strip().lower()
     report_title = bool(meta.get("report_title"))
     report_status_text = bool(meta.get("report_status_text"))
 
@@ -320,11 +328,29 @@ def evaluate_stage(stage: dict[str, Any], evidence: dict[str, Any]) -> Verificat
         start_url = str(meta.get("start_url") or evidence.get("start_url") or "").strip()
         current_url = str(evidence.get("current_url") or "").strip()
         actions = {str(item).strip().lower() for item in (evidence.get("actions") or [])}
-        navigated = bool(current_url and current_url != start_url and "click" in actions)
-        if navigated:
-            satisfied.append(f"navigated to {current_url}")
+        if history_navigation == "back":
+            history_evidence = evidence.get("history_navigation") if isinstance(evidence.get("history_navigation"), dict) else {}
+            current_url_before_action = str((history_evidence or {}).get("current_url_before_action") or "").strip()
+            previous_url = str((history_evidence or {}).get("previous_url") or "").strip()
+            navigated = bool(
+                "go_back" in actions
+                and current_url
+                and current_url_before_action
+                and current_url != current_url_before_action
+                and (not previous_url or current_url == previous_url)
+            )
         else:
-            missing.append("complete the requested navigation step")
+            navigated = bool(current_url and current_url != start_url and "click" in actions)
+        if navigated:
+            if history_navigation == "back":
+                satisfied.append(f"went back to {current_url}")
+            else:
+                satisfied.append(f"navigated to {current_url}")
+        else:
+            if history_navigation == "back":
+                missing.append("go back to the previous browser page")
+            else:
+                missing.append("complete the requested navigation step")
 
     if require_extract:
         matched_extract = _match_required_extract(meta, extracts, inventory, title=str(evidence.get("title") or "").strip())
@@ -501,6 +527,10 @@ def build_verified_payload(stage: dict[str, Any], evidence: dict[str, Any], veri
         payload["requested_topic"] = requested_topic
     if download_hint:
         payload["download_hint"] = download_hint
+    if selector_hint:
+        payload["selector_hint"] = selector_hint
+    if history_navigation := str(meta.get("history_navigation") or "").strip().lower():
+        payload["history_navigation"] = history_navigation
     if meta.get("report_status_text"):
         status_selector = _status_selector_candidates(evidence.get("element_inventory") or [])
         for item in extracts:
@@ -552,6 +582,20 @@ def build_verified_payload(stage: dict[str, Any], evidence: dict[str, Any], veri
             if text_value:
                 payload["extracted_text"] = text_value
                 break
+    heading_text = _extract_heading_text(selector_hint=selector_hint, extracts=extracts)
+    if not heading_text and selector_hint.lower() == "h1":
+        candidate = str(payload.get("extracted_text") or "").strip()
+        normalized = " ".join(candidate.split())
+        if (
+            normalized
+            and len(normalized) <= 160
+            and normalized.count(".") <= 1
+            and normalized.count("?") == 0
+            and normalized.count("!") == 0
+        ):
+            heading_text = candidate
+    if heading_text:
+        payload["heading_text"] = heading_text
     if meta.get("report_title"):
         payload["reported_title"] = str(evidence.get("title") or "").strip()
     if downloads:
@@ -577,6 +621,28 @@ def build_verified_payload(stage: dict[str, Any], evidence: dict[str, Any], veri
             if path:
                 payload["saved_path"] = path
     return payload
+
+
+def _extract_heading_text(*, selector_hint: str, extracts: list[dict[str, Any]]) -> str:
+    preferred_selectors = {str(selector_hint or "").strip().lower(), "h1"}
+    preferred_selectors.discard("")
+    for item in extracts:
+        selector = str(item.get("selector") or "").strip().lower()
+        text_value = str(item.get("text") or "").strip()
+        topic_value = str(item.get("topic") or "").strip()
+        normalized = " ".join(text_value.split())
+        if not normalized or topic_value:
+            continue
+        if selector not in preferred_selectors and "h1" not in selector:
+            continue
+        if (
+            len(normalized) <= 160
+            and normalized.count(".") <= 1
+            and normalized.count("?") == 0
+            and normalized.count("!") == 0
+        ):
+            return text_value
+    return ""
 
 
 def _match_required_extract(meta: dict[str, Any], extracts: list[dict[str, Any]], inventory: list[dict[str, Any]], *, title: str) -> str:

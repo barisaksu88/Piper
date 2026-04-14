@@ -115,6 +115,8 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> PlaywrightExampleTwoTu
         and second_outcome == "VERIFIED"
         and "page heading" in second_stage_goal.lower()
         and "example domain" in second_lower
+        and "main heading" in second_lower
+        and "requested text" not in second_lower
         and "systems indicate" not in first_assistant_text.lower()
         and "systems indicate" not in second_lower
         and not thread_error_seen
