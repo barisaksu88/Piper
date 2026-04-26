@@ -43,5 +43,4 @@
 
 ## Engineering Support
 
-- The external Codex repair loop now exists, but it depends on a working local `codex` CLI being reachable from Piper's runtime environment.
-- The control plane and restart/resume path were validated mechanically plus with a simulated repair worker; the full live Windows GUI path with a real Codex patch job still needs live confirmation on the user's machine.
+

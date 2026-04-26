@@ -30,6 +30,12 @@ def main() -> int:
         outcome_block="",
         user_msg="Thank you",
     )
+    stray_think_tag = sanitize_persona_output(
+        "I'm checking that now.</think>",
+        route_decision={"decision": "SEARCH"},
+        outcome_block="",
+        user_msg="search the web for latest Python 3.13 news",
+    )
 
     success = (
         "upcoming tasks" not in event_wording.lower()
@@ -38,6 +44,7 @@ def main() -> int:
         and "car insurance renewal" not in casual_chat
         and "mechanical engineer" in casual_chat
         and "no further mutations were required" not in no_mutation_ack.lower()
+        and stray_think_tag == "I'm checking that now."
     )
     print(
         json.dumps(
@@ -46,6 +53,7 @@ def main() -> int:
                 "event_wording": event_wording,
                 "casual_chat": casual_chat,
                 "no_mutation_ack": no_mutation_ack,
+                "stray_think_tag": stray_think_tag,
             },
             indent=2,
             ensure_ascii=False,

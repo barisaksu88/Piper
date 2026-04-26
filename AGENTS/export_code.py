@@ -41,7 +41,6 @@ EXCLUDE_PATHS = {
 
     "memory/storage.py",
     "memory/stores.py",
-    "memory/codex_repair_store.py",
 
     "ui/layout.py",
     "ui/windowing.py",

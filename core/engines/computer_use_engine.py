@@ -203,6 +203,8 @@ class _BrowserSessionState:
     page_text: str = ""
     allowed_domains: list[str] = field(default_factory=list)
     field_values: dict[str, str] = field(default_factory=dict)
+    history: list[str] = field(default_factory=list)
+    history_index: int = -1
 
 
 class ComputerUseEngine:
@@ -276,6 +278,24 @@ class ComputerUseEngine:
         if host_l.startswith("www."):
             host_l = host_l[4:]
         return any(host_l == domain or host_l.endswith("." + domain) for domain in allowed_domains)
+
+    @staticmethod
+    def _domain_from_url(url: str) -> str:
+        parsed = urllib.parse.urlparse(str(url or "").strip())
+        host = str(parsed.hostname or "").strip().lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    def _history_navigation_scope_domains(self, *urls: str) -> list[str]:
+        merged: list[str] = list(self._normalize_domains(self._session.allowed_domains))
+        seen = set(merged)
+        for url in urls:
+            host = self._domain_from_url(url)
+            if host and host not in seen:
+                seen.add(host)
+                merged.append(host)
+        return merged
 
     def _enforce_scope(self, url: str, allowed_domains: list[str]) -> None:
         if not bool(getattr(CFG, "COMPUTER_USE_ENABLED", True)):
@@ -1178,6 +1198,14 @@ class ComputerUseEngine:
         suffix = Path(urllib.parse.urlparse(href).path).suffix.lower()
         return suffix in _LOCAL_HTML_PAGE_SUFFIXES
 
+    @staticmethod
+    def _looks_like_direct_download_url(target: str) -> bool:
+        href = str(target or "").strip()
+        if not href:
+            return False
+        suffix = Path(urllib.parse.urlparse(href).path).suffix.lower()
+        return bool(suffix) and suffix not in _LOCAL_HTML_PAGE_SUFFIXES
+
     def _find_local_download_node(self, *, selector: str = "", text: str = "") -> tuple[Optional[_Node], str]:
         selector = str(selector or "").strip()
         text = str(text or "").strip()
@@ -1213,7 +1241,54 @@ class ComputerUseEngine:
             return best[1], "download_text"
         return None, ""
 
-    def _load_local_page(self, url: str) -> None:
+    def _record_navigation(self, url: str, *, replace_current: bool = False) -> None:
+        normalized = str(url or "").strip()
+        if not normalized:
+            return
+        history = self._session.history
+        index = int(self._session.history_index)
+        if replace_current:
+            if 0 <= index < len(history):
+                history[index] = normalized
+                return
+            if history:
+                history[-1] = normalized
+                self._session.history_index = len(history) - 1
+                return
+            history.append(normalized)
+            self._session.history_index = 0
+            return
+        if 0 <= index < len(history) - 1:
+            del history[index + 1 :]
+        if history and history[-1] == normalized:
+            self._session.history_index = len(history) - 1
+            return
+        history.append(normalized)
+        self._session.history_index = len(history) - 1
+
+    def _commit_history_back(self, current_url: str) -> None:
+        normalized = str(current_url or "").strip()
+        if not normalized:
+            return
+        history = self._session.history
+        index = int(self._session.history_index)
+        if 0 <= index - 1 < len(history) and history[index - 1] == normalized:
+            self._session.history_index = index - 1
+            return
+        for candidate_index in range(min(index - 1, len(history) - 1), -1, -1):
+            if history[candidate_index] == normalized:
+                self._session.history_index = candidate_index
+                return
+        self._record_navigation(normalized)
+
+    def _previous_history_url(self) -> str:
+        index = int(self._session.history_index)
+        history = self._session.history
+        if index <= 0 or index >= len(history):
+            return ""
+        return str(history[index - 1] or "").strip()
+
+    def _load_local_page(self, url: str, *, record_history: bool = True) -> None:
         path = self._resolve_file_url(url)
         if not path.exists() or not path.is_file():
             raise BrowserOpError(f"Local browser page not found: {path}")
@@ -1225,6 +1300,8 @@ class ComputerUseEngine:
         self._session.current_html = html_text
         self._session.nodes = nodes
         self._session.page_text = page_text
+        if record_history:
+            self._record_navigation(self._session.current_url)
 
     def _reset_playwright_session(self) -> None:
         page = self._page
@@ -1359,7 +1436,14 @@ class ComputerUseEngine:
         path_name = Path(urllib.parse.urlparse(str(fallback_url or "").strip()).path).name
         return path_name or "download.bin"
 
-    def _download_via_http_fallback(self, *, page: Any, source_url: str, target_dir: Path) -> Path:
+    def _download_via_http_fallback(
+        self,
+        *,
+        page: Any,
+        source_url: str,
+        target_dir: Path,
+        filename: str = "",
+    ) -> Path:
         resolved_url = str(source_url or "").strip()
         if not resolved_url:
             raise BrowserOpError("The browser download fallback requires a concrete source URL.")
@@ -1381,8 +1465,8 @@ class ComputerUseEngine:
         except Exception as exc:
             raise BrowserOpError(f"Browser download fallback failed for {resolved_url}: {exc}") from exc
 
-        filename = self._filename_from_download_response(response, resolved_url)
-        save_path = target_dir / filename
+        resolved_filename = str(filename or "").strip() or self._filename_from_download_response(response, resolved_url)
+        save_path = target_dir / resolved_filename
         with save_path.open("wb") as fh:
             for chunk in response.iter_content(chunk_size=65536):
                 if chunk:
@@ -1515,6 +1599,7 @@ class ComputerUseEngine:
         self._session.allowed_domains = allowed_domains
         state = self._capture_playwright_state()
         self._enforce_scope(str(state.get("current_url") or url), self._session.allowed_domains)
+        self._record_navigation(str(state.get("current_url") or url).strip())
         return self._result(
             status="EXECUTED",
             action="goto_url",
@@ -1752,6 +1837,7 @@ class ComputerUseEngine:
             locator.click(timeout=5000)
             state = self._capture_playwright_state()
             self._enforce_scope(str(state.get("current_url") or ""), self._session.allowed_domains)
+            self._record_navigation(str(state.get("current_url") or "").strip())
             return self._result(
                 status="EXECUTED",
                 action="click",
@@ -1800,6 +1886,70 @@ class ComputerUseEngine:
                 "title": self._session.current_title,
             },
         )
+
+    def _handle_go_back(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
+        self._raise_if_cancelled(cancel_token)
+        del payload
+        current_url_before_action = str(self._session.current_url or "").strip()
+        previous_url = self._previous_history_url()
+        if not previous_url:
+            raise BrowserOpError("No previous browser page is available in the current session history.")
+
+        if self._session.backend == "playwright":
+            page = self._ensure_playwright_page()
+            history_scope_domains = self._history_navigation_scope_domains(current_url_before_action, previous_url)
+            try:
+                page.go_back(wait_until="domcontentloaded", timeout=10000)
+            except PlaywrightTimeoutError:
+                page.goto(previous_url, wait_until="domcontentloaded", timeout=15000)
+            state = self._capture_playwright_state()
+            current_url = str(state.get("current_url") or "").strip()
+            if not current_url:
+                raise BrowserOpError("Browser history navigation did not yield an active page.")
+            if current_url != previous_url:
+                page.goto(previous_url, wait_until="domcontentloaded", timeout=15000)
+                state = self._capture_playwright_state()
+                current_url = str(state.get("current_url") or "").strip()
+            self._enforce_scope(current_url, history_scope_domains)
+            self._session.allowed_domains = history_scope_domains
+            self._commit_history_back(current_url)
+            return self._result(
+                status="EXECUTED",
+                action="go_back",
+                summary=f"Went back to {current_url}.",
+                backend="playwright",
+                current_url_before_action=current_url_before_action,
+                previous_url=previous_url,
+                verification={
+                    "kind": "browser_state",
+                    "current_url": current_url,
+                    "title": state.get("title") or "",
+                },
+                **state,
+            )
+
+        if _FILE_SCHEME_RE.match(previous_url):
+            self._load_local_page(previous_url, record_history=False)
+            self._commit_history_back(self._session.current_url)
+            return self._result(
+                status="EXECUTED",
+                action="go_back",
+                summary=f"Went back to {self._session.current_url}.",
+                backend=self._session.backend,
+                current_url_before_action=current_url_before_action,
+                previous_url=previous_url,
+                current_url=self._session.current_url,
+                title=self._session.current_title,
+                text_preview=self._session.page_text[:400],
+                element_inventory=self._build_local_element_inventory(),
+                field_values=dict(self._session.field_values),
+                verification={
+                    "kind": "browser_state",
+                    "current_url": self._session.current_url,
+                    "title": self._session.current_title,
+                },
+            )
+        raise BrowserOpError("Local browser history navigation only supports file:// fixture pages in this environment.")
 
     def _handle_type_text(self, payload: dict[str, Any], *, cancel_token: CancellationToken | None = None) -> dict[str, Any]:
         self._raise_if_cancelled(cancel_token)
@@ -1867,6 +2017,8 @@ class ComputerUseEngine:
         self._raise_if_cancelled(cancel_token)
         selector = str(payload.get("selector") or "").strip()
         text_hint = str(payload.get("text") or "").strip()
+        payload_url = str(payload.get("url") or "").strip()
+        preferred_filename = str(payload.get("filename") or "").strip()
         download_dir = str(payload.get("download_dir") or "").strip()
         if not download_dir:
             raise BrowserOpError("BROWSER_OP download requires a workspace-relative 'download_dir'.")
@@ -1875,6 +2027,38 @@ class ComputerUseEngine:
 
         if self._session.backend == "playwright":
             page = self._ensure_playwright_page()
+            current_page_url = str(page.url or "").strip()
+            direct_source_url = ""
+            if payload_url:
+                payload_source_url = urllib.parse.urljoin(current_page_url, payload_url)
+                if self._looks_like_direct_download_url(payload_source_url):
+                    direct_source_url = payload_source_url
+            if not direct_source_url and selector.lower() in {"body", "html"} and self._looks_like_direct_download_url(current_page_url):
+                direct_source_url = current_page_url
+            if direct_source_url:
+                save_path = self._download_via_http_fallback(
+                    page=page,
+                    source_url=direct_source_url,
+                    target_dir=target_dir,
+                    filename=preferred_filename,
+                )
+                state = self._capture_playwright_state()
+                result = self._result(
+                    status="EXECUTED",
+                    action="download",
+                    summary=f"Downloaded the requested browser artifact to {save_path.relative_to(self.workspace).as_posix()}",
+                    backend="playwright",
+                    selector=selector,
+                    saved_path=save_path.relative_to(self.workspace).as_posix(),
+                    verification={
+                        "kind": "download",
+                        "saved_path": save_path.relative_to(self.workspace).as_posix(),
+                        "current_url": state.get("current_url") or "",
+                    },
+                    **state,
+                )
+                result["source_href"] = direct_source_url
+                return result
             selector_value = self._download_selector_for_playwright(payload)
             locator = page.locator(selector_value).first
             download_label = ""
@@ -1896,16 +2080,26 @@ class ComputerUseEngine:
                 with page.expect_download(timeout=10000) as download_info:
                     locator.click(timeout=5000)
                 download = download_info.value
-                suggested_name = str(download.suggested_filename or "download.bin").strip() or "download.bin"
+                suggested_name = preferred_filename or str(download.suggested_filename or "download.bin").strip() or "download.bin"
                 save_path = target_dir / suggested_name
                 download.save_as(str(save_path))
             except PlaywrightTimeoutError:
                 resolved_url = urllib.parse.urljoin(str(page.url or "").strip(), source_href) if source_href else ""
                 if not resolved_url:
+                    if payload_url:
+                        candidate_url = urllib.parse.urljoin(str(page.url or "").strip(), payload_url)
+                        if self._looks_like_direct_download_url(candidate_url):
+                            resolved_url = candidate_url
+                if not resolved_url:
                     raise
                 if self._looks_like_html_page_href(source_href, download_attr):
                     raise BrowserOpError("The targeted browser element points to a page, not a downloadable artifact.")
-                save_path = self._download_via_http_fallback(page=page, source_url=resolved_url, target_dir=target_dir)
+                save_path = self._download_via_http_fallback(
+                    page=page,
+                    source_url=resolved_url,
+                    target_dir=target_dir,
+                    filename=preferred_filename,
+                )
             state = self._capture_playwright_state()
             result = self._result(
                 status="EXECUTED",
@@ -1926,6 +2120,31 @@ class ComputerUseEngine:
             if source_href:
                 result["source_href"] = source_href
             return result
+
+        if payload_url:
+            source_url = urllib.parse.urljoin(self._session.current_url, payload_url)
+            if self._looks_like_direct_download_url(source_url):
+                source_path = self._resolve_file_url(source_url)
+                if not source_path.exists() or not source_path.is_file():
+                    raise BrowserOpError(f"Local download source not found: {source_path}")
+                save_name = preferred_filename or source_path.name
+                save_path = target_dir / save_name
+                shutil.copy2(source_path, save_path)
+                result = self._result(
+                    status="EXECUTED",
+                    action="download",
+                    summary=f"Downloaded the requested local browser artifact to {save_path.relative_to(self.workspace).as_posix()}",
+                    backend=self._session.backend,
+                    selector=selector,
+                    saved_path=save_path.relative_to(self.workspace).as_posix(),
+                    verification={
+                        "kind": "download",
+                        "saved_path": save_path.relative_to(self.workspace).as_posix(),
+                        "current_url": self._session.current_url,
+                    },
+                )
+                result["source_href"] = payload_url
+                return result
 
         node, strategy = self._find_local_download_node(selector=selector, text=text_hint)
         if node is None:

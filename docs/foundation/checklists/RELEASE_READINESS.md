@@ -79,11 +79,6 @@ Suggested automated coverage:
 - UI repair lifecycle still works.
 - Worker leaves clean status instead of hanging.
 
-Suggested automated coverage:
-- [codex_escalation_smoke_test.py](../../../scripts/codex_escalation_smoke_test.py)
-- [codex_repair_bridge_smoke_test.py](../../../scripts/codex_repair_bridge_smoke_test.py)
-- [codex_ui_repair_smoke_test.py](../../../scripts/codex_ui_repair_smoke_test.py)
-
 ## 8. Cleanliness
 
 - `python3 -m compileall` passes for touched modules.

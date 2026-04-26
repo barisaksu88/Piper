@@ -239,7 +239,6 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> DiagnosisSmokeReport:
         result = harness.send_text(DIAGNOSIS_TURN, timeout_s=timeout)
         ui_payloads = [str(event.get("payload") or "") for event in result.ui_events]
         verification_block_seen = any("verification is still missing" in payload.lower() for payload in ui_payloads)
-        escalated = any(str(event.get("kind") or "") == "codex_escalation" for event in result.ui_events)
         report = DiagnosisSmokeReport(
             ready=bool(boot.ready),
             success=bool(boot.ready) and _turn_passed(result.assistant_text, verification_block_seen, escalated, result.timed_out),

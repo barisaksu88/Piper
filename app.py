@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import warnings
 
 from config import CFG
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 logging.basicConfig(
     level=getattr(logging, CFG.LOG_LEVEL, logging.INFO),
@@ -10,14 +15,27 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+warnings.filterwarnings(
+    "ignore",
+    message=r".*unauthenticated requests to the HF Hub.*",
+)
+
+for logger_name, level in (
+    ("httpx", logging.WARNING),
+    ("httpcore", logging.WARNING),
+    ("huggingface_hub", logging.ERROR),
+    ("huggingface_hub.utils._http", logging.ERROR),
+    ("sentence_transformers", logging.WARNING),
+    ("transformers", logging.WARNING),
+):
+    logging.getLogger(logger_name).setLevel(level)
+
 import atexit
-import os
 import queue
 import sys
 from pathlib import Path
 
 from core.agent import AgentBrain
-from core.codex_bridge import probe_codex_support
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
 from core.operational_state_service import OperationalStateService
@@ -118,19 +136,11 @@ def build_controller() -> PiperController:
     )
     live_screen = LiveScreenSession(CFG.DATA_DIR)
 
-    def _probe_engineering_channel() -> str:
-        _, message = probe_codex_support(timeout_s=CFG.CODEX_BOOT_PROBE_TIMEOUT_S)
-        ui_queue.put(("status_widget_dashboard_activity", message))
-        return message
-
     boot_mgr = BootManager(
         ui_queue,
         background_boot_tasks=[
             ("Warming TTS engine...", tts.warm_up),
-            ("Checking engineering channel...", _probe_engineering_channel),
         ]
-        if CFG.CODEX_BOOT_PROBE_ENABLED
-        else [("Warming TTS engine...", tts.warm_up)],
     )
     img_gen = ImageGenerator(CFG.DATA_DIR)
 

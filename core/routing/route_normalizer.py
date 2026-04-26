@@ -9,6 +9,7 @@ from core.browser_route_utils import (
     build_browser_context_followup_route,
     build_explicit_browser_task_card as build_browser_task_card,
     extract_browser_url as extract_browser_url,
+    has_placeholder_browser_url as has_placeholder_browser_url,
     looks_like_explicit_browser_request as shared_looks_like_explicit_browser_request,
 )
 from core.contracts import RouteDecision, StageCard
@@ -390,6 +391,25 @@ def _registered_lookup_source_choice_followup(
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     return _normalize_lookup_source_choice_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_malformed_browser_url_clarification(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision, recent_history
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    if not has_placeholder_browser_url(text):
+        return None
+    if not re.search(r"(?i)\b(browser|page|site|website|click|open|visit|navigate|download|read|title|heading)\b", text):
+        return None
+    return _build_browser_url_clarification_card(
+        "The browser URL still contains a placeholder like '<fixture-port>'. Please give me the real URL or port first."
+    )
 
 
 @register_normalizer
@@ -915,6 +935,28 @@ def _normalize_explicit_browser_task(user_msg: str) -> RouteDecision | None:
     if not shared_looks_like_explicit_browser_request(text):
         return None
     return build_browser_task_card(text, url)
+
+
+def _build_browser_url_clarification_card(question: str) -> RouteDecision:
+    question_text = str(question or "").strip() or "What exact browser URL should I open?"
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": "Clarify the browser URL before acting.",
+            "context": [
+                "The latest browser request includes a malformed or placeholder URL.",
+                f"Preferred clarification question: {question_text}",
+            ],
+            "stages": [
+                {
+                    "stage_goal": f"Ask the user: {question_text}",
+                    "stage_type": "CHAT",
+                    "success_condition": "A concise browser-URL clarification question is ready for the user.",
+                    "allowed_tools": [],
+                }
+            ],
+        },
+    }
 
 
 def looks_like_explicit_browser_request(text: str) -> bool:

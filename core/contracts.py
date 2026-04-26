@@ -160,16 +160,6 @@ class RuntimeSignal(TypedDict, total=False):
     evidence_files: List[str]
 
 
-class EscalationDecision(TypedDict, total=False):
-    decision: Literal["monitor", "ask_codex"]
-    reason: str
-    summary: str
-    brief_path: str
-    manual: bool
-    signal_count: int
-    trigger_kind: str
-
-
 @dataclass(frozen=True)
 class StateMutationIntent:
     decision: Literal["none", "chat_correction", "complete_task", "complete_event", "inspect_event"] = "none"
@@ -349,6 +339,8 @@ class RuntimeContextPack:
     runtime_note: str = ""
     relevant_paths: List[str] = field(default_factory=list)
     reporter_just_ran: bool = False
+    search_failed: bool = False
+    search_error: str = ""
 
 
 @dataclass(frozen=True)

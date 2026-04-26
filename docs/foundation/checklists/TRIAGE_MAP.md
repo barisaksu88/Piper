@@ -144,22 +144,6 @@ Symptoms:
 - repair worker appears stuck
 - boot probe green but repair path dead
 
-Look first:
-- [engineering_support.py](../../../core/engineering_support.py)
-- [codex_bridge.py](../../../core/codex_bridge.py)
-- [codex_repair_worker.py](../../../scripts/codex_repair_worker.py)
-- [codex_repair_store.py](../../../memory/codex_repair_store.py)
-
-State/log files:
-- [codex_repair_status.json](../../../data/state/codex_repair_status.json)
-- [codex_repair_worker.log](../../../data/debug/codex_repair_worker.log)
-- [codex_escalations.jsonl](../../../data/debug/codex_escalations.jsonl)
-
-Relevant tests:
-- [codex_escalation_smoke_test.py](../../../scripts/codex_escalation_smoke_test.py)
-- [codex_repair_bridge_smoke_test.py](../../../scripts/codex_repair_bridge_smoke_test.py)
-- [codex_ui_repair_smoke_test.py](../../../scripts/codex_ui_repair_smoke_test.py)
-
 ## 9. Boot, Restart, or Server Lifecycle Is Wrong
 
 Symptoms:
@@ -177,7 +161,7 @@ Logs:
 - [llm_prompt_debug.txt](../../../data/debug/llm_prompt_debug.txt)
 
 Useful checks:
-- process sweep with `pgrep -af "llama-server|PiperHarness|codex_repair_worker"`
+- process sweep with `pgrep -af "llama-server|PiperHarness"`
 
 ## 10. If You Are Unsure Where To Start
 

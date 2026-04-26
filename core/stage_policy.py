@@ -20,6 +20,13 @@ _USER_INPUT_RE = re.compile(
     r"confirm the game|confirm the idea|confirm the concept"
     r")\b"
 )
+_CONTEXT_APPROVAL_STAGE_RE = re.compile(
+    r"\b("
+    r"propos\w*|plan|planning|recommend|suggest|approval|approve|"
+    r"execute|apply|organize|organise|reorgani[sz]\w*|move|rename|"
+    r"delete|remove|edit|modify|write|change"
+    r")\b"
+)
 
 
 def stage_type_name(stage: StageCard | dict) -> str:
@@ -39,8 +46,24 @@ def stage_goal_success_text(stage: StageCard | dict) -> str:
     ).strip().lower()
 
 
+def stage_text_with_context(stage: StageCard | dict) -> str:
+    return " ".join(
+        [
+            str((stage or {}).get("stage_goal", "") or ""),
+            str((stage or {}).get("success_condition", "") or ""),
+            " ".join(str(item) for item in ((stage or {}).get("context") or [])),
+        ]
+    ).strip().lower()
+
+
 def stage_requires_user_approval(stage: StageCard | dict) -> bool:
-    return bool(_APPROVAL_RE.search(stage_goal_success_text(stage)))
+    goal_success = stage_goal_success_text(stage)
+    if _APPROVAL_RE.search(goal_success):
+        return True
+    context_text = " ".join(str(item) for item in ((stage or {}).get("context") or [])).strip().lower()
+    if not context_text or not _APPROVAL_RE.search(context_text):
+        return False
+    return bool(_CONTEXT_APPROVAL_STAGE_RE.search(goal_success))
 
 
 def stage_requires_user_input(stage: StageCard | dict) -> bool:

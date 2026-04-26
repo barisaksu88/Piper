@@ -28,9 +28,11 @@ class ComputerUseEngineSmokeReport:
     type_ok: bool
     has_text_click_ok: bool
     click_ok: bool
+    go_back_ok: bool
     wait_ok: bool
     download_ok: bool
     navigation_download_ok: bool
+    direct_url_download_ok: bool
     scope_block_ok: bool
     downloaded_rel: str
     final_url: str
@@ -79,6 +81,7 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
         goto_start_again = _run_action(engine, {"action": "goto_url", "url": start_url})
         click_result = _run_action(engine, {"action": "click", "selector": "#next-link"})
         wait_result = _run_action(engine, {"action": "wait_for", "selector": "#destination"})
+        go_back_result = _run_action(engine, {"action": "go_back"})
         goto_download_page = _run_action(engine, {"action": "goto_url", "url": start_url})
         download_result = _run_action(
             engine,
@@ -98,6 +101,15 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
                 "download_dir": "browser_downloads_nav",
             },
         )
+        direct_url_download_result = _run_action(
+            engine,
+            {
+                "action": "download",
+                "url": "downloads/quarterly-report.pdf",
+                "download_dir": "browser_downloads_direct",
+                "filename": "quarterly-report.pdf",
+            },
+        )
         scope_block_result = _run_action(
             engine,
             {
@@ -111,6 +123,8 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
         downloaded_path = workspace / downloaded_rel if downloaded_rel else workspace / "missing"
         navigation_downloaded_rel = str(navigation_download_result.get("saved_path") or "")
         navigation_downloaded_path = workspace / navigation_downloaded_rel if navigation_downloaded_rel else workspace / "missing"
+        direct_downloaded_rel = str(direct_url_download_result.get("saved_path") or "")
+        direct_downloaded_path = workspace / direct_downloaded_rel if direct_downloaded_rel else workspace / "missing"
 
         title_ok = (
             goto_result.get("status") == "EXECUTED"
@@ -157,6 +171,11 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
             and str(click_result.get("title") or "") == "Browser Fixture Next"
             and str(click_result.get("current_url") or "").endswith("/next.html")
         )
+        go_back_ok = (
+            go_back_result.get("status") == "EXECUTED"
+            and str(go_back_result.get("title") or "") == "Browser Fixture Home"
+            and str(go_back_result.get("current_url") or "").endswith("/index.html")
+        )
         wait_ok = wait_result.get("status") == "EXECUTED"
         download_ok = (
             goto_download_page.get("status") == "EXECUTED"
@@ -173,6 +192,12 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
             and navigation_downloaded_path.exists()
             and navigation_downloaded_path.read_text(encoding="utf-8").strip() == "fixture quarterly report pdf"
         )
+        direct_url_download_ok = (
+            direct_url_download_result.get("status") == "EXECUTED"
+            and direct_downloaded_rel == "browser_downloads_direct/quarterly-report.pdf"
+            and direct_downloaded_path.exists()
+            and direct_downloaded_path.read_text(encoding="utf-8").strip() == "fixture quarterly report pdf"
+        )
         scope_block_ok = (
             scope_block_result.get("status") == "BLOCKED"
             and "outside the allowed browser scope" in str(scope_block_result.get("summary") or "").lower()
@@ -188,9 +213,11 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
                 type_ok,
                 has_text_click_ok,
                 click_ok,
+                go_back_ok,
                 wait_ok,
                 download_ok,
                 navigation_download_ok,
+                direct_url_download_ok,
                 scope_block_ok,
             )
         )
@@ -206,9 +233,11 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
             type_ok=bool(type_ok),
             has_text_click_ok=bool(has_text_click_ok),
             click_ok=bool(click_ok),
+            go_back_ok=bool(go_back_ok),
             wait_ok=bool(wait_ok),
             download_ok=bool(download_ok),
             navigation_download_ok=bool(navigation_download_ok),
+            direct_url_download_ok=bool(direct_url_download_ok),
             scope_block_ok=bool(scope_block_ok),
             downloaded_rel=downloaded_rel,
             final_url=str(click_result.get("current_url") or ""),
@@ -239,9 +268,11 @@ def main() -> int:
         print(f"TYPE_OK: {report.type_ok}")
         print(f"HAS_TEXT_CLICK_OK: {report.has_text_click_ok}")
         print(f"CLICK_OK: {report.click_ok}")
+        print(f"GO_BACK_OK: {report.go_back_ok}")
         print(f"WAIT_OK: {report.wait_ok}")
         print(f"DOWNLOAD_OK: {report.download_ok}")
         print(f"NAVIGATION_DOWNLOAD_OK: {report.navigation_download_ok}")
+        print(f"DIRECT_URL_DOWNLOAD_OK: {report.direct_url_download_ok}")
         print(f"SCOPE_BLOCK_OK: {report.scope_block_ok}")
         print(f"DOWNLOADED_REL: {report.downloaded_rel}")
         print(f"FINAL_URL: {report.final_url}")

@@ -6,12 +6,16 @@ from typing import Dict, Iterable, List, Optional
 
 from core.prompt_builder import PromptBuilder
 from core.scratchpad_formatter import ScratchpadFormatter
+from core.search_contracts import (
+    SEARCH_FAILURE_PREFIX as _BACKGROUND_SEARCH_FAILED_PREFIX,
+    SEARCH_FAILURE_REPORTER_INSTRUCTION as _SEARCH_FAILURE_REPORTER_INSTRUCTION,
+    SEARCH_REPORTER_INSTRUCTION as _SEARCH_REPORTER_INSTRUCTION,
+    SEARCH_RESULT_PREFIX as _BACKGROUND_SEARCH_COMPLETE_PREFIX,
+)
 from core.turn_explanation import LAST_TURN_EXPLANATION_PREFIX
 
 _SEARCH_SUMMARY_PREFIX = "[SEARCH SUMMARY FOR "
 _SEARCH_REPORT_CONSUMED_PREFIX = "[SEARCH REPORT CONSUMED FOR "
-_BACKGROUND_SEARCH_COMPLETE_PREFIX = "Background search complete for '"
-_SEARCH_REPORTER_INSTRUCTION = "The web search is complete. Summarize the findings for the user now."
 _PROACTIVE_TRIGGER_PREFIX = "[PROACTIVE_TRIGGER]"
 _PROACTIVE_TRIGGER_CONSUMED_PREFIX = "[PROACTIVE_TRIGGER CONSUMED]"
 
@@ -34,7 +38,11 @@ def _clean_for_model(messages: Iterable[Dict[str, str]]) -> List[Dict[str, str]]
             continue
         if content.startswith(_BACKGROUND_SEARCH_COMPLETE_PREFIX):
             continue
+        if content.startswith(_BACKGROUND_SEARCH_FAILED_PREFIX):
+            continue
         if content == _SEARCH_REPORTER_INSTRUCTION:
+            continue
+        if content == _SEARCH_FAILURE_REPORTER_INSTRUCTION:
             continue
         if content.startswith(_PROACTIVE_TRIGGER_PREFIX):
             continue

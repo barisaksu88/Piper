@@ -22,6 +22,7 @@ class CommandResult:
     vision_path: Optional[str] = None
     vision_prompt: Optional[str] = None
     support_note: Optional[str] = None
+    graph_action: Optional[str] = None
 
 
 _VISION_CMD_RE = re.compile(
@@ -158,10 +159,21 @@ def handle_command(user_text: str, *, style_mgr: StyleManager) -> CommandResult:
             vision_prompt=question,
         )
 
-    if low == "/codex":
-        return CommandResult(True, action="codex_support", support_note="")
+    if low in {"/graph", "/langgraph"}:
+        return CommandResult(True, action="langgraph_recovery", graph_action="status")
 
-    if low.startswith("/codex "):
-        return CommandResult(True, action="codex_support", support_note=txt.split(maxsplit=1)[1].strip())
+    if low.startswith("/graph ") or low.startswith("/langgraph "):
+        parts = txt.split(maxsplit=1)
+        subcommand = parts[1].strip().lower() if len(parts) > 1 else ""
+        if subcommand in {"status", "show", "inspect"}:
+            return CommandResult(True, action="langgraph_recovery", graph_action="status")
+        if subcommand in {"resume", "recover", "continue"}:
+            return CommandResult(True, action="langgraph_recovery", graph_action="resume")
+        if subcommand in {"clear", "discard", "forget"}:
+            return CommandResult(True, action="langgraph_recovery", graph_action="clear")
+        return CommandResult(
+            True,
+            ui_message="[UI] Usage: /graph status | /graph resume | /graph clear",
+        )
 
     return CommandResult(False)

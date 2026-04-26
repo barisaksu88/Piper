@@ -96,23 +96,6 @@ def pump_ui_queue(controller) -> None:
             controller.log_agent_monitor(str(payload))
             controller.maybe_speak_ui_event(kind, payload)
             continue
-        if kind == "codex_escalation":
-            if isinstance(payload, dict):
-                controller.latest_codex_escalation = payload
-                controller.latest_codex_brief_path = str(payload.get("brief_path") or "").strip()
-                controller.latest_codex_summary = str(payload.get("summary") or "").strip()
-                summary = controller.latest_codex_summary or "Codex support brief prepared."
-                location = controller.latest_codex_brief_path
-                line = f"[ENGINEERING SUPPORT] {summary}"
-                if location:
-                    line += f" ({location})"
-                controller.log_agent_monitor(line)
-                if bool(payload.get("manual")):
-                    controller.chat_append("system", f"[UI] Codex support brief prepared: {location or 'data/debug/codex_escalations.jsonl'}")
-                controller.queue_codex_repair(payload)
-                controller.maybe_speak_ui_event(kind, payload)
-            continue
-
         if kind == "status":
             controller.set_status(str(payload))
             controller.maybe_speak_ui_event(kind, payload)

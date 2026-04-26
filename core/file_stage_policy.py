@@ -33,6 +33,14 @@ class FileStagePolicy:
     )
     _QUOTED_VALUE_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
     _PATHISH_TOKEN_RE = re.compile(r"(?:[a-z0-9_.-]+[/\\])+[a-z0-9_.-]+|[a-z0-9_.-]+\.[a-z0-9]{1,8}", re.IGNORECASE)
+    _DECLARED_SCOPE_LABEL_RE = re.compile(
+        r"(?im)\b(?:target|requested|source|scope|root)\s+"
+        r"(?:directory|folder|root|path)\s*:\s*(?P<path>[^\n;,]+)"
+    )
+    _DECLARED_SCOPE_PHRASE_RE = re.compile(
+        r"(?i)\b(?:within|inside|under|in)\s+"
+        r"(?P<path>(?:data/workspace|\.?/workspace|workspace|[A-Za-z]:[\\/]|\.?[\\/])?[\w./\\-]+(?:[/\\][\w./\\-]+)+)"
+    )
     _NEGATED_MUTATION_RE = re.compile(
         r"\b(?:"
         r"without\s+(?:modif(?:y|ying)|edit(?:ing)?|chang(?:e|ing)|rewrit(?:e|ing)|updat(?:e|ing)|touch(?:ing)?|mutat(?:e|ing))"
@@ -200,28 +208,39 @@ class FileStagePolicy:
             return False
         return bool(
             re.search(
-                r"\b(propose|proposal|plan|planning|suggest|recommend|design|present|approval|approve|confirmation|confirm)\b",
+                r"\b(propos\w*|proposal|plan|planning|suggest|recommend|design|present|approval|approve|confirmation|confirm)\b",
                 text,
             )
         )
 
     @staticmethod
     def stage_requires_user_approval(stage: StageCard) -> bool:
-        text = " ".join(
+        goal_success_text = " ".join(
             [
                 str(stage.get("stage_goal", "")),
                 str(stage.get("success_condition", "")),
             ]
         ).lower()
-        text = FileStagePolicy._QUOTED_VALUE_RE.sub(" ", text)
+        text = FileStagePolicy._QUOTED_VALUE_RE.sub(" ", goal_success_text)
         text = FileStagePolicy._PATHISH_TOKEN_RE.sub(" ", text)
         text = text.replace("_", " ")
         text = " ".join(text.split())
         if not text:
             return False
+        if re.search(
+            r"\b(user confirmation|user approval|for approval|await approval|ask for approval|ask for confirmation|present .* for approval|present .* for confirmation|confirm before executing|approval before executing)\b",
+            text,
+        ):
+            return True
+        context_text = " ".join(str(item) for item in (stage.get("context") or [])).lower()
+        if not re.search(
+            r"\b(user confirmation|user approval|for approval|await approval|ask for approval|ask for confirmation|present .* for approval|present .* for confirmation|confirm before executing|approval before executing)\b",
+            context_text,
+        ):
+            return False
         return bool(
             re.search(
-                r"\b(user confirmation|user approval|for approval|await approval|ask for approval|ask for confirmation|present .* for approval|present .* for confirmation|confirm before executing|approval before executing)\b",
+                r"\b(propos\w*|proposal|plan|planning|suggest|recommend|design|present|approval|approve|confirmation|confirm|execute|apply|organize|organise|reorgani[sz]\w*|move|rename|delete|remove|edit|modify|write|change)\b",
                 text,
             )
         )
@@ -525,12 +544,47 @@ class FileStagePolicy:
         return normalized
 
     @classmethod
+    def stage_declared_scope_targets(cls, stage: StageCard) -> list[str]:
+        raw_text = "\n".join(
+            [
+                str(stage.get("stage_goal", "")),
+                str(stage.get("success_condition", "")),
+                *[str(item) for item in (stage.get("context") or [])],
+            ]
+        )
+        if not raw_text:
+            return []
+
+        candidates: list[str] = []
+        for pattern in (cls._DECLARED_SCOPE_LABEL_RE, cls._DECLARED_SCOPE_PHRASE_RE):
+            for match in pattern.finditer(raw_text):
+                raw_candidate = str(match.group("path") or "").strip()
+                raw_candidate = re.split(
+                    r"\s+\b(?:to|for|before|after|and|with|without|until)\b",
+                    raw_candidate,
+                    maxsplit=1,
+                    flags=re.IGNORECASE,
+                )[0]
+                raw_candidate = raw_candidate.rstrip("`'\".,:;!?)]}")
+                normalized = cls._normalize_stage_path_target(raw_candidate)
+                if not normalized:
+                    continue
+                if Path(normalized).suffix and "/" not in normalized:
+                    continue
+                if normalized not in candidates:
+                    candidates.append(normalized)
+        return candidates
+
+    @classmethod
     def stage_scope_root(cls, stage: StageCard) -> str:
-        if not (cls.stage_is_extension_file_reorg(stage) or cls.stage_is_broad_file_reorg(stage)):
-            return ""
         declared = cls._normalize_stage_path_target(stage.get("declared_scope_root"))
         if declared:
             return declared
+        declared_targets = cls.stage_declared_scope_targets(stage)
+        if declared_targets:
+            return declared_targets[0]
+        if not (cls.stage_is_extension_file_reorg(stage) or cls.stage_is_broad_file_reorg(stage)):
+            return ""
         candidates: list[str] = []
         for raw in stage.get("active_targets") or []:
             normalized = cls._normalize_stage_path_target(raw)
@@ -625,6 +679,28 @@ class FileStagePolicy:
     @classmethod
     def stage_target_terms(cls, stage: StageCard) -> list[str]:
         return sorted(set(cls.stage_named_file_targets(stage)) | set(cls.stage_lookup_terms(stage)))
+
+    @classmethod
+    def stage_missing_target_terms(cls, stage: StageCard) -> list[str]:
+        terms: set[str] = {
+            str(term).strip().lower()
+            for term in cls.stage_target_terms(stage)
+            if str(term).strip()
+        }
+        scope_targets = [cls.stage_scope_root(stage), *cls.stage_declared_scope_targets(stage)]
+        for raw_target in scope_targets:
+            normalized = cls._normalize_stage_path_target(raw_target)
+            if normalized and normalized != ".":
+                terms.add(normalized.lower())
+
+        expanded = set(terms)
+        for term in terms:
+            path = Path(term)
+            if path.name:
+                expanded.add(path.name.lower())
+            if path.stem:
+                expanded.add(path.stem.lower())
+        return sorted(expanded)
 
     @classmethod
     def stage_replacement_pair(cls, stage: StageCard) -> tuple[str, str] | None:

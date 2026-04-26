@@ -140,8 +140,15 @@ class ContextPackRenderer:
         if pack.reporter_just_ran:
             if pack.search_query:
                 lines.append(f"Search query: {pack.search_query}")
-            lines.append("Execution status: SEARCH COMPLETED")
-            lines.append("Runtime note: Search summary was prepared for the user.")
+            if pack.search_failed:
+                lines.append("Execution status: SEARCH FAILED")
+                note = "Search failed before usable web results were retrieved."
+                if pack.search_error:
+                    note += f" Error: {pack.search_error[:500]}"
+                lines.append(f"Runtime note: {note}")
+            else:
+                lines.append("Execution status: SEARCH COMPLETED")
+                lines.append("Runtime note: Search summary was prepared for the user.")
         else:
             if pack.task_goal:
                 lines.append(f"Task goal: {pack.task_goal}")
@@ -165,7 +172,6 @@ class TailBlockContext:
     document_focus_active: bool
     reporter_just_ran: bool
     skill: Dict[str, Any]
-    codex_escalation: Dict[str, Any]
 
 
 TailBlockBuilder = Callable[[TailBlockContext], str]
@@ -375,6 +381,8 @@ class ContextPackEngine:
             runtime_note="" if reporter_just_ran else SummaryEngine.build_runtime_note(getattr(orc, "scratchpad", []) or []),
             relevant_paths=self._collect_runtime_context_paths(orc),
             reporter_just_ran=bool(reporter_just_ran),
+            search_failed=bool(getattr(orc, "latest_search_failed", False)) if reporter_just_ran else False,
+            search_error=str(getattr(orc, "latest_search_error", "") or "") if reporter_just_ran else "",
         )
 
     def render_runtime_context_message(self, pack: RuntimeContextPack) -> str:
@@ -473,13 +481,11 @@ class ContextPackEngine:
         document_focus_active: bool = False,
         reporter_just_ran: bool = False,
         active_skill: Dict[str, Any] | None = None,
-        latest_codex_escalation: Dict[str, Any] | None = None,
         persona_runtime: PersonaRuntimePack | None = None,
     ) -> PersonaDirectivePack:
         runtime = persona_runtime or PersonaRuntimePack()
         route = dict(route_decision or {})
         skill = dict(active_skill or {})
-        codex_escalation = dict(latest_codex_escalation or {})
         tail_context = TailBlockContext(
             route=route,
             runtime=runtime,
@@ -487,7 +493,6 @@ class ContextPackEngine:
             document_focus_active=bool(document_focus_active),
             reporter_just_ran=bool(reporter_just_ran),
             skill=skill,
-            codex_escalation=codex_escalation,
         )
         tail_system_blocks: list[str] = []
         for builder in _TAIL_BLOCK_REGISTRY:
@@ -699,11 +704,11 @@ def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
         return ""
     return (
         "[SEARCH_REPORT_RULE]\n"
-        "This turn is the final user-facing summary of a search that already completed.\n"
+        "This turn is the final user-facing summary of a search attempt that already finished.\n"
         "The user already received an initial response while the search was running.\n"
-        "Use the completed search summary to extend, refine, or correct that earlier response.\n"
+        "Use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
         "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
-        "Answer directly from the completed search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this completed search."
+        "Answer directly from the search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
     )
 
 
@@ -726,20 +731,6 @@ def _tail_block_active_skill(ctx: TailBlockContext) -> str:
 @register_tail_block
 def _tail_block_verification_result(ctx: TailBlockContext) -> str:
     return ContextPackEngine._render_verification_result_block(ctx.runtime)
-
-
-@register_tail_block
-def _tail_block_engineering_support(ctx: TailBlockContext) -> str:
-    if not ctx.codex_escalation or not ctx.runtime.outcome_failed:
-        return ""
-    return (
-        "[ENGINEERING_SUPPORT_RULE]\n"
-        "This task prepared an engineering support brief because the runtime detected a real execution issue.\n"
-        "Be honest that engineering support has been prepared.\n"
-        "Do not claim the issue is already fixed.\n"
-        f"Escalation summary: {str(ctx.codex_escalation.get('summary') or '').strip()}\n"
-        f"Escalation log: {str(ctx.codex_escalation.get('brief_path') or '').strip()}"
-    )
 
 
 @register_tail_block
@@ -818,6 +809,20 @@ def _tail_block_failed_outcome_no_verification(ctx: TailBlockContext) -> str:
         "Do not claim any file was moved, copied, renamed, created, or deleted.\n"
         "Only report what FILE_CHECKER VERIFIED evidence explicitly confirms.\n"
         "Use LAST_LOG as the sole authoritative cause of the failure — do not invent a reason."
+    )
+
+
+@register_tail_block
+def _tail_block_workspace_boundary(ctx: TailBlockContext) -> str:
+    if not ctx.runtime.needs_file_work_report_rule:
+        return ""
+    return (
+        "[WORKSPACE_BOUNDARY_RULE]\n"
+        "FILE_WORK tools are restricted to the workspace folder.\n"
+        "If a file operation failed because the path is outside the workspace, "
+        "do not invent file contents, line numbers, or code snippets.\n"
+        "Do not offer to create a replacement file in a different location.\n"
+        "State honestly that you cannot access files outside the workspace."
     )
 
 

@@ -37,7 +37,14 @@ pypdf                # PDF text extraction (pure Python, lightweight)
 PyMuPDF              # PDF rendering / complex docs (import: fitz)
 
 # ── Search ───────────────────────────────────────────────────────────────────
-duckduckgo-search    # Web search backend
+ddgs                  # Primary DuckDuckGo search backend
+duckduckgo-search     # Backward-compatible fallback for existing local envs
+
+# ── Graph orchestration (LangGraph migration scaffold) ───────────────────────
+langgraph
+langgraph-checkpoint-sqlite
+langgraph-checkpoint-postgres
+psycopg[binary,pool]  # Required when enabling PostgresSaver in production
 
 # ── Computer use (browser automation) ───────────────────────────────────────
 playwright           # Browser control (ComputerUseEngine WIP)

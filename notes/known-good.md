@@ -79,8 +79,7 @@
 - The UI now includes:
   - a `Code` tab beside `Visual Cortex` for the latest code artefact captured from tool evidence
   - a `Documents` tab between `Status` and `Monitor` for ingested document previews
-- `/codex` now writes a manual engineering-support snapshot to `data/debug/codex_escalations.jsonl`.
-- Automatic engineering-support briefs are also written there when Piper detects repeated verification deadlocks, planner loops, no-effect mutating file steps, or hard runtime errors.
+
 
 ## Task/Event Semantics
 
@@ -190,13 +189,6 @@
 - Command:
   - `.venv\\Scripts\\python scripts\\code_session_smoke_test.py --json`
 - It verifies prompt-without-newline output, stdin delivery, clean exit, and silent rerun without stale output from the superseded process.
-- `Codex Escalation Smoke` is the named regression for engineering-support sensors and brief generation.
-- Command:
-  - `.venv\\Scripts\\python scripts\\codex_escalation_smoke_test.py`
-- It verifies:
-  - automatic escalation after repeated verification-block signals
-  - manual snapshot generation
-  - `/codex <note>` command parsing
 - UI panes now use shared bottom-follow autoscroll for dynamic text:
   - chat transcript
   - boot log
@@ -260,12 +252,7 @@
     - `data/benchmarks/results/model_compare_event_followup_q8_vs_q9.json`
     - `data/benchmarks/results/file_chaos_q8_assessment.json`
     - `data/benchmarks/results/file_chaos_q9_assessment.json`
-- Engineering support is now a real repair loop, not just a local log.
-  - `codex_escalation` events in the GUI now enqueue a single external Codex repair worker through `core/codex_bridge.py`.
   - The worker writes bounded state under:
-    - `data/state/codex_repair_request.json`
-    - `data/state/codex_repair_status.json`
-    - `data/state/codex_recovery.json`
   - Verified behavior:
     - worker writes a structured result
     - reruns verification commands
@@ -273,12 +260,7 @@
     - post-restart recovery retries the interrupted user request once
   - Validation:
     - `python3 -m compileall config.py core ui memory harness scripts app.py`
-    - `python3 scripts/codex_escalation_smoke_test.py`
-    - `python3 scripts/codex_repair_bridge_smoke_test.py`
     - `.venv\\Scripts\\python.exe scripts\\file_edit_smoke_test.py --json`
-- Boot now probes external engineering support in parallel with normal startup.
-  - `BootManager` supports non-blocking `background_boot_tasks`, so the Codex health probe overlaps llama-server startup instead of extending the critical path.
-  - `core/codex_bridge.py` now exposes `probe_codex_support()` and `resolve_codex_executable()` for both the boot probe and repair worker.
   - Startup now logs `Engineering channel: ONLINE` or `Engineering channel: OFFLINE (...)` without replaying stale old repair failures as fresh boot events.
 - `Generic Code Repair Flow Smoke` is the named regression for vague inspect -> fix -> run code turns that should stay grounded to the active script instead of wandering into blind workspace search or stalled verification.
 - Command:
@@ -292,13 +274,7 @@
   - plain `Run <script>.py.` turns are treated as launch stages, not as implicit interactive gameplay verification
 - Latest clean passing artifact:
   - `C:\\Users\\HAWKGA~1\\AppData\\Local\\Temp\\piper-harness-ppeiopdx\\data`
-  - `scripts/codex_repair_worker.py` now reconfigures stdio to UTF-8 and writes captured Codex output through a byte-safe helper, so Windows `charmap` stdout can no longer kill the repair loop before restart.
-  - On Windows, engineering support now prefers the WSL Codex backend when available, using `wsl.exe -e .../linux-x86_64/codex`, so repair jobs run in the same Codex environment that works from WSL instead of the broken native Windows shell path.
   - Validation:
-    - `python3 -m compileall config.py core/codex_bridge.py scripts/codex_repair_worker.py llm/boot.py app.py scripts/codex_boot_probe_smoke_test.py`
-    - `python3 scripts/codex_boot_probe_smoke_test.py`
-    - `python3 scripts/codex_repair_bridge_smoke_test.py`
-    - `.venv\\Scripts\\python.exe scripts\\codex_ui_repair_smoke_test.py`
 - Diagnosis-only `FILE_WORK` for `catch_the_stars.py` no longer trips the old verification/escalation loop.
   - The old failure shape was:
     - diagnosis stage misclassified as mutating or exact-read-only

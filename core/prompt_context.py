@@ -162,7 +162,6 @@ class PromptContextService:
         document_focus_active: bool = False,
         reporter_just_ran: bool = False,
         active_skill: dict[str, Any] | None = None,
-        latest_codex_escalation: dict[str, Any] | None = None,
         persona_runtime: PersonaRuntimePack | None = None,
     ) -> PersonaDirectivePack:
         return self.engine.build_persona_directive_pack(
@@ -171,7 +170,6 @@ class PromptContextService:
             document_focus_active=document_focus_active,
             reporter_just_ran=reporter_just_ran,
             active_skill=active_skill,
-            latest_codex_escalation=latest_codex_escalation,
             persona_runtime=persona_runtime,
         )
 

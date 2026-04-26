@@ -36,6 +36,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from core.planner_boundary import PlannerBoundary, PlannerInput, PlannerOutput  # noqa: E402
 from core.prompt_builder import PromptBuilder  # noqa: E402
+from core.file_stage_policy import FileStagePolicy  # noqa: E402
+from core.stage_policy import stage_requires_user_approval  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ def _stage(
     declared_scope_root: str = "",
     declared_exact_targets=None,
     evidence_required: str = "",
+    context=None,
 ) -> dict:
     s: dict = {"stage_goal": stage_goal, "stage_type": stage_type,
                "success_condition": success_condition}
@@ -68,6 +71,8 @@ def _stage(
         s["declared_exact_targets"] = list(declared_exact_targets)
     if evidence_required:
         s["evidence_required"] = evidence_required
+    if context is not None:
+        s["context"] = list(context)
     return s
 
 
@@ -187,6 +192,48 @@ def test_declared_scope_root_is_preserved_and_derived() -> None:
     derived_inp = PlannerBoundary.validate_input(derived_stage)
     assert derived_inp.declared_scope_root == "test"
     assert derived_stage["declared_scope_root"] == "test"
+
+
+def test_declared_scope_root_is_derived_from_target_directory_context() -> None:
+    stage = _stage(
+        stage_goal="Analyze file types, sizes, and naming patterns to identify organization opportunities.",
+        success_condition="Analysis report with observations and proposed organization structure is ready.",
+        context=[
+            "Target directory: data/workspace/langgraph_approval_test",
+            "Constraint: Do not move, rename, delete, or edit anything until user approval",
+            "Action required: Read-only inspection and planning",
+        ],
+    )
+    stage["file_stage_kind"] = "INSPECTION"
+    inp = PlannerBoundary.validate_input(stage)
+    assert inp.declared_scope_root == "langgraph_approval_test"
+    assert inp.active_targets == ["langgraph_approval_test"]
+    assert stage["declared_scope_root"] == "langgraph_approval_test"
+    assert stage["active_targets"] == ["langgraph_approval_test"]
+
+
+def test_approval_constraint_can_come_from_stage_context() -> None:
+    stage = _stage(
+        stage_goal="Analyze file types, sizes, and naming patterns to identify organization opportunities.",
+        success_condition="Analysis report with observations and proposed organization structure is ready.",
+        context=[
+            "Constraint: Do not move, rename, delete, or edit anything until user approval",
+        ],
+    )
+    assert stage_requires_user_approval(stage)
+    assert FileStagePolicy.stage_requires_user_approval(stage)
+
+
+def test_context_approval_does_not_pause_plain_inventory_stage() -> None:
+    stage = _stage(
+        stage_goal="List all files and subdirectories within data/workspace/langgraph_approval_test.",
+        success_condition="Complete inventory of files and folders is generated.",
+        context=[
+            "Constraint: Do not move, rename, delete, or edit anything until user approval",
+        ],
+    )
+    assert not stage_requires_user_approval(stage)
+    assert not FileStagePolicy.stage_requires_user_approval(stage)
 
 
 def test_objective_from_stage_card() -> None:

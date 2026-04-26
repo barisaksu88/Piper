@@ -44,8 +44,6 @@ def _categorize(filename: str) -> str:
         return "PERSONA"
     if stem.startswith("undo_"):
         return "UNDO"
-    if stem.startswith("codex_"):
-        return "CODEX"
     if stem.startswith("knowledge_"):
         return "KNOWLEDGE"
     if stem.startswith("vision_"):

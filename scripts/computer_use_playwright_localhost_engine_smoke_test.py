@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 import tempfile
+import urllib.parse
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -25,6 +26,8 @@ class PlaywrightLocalhostEngineSmokeReport:
     extract_ok: bool
     type_ok: bool
     click_ok: bool
+    go_back_ok: bool
+    cross_host_back_ok: bool
     wait_ok: bool
     download_ok: bool
     scope_block_ok: bool
@@ -48,6 +51,9 @@ def run_smoke() -> PlaywrightLocalhostEngineSmokeReport:
         with running_fixture_server() as base_url:
             start_url = f"{base_url}/index.html"
             allowed_domains = ["127.0.0.1"]
+            parsed = urllib.parse.urlparse(base_url)
+            cross_host_base = f"http://localhost:{parsed.port}"
+            cross_host_next_url = f"{cross_host_base}/next.html"
 
             goto_result = _run_action(
                 engine,
@@ -62,6 +68,16 @@ def run_smoke() -> PlaywrightLocalhostEngineSmokeReport:
             type_result = _run_action(engine, {"action": "type_text", "selector": "#email", "text": "alice@example.com"})
             click_result = _run_action(engine, {"action": "click", "selector": "#next-link"})
             wait_result = _run_action(engine, {"action": "wait_for", "selector": "#destination"})
+            go_back_result = _run_action(engine, {"action": "go_back"})
+            cross_host_goto_result = _run_action(
+                engine,
+                {
+                    "action": "goto_url",
+                    "url": cross_host_next_url,
+                    "allowed_domains": ["localhost"],
+                },
+            )
+            cross_host_back_result = _run_action(engine, {"action": "go_back"})
             goto_download_page = _run_action(
                 engine,
                 {
@@ -112,6 +128,19 @@ def run_smoke() -> PlaywrightLocalhostEngineSmokeReport:
             and str(click_result.get("title") or "") == "Browser Fixture Next"
             and str(click_result.get("current_url") or "").endswith("/next.html")
         )
+        go_back_ok = (
+            go_back_result.get("status") == "EXECUTED"
+            and str(go_back_result.get("title") or "") == "Browser Fixture Home"
+            and str(go_back_result.get("current_url") or "").endswith("/index.html")
+        )
+        cross_host_back_ok = (
+            cross_host_goto_result.get("status") == "EXECUTED"
+            and str(cross_host_goto_result.get("current_url") or "").startswith(cross_host_base)
+            and cross_host_back_result.get("status") == "EXECUTED"
+            and str(cross_host_back_result.get("title") or "") == "Browser Fixture Home"
+            and str(cross_host_back_result.get("current_url") or "").startswith(base_url.rsplit("/", 1)[0])
+            and str(cross_host_back_result.get("current_url") or "").endswith("/index.html")
+        )
         wait_ok = wait_result.get("status") == "EXECUTED"
         download_ok = (
             goto_download_page.get("status") == "EXECUTED"
@@ -123,7 +152,7 @@ def run_smoke() -> PlaywrightLocalhostEngineSmokeReport:
             scope_block_result.get("status") == "BLOCKED"
             and "outside the allowed browser scope" in str(scope_block_result.get("summary") or "").lower()
         )
-        success = all((backend_ok, title_ok, extract_ok, type_ok, click_ok, wait_ok, download_ok, scope_block_ok))
+        success = all((backend_ok, title_ok, extract_ok, type_ok, click_ok, go_back_ok, cross_host_back_ok, wait_ok, download_ok, scope_block_ok))
 
         return PlaywrightLocalhostEngineSmokeReport(
             success=bool(success),
@@ -132,6 +161,8 @@ def run_smoke() -> PlaywrightLocalhostEngineSmokeReport:
             extract_ok=bool(extract_ok),
             type_ok=bool(type_ok),
             click_ok=bool(click_ok),
+            go_back_ok=bool(go_back_ok),
+            cross_host_back_ok=bool(cross_host_back_ok),
             wait_ok=bool(wait_ok),
             download_ok=bool(download_ok),
             scope_block_ok=bool(scope_block_ok),
@@ -160,6 +191,8 @@ def main() -> int:
         print(f"EXTRACT_OK: {report.extract_ok}")
         print(f"TYPE_OK: {report.type_ok}")
         print(f"CLICK_OK: {report.click_ok}")
+        print(f"GO_BACK_OK: {report.go_back_ok}")
+        print(f"CROSS_HOST_BACK_OK: {report.cross_host_back_ok}")
         print(f"WAIT_OK: {report.wait_ok}")
         print(f"DOWNLOAD_OK: {report.download_ok}")
         print(f"SCOPE_BLOCK_OK: {report.scope_block_ok}")
