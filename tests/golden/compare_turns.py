@@ -155,6 +155,86 @@ def _compare_checkpoint_id(a: str, b: str, path: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Route-decision structural comparator
+# ---------------------------------------------------------------------------
+
+def _compare_route_decision(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
+    """Compare route decisions structurally, allowing LLM-generated text variance.
+
+    Exact match on:
+      - decision type (CHAT/TASK/SEARCH)
+      - stage_type, file_stage_kind, allowed_tools, skill.name, mutation
+    Ignored (free-form / history-dependent):
+      - card.goal, card.context
+      - stages[].stage_goal, stages[].success_condition
+    """
+    errs: list[str] = []
+
+    exp = dict(expected or {})
+    act = dict(actual or {})
+
+    # 1. Top-level decision
+    exp_dec = str(exp.get("decision") or "").strip().upper()
+    act_dec = str(act.get("decision") or "").strip().upper()
+    if exp_dec != act_dec:
+        errs.append(f"route_decision.decision: expected {exp_dec!r}, got {act_dec!r}")
+
+    # 2. Interceptor (if present in either)
+    exp_int = str(exp.get("interceptor") or "").strip().upper()
+    act_int = str(act.get("interceptor") or "").strip().upper()
+    if exp_int or act_int:
+        if exp_int != act_int:
+            errs.append(f"route_decision.interceptor: expected {exp_int!r}, got {act_int!r}")
+
+    # 3. Top-level skill.name
+    exp_skill = str((exp.get("skill") or {}).get("name") or "").strip()
+    act_skill = str((act.get("skill") or {}).get("name") or "").strip()
+    if exp_skill != act_skill:
+        errs.append(f"route_decision.skill.name: expected {exp_skill!r}, got {act_skill!r}")
+
+    # 4. Card stages — compare structurally
+    exp_card = dict(exp.get("card") or {})
+    act_card = dict(act.get("card") or {})
+    exp_stages = list(exp_card.get("stages") or [])
+    act_stages = list(act_card.get("stages") or [])
+
+    if len(exp_stages) != len(act_stages):
+        errs.append(f"route_decision.card.stages: count mismatch {len(exp_stages)} vs {len(act_stages)}")
+    else:
+        for i, (es, ac) in enumerate(zip(exp_stages, act_stages)):
+            prefix = f"route_decision.card.stages[{i}]"
+            es = dict(es or {})
+            ac = dict(ac or {})
+
+            es_type = str(es.get("stage_type") or "").strip().upper()
+            ac_type = str(ac.get("stage_type") or "").strip().upper()
+            if es_type != ac_type:
+                errs.append(f"{prefix}.stage_type: expected {es_type!r}, got {ac_type!r}")
+
+            es_fsk = str(es.get("file_stage_kind") or "").strip().upper()
+            ac_fsk = str(ac.get("file_stage_kind") or "").strip().upper()
+            if es_fsk != ac_fsk:
+                errs.append(f"{prefix}.file_stage_kind: expected {es_fsk!r}, got {ac_fsk!r}")
+
+            es_tools = set(str(t).strip().upper() for t in (es.get("allowed_tools") or []))
+            ac_tools = set(str(t).strip().upper() for t in (ac.get("allowed_tools") or []))
+            if es_tools != ac_tools:
+                errs.append(f"{prefix}.allowed_tools: expected {sorted(es_tools)}, got {sorted(ac_tools)}")
+
+            es_mut = es.get("mutation")
+            ac_mut = ac.get("mutation")
+            if es_mut != ac_mut:
+                errs.append(f"{prefix}.mutation: expected {es_mut!r}, got {ac_mut!r}")
+
+            es_skill = str((es.get("skill") or {}).get("name") or "").strip()
+            ac_skill = str((ac.get("skill") or {}).get("name") or "").strip()
+            if es_skill != ac_skill:
+                errs.append(f"{prefix}.skill.name: expected {es_skill!r}, got {ac_skill!r}")
+
+    return errs
+
+
+# ---------------------------------------------------------------------------
 # Turn comparison engine
 # ---------------------------------------------------------------------------
 
@@ -166,14 +246,32 @@ class TurnComparison:
     passed: bool = False
 
 
-def compare_turns(expected: dict[str, Any], actual: dict[str, Any]) -> TurnComparison:
-    """Compare two golden turn dicts using semantic rules."""
+def compare_turns(
+    expected: dict[str, Any],
+    actual: dict[str, Any],
+    *,
+    mode: str = "full",
+) -> TurnComparison:
+    """Compare two golden turn dicts using semantic rules.
+
+    *mode*:
+      - "full"   : compare all fields
+      - "route_only" : compare only route_decision
+    """
     case_name = str(expected.get("case_name", "unknown"))
     turn_id = str(expected.get("turn_id", "unknown"))
     errs: list[str] = []
 
-    # route_decision — exact match
-    errs.extend(_compare_exact(expected.get("route_decision"), actual.get("route_decision"), "route_decision"))
+    # route_decision — structural match (always checked)
+    errs.extend(_compare_route_decision(expected.get("route_decision"), actual.get("route_decision")))
+
+    if mode == "route_only":
+        return TurnComparison(
+            turn_id=turn_id,
+            case_name=case_name,
+            mismatches=errs,
+            passed=len(errs) == 0,
+        )
 
     # stage_transitions — exact ordered match
     errs.extend(
@@ -281,7 +379,12 @@ def load_corpus(corpus_dir: Path) -> dict[str, dict[str, Any]]:
     return turns
 
 
-def compare_corpora(expected_dir: Path, actual_dir: Path) -> CorpusComparison:
+def compare_corpora(
+    expected_dir: Path,
+    actual_dir: Path,
+    *,
+    mode: str = "full",
+) -> CorpusComparison:
     expected = load_corpus(expected_dir)
     actual = load_corpus(actual_dir)
 
@@ -293,7 +396,7 @@ def compare_corpora(expected_dir: Path, actual_dir: Path) -> CorpusComparison:
         if case_name not in actual:
             missing.append(case_name)
             continue
-        result = compare_turns(expected[case_name], actual[case_name])
+        result = compare_turns(expected[case_name], actual[case_name], mode=mode)
         results.append(result)
 
     for case_name in sorted(actual):
@@ -323,9 +426,15 @@ def main() -> int:
     parser.add_argument("expected", type=Path, help="Expected corpus directory")
     parser.add_argument("actual", type=Path, help="Actual corpus directory")
     parser.add_argument("--json", action="store_true", help="Output JSON report")
+    parser.add_argument(
+        "--mode",
+        choices=["full", "route_only"],
+        default="full",
+        help="Comparison mode: full (default) or route_only",
+    )
     args = parser.parse_args()
 
-    report = compare_corpora(args.expected, args.actual)
+    report = compare_corpora(args.expected, args.actual, mode=args.mode)
 
     if args.json:
         payload = {

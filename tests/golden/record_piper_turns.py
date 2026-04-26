@@ -348,6 +348,36 @@ TEST_CASES: list[tuple[str, str]] = [
 
 
 # ---------------------------------------------------------------------------
+# Route-node instrumentation (Phase 1 verification)
+# ---------------------------------------------------------------------------
+
+def _install_route_node_patch() -> None:
+    """Patch Orchestrator._phase_route so the ROUTE stage runs through route_node."""
+    import core.orchestrator as _orc_module
+    import core.graph_nodes as _gn_module
+
+    _orig_phase_route = _orc_module.Orchestrator._phase_route
+
+    def _patched_phase_route(self):
+        state = _gn_module.PiperState(
+            messages=[],
+            stage="ROUTE",
+            route_decision=None,
+            manager_result=None,
+            verification_passed=False,
+            pre_persona_output=None,
+            persona_output=None,
+            workspace_path=str(getattr(getattr(self, "brain", None), "workspace", ".")),
+        )
+        config = {"configurable": {"orchestrator": self}}
+        _gn_module.route_node(state, config=config)
+        # route_node internally calls _run_route_core, which sets
+        # self.route_decision and self.next_stage exactly as phase_route did.
+
+    _orc_module.Orchestrator._phase_route = _patched_phase_route
+
+
+# ---------------------------------------------------------------------------
 # Recorder runner
 # ---------------------------------------------------------------------------
 
@@ -358,11 +388,13 @@ class GoldenRecorder:
         *,
         enable_memory_learning: bool = False,
         timeout_s: float = 180.0,
+        use_route_node: bool = False,
     ) -> None:
         self.corpus_dir = Path(corpus_dir)
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         self.enable_memory_learning = enable_memory_learning
         self.timeout_s = timeout_s
+        self.use_route_node = use_route_node
         self.turn_index = 0
         self.harness: Optional[PiperHarness] = None
 
@@ -408,6 +440,9 @@ class GoldenRecorder:
 
     def run(self) -> list[GoldenTurn]:
         _install_instrumentation()
+        if self.use_route_node:
+            _install_route_node_patch()
+            print("[GoldenRecorder] Phase 1 mode: ROUTE stage will use route_node.")
 
         print("[GoldenRecorder] Starting PiperHarness...")
         self.harness = PiperHarness(
@@ -464,8 +499,26 @@ class GoldenRecorder:
 
 
 def main() -> int:
-    corpus_dir = Path(__file__).resolve().parent / "corpus"
-    recorder = GoldenRecorder(corpus_dir=corpus_dir)
+    import argparse
+    parser = argparse.ArgumentParser(description="Record golden corpus turns.")
+    parser.add_argument(
+        "--route-node",
+        action="store_true",
+        help="Patch Orchestrator to use core.graph_nodes.route_node for the ROUTE stage (Phase 1 verification).",
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        default=None,
+        help="Output directory for corpus JSON files (default: tests/golden/corpus).",
+    )
+    args = parser.parse_args()
+
+    corpus_dir = args.corpus_dir or Path(__file__).resolve().parent / "corpus"
+    recorder = GoldenRecorder(
+        corpus_dir=corpus_dir,
+        use_route_node=args.route_node,
+    )
     recorded = recorder.run()
     return 0 if recorded else 1
 

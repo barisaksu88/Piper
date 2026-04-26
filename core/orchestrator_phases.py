@@ -827,13 +827,13 @@ def _merge_secretary_system_prompt(base_prompt: str, latest_runtime_context: str
     return runtime
 
 
-def phase_route(orc) -> None:
-    orc.raise_if_cancelled()
-    orc._update_status(mode="ANALYZING")
-    orc.ui.put(("agent_log", "--- PHASE 1: ROUTE CHECK ---"))
-    orc.latest_route_error = ""
-    orc.stats_collector.start_phase(orc.turn_stats, "route")
+def _run_route_core(orc) -> None:
+    """Core routing decision logic extracted from ``phase_route``.
 
+    Performs the full ROUTE computation including interceptors, secretary LLM,
+    normalization, skill-layer application, and ``next_stage`` selection.
+    Side-effects on *orc* are expected (this is the legacy boundary).
+    """
     full_history = orc.get_context()
     recent_history = full_history[-6:]
     latest_runtime_context = _latest_runtime_context_message(full_history)
@@ -1112,7 +1112,7 @@ def phase_route(orc) -> None:
         source_scope=str(orc.route_decision.get("source_scope") or "").strip().lower(),
         confidence=str(orc.route_decision.get("confidence") or "").strip().lower(),
         search_query=str(((orc.route_decision.get("card") or {}).get("query") or "")).strip(),
-        latest_route_error=orc.latest_route_error,
+        latest_route_error=getattr(orc, "latest_route_error", ""),
     )
     orc.stats_collector.end_phase(orc.turn_stats, "route")
     decision = orc.route_decision.get("decision")
@@ -1147,6 +1147,14 @@ def phase_route(orc) -> None:
     else:
         orc.next_stage = "PERSONA"
 
+
+def phase_route(orc) -> None:
+    orc.raise_if_cancelled()
+    orc._update_status(mode="ANALYZING")
+    orc.ui.put(("agent_log", "--- PHASE 1: ROUTE CHECK ---"))
+    orc.latest_route_error = ""
+    orc.stats_collector.start_phase(orc.turn_stats, "route")
+    _run_route_core(orc)
 
 def phase_document_focus(orc) -> None:
     orc.raise_if_cancelled()
