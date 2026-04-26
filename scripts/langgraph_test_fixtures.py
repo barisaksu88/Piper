@@ -71,7 +71,6 @@ class BaseDummyOrchestrator:
         self.document_focus_sources: list[str] = []
         self.turn_screen_image_path = None
         self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = None
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None

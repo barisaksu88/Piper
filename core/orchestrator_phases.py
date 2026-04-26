@@ -23,7 +23,7 @@ from core.engines.proactive_monitor import (
     parse_proactive_trigger_message,
     parse_reminder_request,
 )
-from core.engines.route_clarity import RouteClarifier
+from core.engines.route_clarity import RouteClarifier, _PATHISH_RE
 from core.engines.state_mutation import StateMutationEngine
 from core.executor import StageExecutor
 from core.file_stage_policy import FileStagePolicy
@@ -1116,6 +1116,30 @@ def phase_route(orc) -> None:
     )
     orc.stats_collector.end_phase(orc.turn_stats, "route")
     decision = orc.route_decision.get("decision")
+    # If Secretary produced a bare CHAT with no stage instructions for a very
+    # short/vague message, wrap it so the Planner/Persona asks for clarification
+    # instead of treating it as casual chat (which leads to snarky responses).
+    if decision == "CHAT":
+        card = dict(orc.route_decision.get("card") or {})
+        has_clarify_stage = any(
+            str(s.get("stage_type") or "").upper() == "CHAT"
+            and "clarif" in str(s.get("stage_goal") or "").lower()
+            for s in (card.get("stages") or [])
+        )
+        if not has_clarify_stage:
+            user_msg = str(getattr(orc, "user_msg", "") or "").strip()
+            tokens = re.findall(r"[a-z0-9']+", user_msg.lower())
+            if len(tokens) <= 5 and not _PATHISH_RE.search(user_msg):
+                card["goal"] = "Clarify the meaning of the user's message"
+                card["stages"] = [
+                    {
+                        "stage_type": "CHAT",
+                        "stage_goal": f"Ask the user to clarify what they mean by: {user_msg}",
+                        "success_condition": "User clarifies or rephrases",
+                    }
+                ]
+                orc.route_decision["card"] = card
+                orc.ui.put(("agent_log", "   -> Wrapped vague CHAT with clarification stage."))
     if decision == "SEARCH":
         orc.next_stage = "SEARCH"
     elif decision == "TASK":
@@ -2221,7 +2245,6 @@ def phase_persona(orc) -> None:
         orc.scratchpad,
         latest_stage=latest_stage,
         reporter_just_ran=reporter_just_ran,
-        escalation_active=bool(getattr(orc, "latest_codex_escalation", None)),
         verification_result=getattr(orc, "last_verification", None),
         outcome_pack=_outcome_pack_for_persona,
     )
@@ -2237,7 +2260,6 @@ def phase_persona(orc) -> None:
         document_focus_active=bool(getattr(orc, "document_focus_text", "") or ""),
         reporter_just_ran=reporter_just_ran,
         active_skill=active_skill,
-        latest_codex_escalation=getattr(orc, "latest_codex_escalation", None) or {},
         persona_runtime=persona_runtime,
     )
 
@@ -2474,10 +2496,7 @@ def phase_persona(orc) -> None:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored after completed search report."))
             orc.next_stage = "FINISHED"
         elif outcome_failed:
-            if bool(getattr(orc, "latest_codex_escalation", None)):
-                orc.ui.put(("agent_log", "   -> ROUTER marker ignored because engineering support escalation is active — user must decide next step."))
-                orc.next_stage = "FINISHED"
-            elif not bool(getattr(persona_runtime, "allow_persona_reroute", True)):
+            if not bool(getattr(persona_runtime, "allow_persona_reroute", True)):
                 orc.ui.put(("agent_log", "   -> ROUTER marker ignored because this failure is terminal for the current turn."))
                 orc.next_stage = "FINISHED"
             elif _wants_user_confirmation(clean_answer):

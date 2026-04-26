@@ -15,7 +15,6 @@ from config import CFG, data_debug_path
 from core.agent import AgentBrain
 from core.code_session import EmbeddedCodeSession
 from core.commands import handle_command
-from core.engineering_support import build_manual_codex_snapshot
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
 from core.operational_state_service import OperationalStateService
@@ -213,12 +212,10 @@ class _HarnessDataOverlay:
             "DATA_DIR": CFG.DATA_DIR,
             "MEMORY_PATH": CFG.MEMORY_PATH,
             "INSTRUCTIONS_PATH": CFG.INSTRUCTIONS_PATH,
-            "CODEX_AUTO_REPAIR_ENABLED": CFG.CODEX_AUTO_REPAIR_ENABLED,
         }
         object.__setattr__(CFG, "DATA_DIR", self.data_dir)
         object.__setattr__(CFG, "MEMORY_PATH", self.data_dir / "state" / "memory.jsonl")
         object.__setattr__(CFG, "INSTRUCTIONS_PATH", self.data_dir / "prompts" / "instructions.txt")
-        object.__setattr__(CFG, "CODEX_AUTO_REPAIR_ENABLED", False)
         # Ensure state/ exists — a fresh CI checkout won't have it and harness
         # scripts that seed tasks.json / events.json will crash otherwise.
         (self.data_dir / "state").mkdir(parents=True, exist_ok=True)
@@ -247,13 +244,7 @@ class _HarnessDataOverlay:
         change_journal_path = self.data_dir / "change_journal.json"
         if change_journal_path.exists():
             change_journal_path.unlink()
-        for rel_path in (
-            self.data_dir / "state" / "codex_repair_request.json",
-            self.data_dir / "state" / "codex_repair_status.json",
-            self.data_dir / "state" / "codex_recovery.json",
-        ):
-            if rel_path.exists():
-                rel_path.unlink()
+
 
     @staticmethod
     def _reset_runtime_caches() -> None:
@@ -551,25 +542,6 @@ class PiperHarness:
         elif res.action == "set_admin_password" and res.password_value is not None:
             outcome = self.user_runtime.set_admin_password(res.password_value)
             self.chat_state.append("system", outcome.message)
-        elif res.action == "codex_support":
-            messages = self.chat_state.get_messages_snapshot()
-            user_msg = ""
-            for message in reversed(messages):
-                if str(message.get("role") or "") == "user":
-                    user_msg = str(message.get("content") or "").strip()
-                    break
-            decision = build_manual_codex_snapshot(
-                log_path=CFG.CODEX_ESCALATION_LOG_PATH,
-                note=res.support_note or "",
-                user_msg=user_msg,
-                history_tail=messages[-8:],
-                monitor_text="",
-                dashboard_text="",
-                status_snapshot=self._statuses[-1] if self._statuses else "",
-                source="harness_command",
-            )
-            self._record_event("codex_escalation", decision)
-            self.chat_state.append("system", f"[UI] Codex support brief prepared: {decision.get('brief_path', '')}")
         elif res.action == "vision_query" and res.vision_path and res.vision_prompt:
             self.chat_state.append("user", user_text)
             self._persist_turn("user", user_text)

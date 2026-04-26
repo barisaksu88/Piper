@@ -172,7 +172,6 @@ class TailBlockContext:
     document_focus_active: bool
     reporter_just_ran: bool
     skill: Dict[str, Any]
-    codex_escalation: Dict[str, Any]
 
 
 TailBlockBuilder = Callable[[TailBlockContext], str]
@@ -482,13 +481,11 @@ class ContextPackEngine:
         document_focus_active: bool = False,
         reporter_just_ran: bool = False,
         active_skill: Dict[str, Any] | None = None,
-        latest_codex_escalation: Dict[str, Any] | None = None,
         persona_runtime: PersonaRuntimePack | None = None,
     ) -> PersonaDirectivePack:
         runtime = persona_runtime or PersonaRuntimePack()
         route = dict(route_decision or {})
         skill = dict(active_skill or {})
-        codex_escalation = dict(latest_codex_escalation or {})
         tail_context = TailBlockContext(
             route=route,
             runtime=runtime,
@@ -496,7 +493,6 @@ class ContextPackEngine:
             document_focus_active=bool(document_focus_active),
             reporter_just_ran=bool(reporter_just_ran),
             skill=skill,
-            codex_escalation=codex_escalation,
         )
         tail_system_blocks: list[str] = []
         for builder in _TAIL_BLOCK_REGISTRY:
@@ -738,20 +734,6 @@ def _tail_block_verification_result(ctx: TailBlockContext) -> str:
 
 
 @register_tail_block
-def _tail_block_engineering_support(ctx: TailBlockContext) -> str:
-    if not ctx.codex_escalation or not ctx.runtime.outcome_failed:
-        return ""
-    return (
-        "[ENGINEERING_SUPPORT_RULE]\n"
-        "This task prepared an engineering support brief because the runtime detected a real execution issue.\n"
-        "Be honest that engineering support has been prepared.\n"
-        "Do not claim the issue is already fixed.\n"
-        f"Escalation summary: {str(ctx.codex_escalation.get('summary') or '').strip()}\n"
-        f"Escalation log: {str(ctx.codex_escalation.get('brief_path') or '').strip()}"
-    )
-
-
-@register_tail_block
 def _tail_block_file_work_report(ctx: TailBlockContext) -> str:
     if not ctx.runtime.needs_file_work_report_rule:
         return ""
@@ -827,6 +809,20 @@ def _tail_block_failed_outcome_no_verification(ctx: TailBlockContext) -> str:
         "Do not claim any file was moved, copied, renamed, created, or deleted.\n"
         "Only report what FILE_CHECKER VERIFIED evidence explicitly confirms.\n"
         "Use LAST_LOG as the sole authoritative cause of the failure — do not invent a reason."
+    )
+
+
+@register_tail_block
+def _tail_block_workspace_boundary(ctx: TailBlockContext) -> str:
+    if not ctx.runtime.needs_file_work_report_rule:
+        return ""
+    return (
+        "[WORKSPACE_BOUNDARY_RULE]\n"
+        "FILE_WORK tools are restricted to the workspace folder.\n"
+        "If a file operation failed because the path is outside the workspace, "
+        "do not invent file contents, line numbers, or code snippets.\n"
+        "Do not offer to create a replacement file in a different location.\n"
+        "State honestly that you cannot access files outside the workspace."
     )
 
 

@@ -1865,6 +1865,10 @@ class StageExecutor:
             requested = self._missing_file_request_target(tool_result).lower()
             if self._matches_missing_target(requested, target_terms):
                 return True
+        if "escapes the workspace" in summary or "outside the workspace" in summary:
+            requested = self._missing_file_request_target(tool_result).lower()
+            if self._matches_missing_target(requested, target_terms):
+                return True
 
         action = str(tool_result.get("action", "")).lower()
         if action == "read_many":

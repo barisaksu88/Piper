@@ -21,11 +21,6 @@ from ui.event_speech import (  # noqa: E402
 
 
 def main() -> int:
-    important_codex = event_speech_message(
-        "codex_escalation",
-        {"summary": "Engineering support prepared."},
-        mode=EVENT_SPEECH_IMPORTANT,
-    )
     important_dashboard = event_speech_message(
         "status_widget_dashboard_activity",
         "Stage 1 Success.",
@@ -67,7 +62,6 @@ def main() -> int:
         and normalize_event_speech_mode("Events: Noisy Test") == EVENT_SPEECH_NOISY
         and event_speech_mode_label(EVENT_SPEECH_ALL) == "Events: All"
         and event_speech_mode_options()[0] == "Events: Off"
-        and important_codex is not None
         and important_dashboard is None
         and all_dashboard is not None
         and noisy_boot is not None
@@ -80,7 +74,6 @@ def main() -> int:
         json.dumps(
             {
                 "success": bool(success),
-                "important_codex": important_codex,
                 "important_dashboard": important_dashboard,
                 "all_dashboard": all_dashboard,
                 "noisy_boot": noisy_boot,

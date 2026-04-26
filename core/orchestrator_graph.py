@@ -47,7 +47,6 @@ class OrchestratorGraphState(TypedDict, total=False):
     document_focus_sources: list[str]
     turn_screen_image_path: str
     turn_screen_image_kind: str
-    latest_codex_escalation: dict[str, Any] | None
     failed_task_router_retries: int
     last_stage_outcome: dict[str, Any] | None
     last_verification: dict[str, Any] | None
@@ -171,7 +170,7 @@ def save_langgraph_recovery_record(record: dict[str, Any], *, path: Path | str |
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp_name, record_path)
-    except Exception:
+    except OSError:
         try:
             os.unlink(tmp_name)
         except OSError:
@@ -249,7 +248,7 @@ def save_langgraph_interrupt_record(record: dict[str, Any], *, path: Path | str 
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp_name, record_path)
-    except Exception:
+    except OSError:
         try:
             os.unlink(tmp_name)
         except OSError:
@@ -459,7 +458,6 @@ def snapshot_orchestrator_state(
         "document_focus_sources": [str(item) for item in (getattr(orc, "document_focus_sources", []) or [])],
         "turn_screen_image_path": str(getattr(orc, "turn_screen_image_path", "") or ""),
         "turn_screen_image_kind": str(getattr(orc, "turn_screen_image_kind", "") or ""),
-        "latest_codex_escalation": _serialize_state_value(getattr(orc, "latest_codex_escalation", None)),
         "failed_task_router_retries": int(getattr(orc, "failed_task_router_retries", 0) or 0),
         "last_stage_outcome": _serialize_state_value(getattr(orc, "last_stage_outcome", None)),
         "last_verification": _serialize_state_value(getattr(orc, "last_verification", None)),
@@ -492,7 +490,6 @@ def restore_orchestrator_state(orc: Orchestrator, state: OrchestratorGraphState)
     turn_screen_image_path = str(state.get("turn_screen_image_path", "") or "")
     orc.turn_screen_image_path = turn_screen_image_path or None
     orc.turn_screen_image_kind = str(state.get("turn_screen_image_kind", getattr(orc, "turn_screen_image_kind", "")) or "")
-    orc.latest_codex_escalation = dict(state.get("latest_codex_escalation") or {}) or None
     orc.failed_task_router_retries = int(
         state.get("failed_task_router_retries", getattr(orc, "failed_task_router_retries", 0)) or 0
     )

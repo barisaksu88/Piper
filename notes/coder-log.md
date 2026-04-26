@@ -566,7 +566,7 @@
   - added `AGENTS.md` §10A in the live doctrine file (repo root; `docs/architecture/AGENTS.md` does not exist in this repo)
   - confirmed `bytes_b64` no longer has any write path; only the legacy read-time skip remains in `change_journal.py`
   - `stats.jsonl` now prunes on write to `history_limit` lines with temp-file + atomic rename
-  - repo sweep also capped `memory.jsonl` and `codex_escalations.jsonl` on the write path
+  - repo sweep also capped `memory.jsonl` on the write path
   - added `TRIGGER_FLOW.md` §13.20 for the pre-roadmap #3 data-hygiene rules
 
 - Hook extraction pass:

@@ -90,12 +90,6 @@ def event_speech_message(kind: object, payload: Any, *, mode: object) -> dict[st
 
     if event_key == "boot_ready":
         text = "Systems online."
-    elif event_key == "codex_escalation":
-        summary = ""
-        if isinstance(payload, dict):
-            summary = _truncate(payload.get("summary") or "")
-        text = summary or "Engineering support prepared."
-        dedupe_key = f"codex:{text.lower()}"
     elif event_key == "error":
         text = _truncate(payload)
         dedupe_key = f"error:{text.lower()}"

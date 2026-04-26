@@ -245,35 +245,6 @@ def _candidate_vscode_extension_dirs() -> list[Path]:
     return [path for path in _dedupe_paths(candidates) if path.exists()]
 
 
-def _resolve_codex_executable() -> str:
-    override = os.environ.get("PIPER_CODEX_EXECUTABLE", "").strip()
-    if override:
-        override_path = _coerce_existing_path(override)
-        if override_path and override_path.exists():
-            return str(override_path)
-        override_which = shutil.which(override)
-        if override_which:
-            return override_which
-
-    binary_names = ["codex.exe", "codex.cmd", "codex"] if os.name == "nt" else ["codex"]
-    for name in binary_names:
-        resolved = shutil.which(name)
-        if resolved:
-            return resolved
-
-    platform_patterns = (
-        ("openai.chatgpt-*/bin/windows-x86_64/codex.exe",) if os.name == "nt"
-        else ("openai.chatgpt-*/bin/linux-x86_64/codex",)
-    )
-    for ext_dir in _candidate_vscode_extension_dirs():
-        for pattern in platform_patterns:
-            matches = sorted(ext_dir.glob(pattern), reverse=True)
-            if matches:
-                return str(matches[0])
-
-    return override or "codex"
-
-
 def _to_wsl_path_text(raw_path: str | Path) -> str:
     raw = str(raw_path or "").strip()
     if not raw:
@@ -377,28 +348,6 @@ def _resolve_llama_server_url(raw_url: str, server_exe: Path | str) -> str:
     if parsed.port:
         netloc += f":{parsed.port}"
     return urlunparse(parsed._replace(netloc=netloc))
-
-
-def _resolve_codex_wsl_executable() -> str:
-    override = os.environ.get("PIPER_CODEX_WSL_EXECUTABLE", "").strip()
-    if override:
-        override_path = _coerce_existing_path(override)
-        if override_path and override_path.exists():
-            return _to_wsl_path_text(override_path)
-        if override.startswith("/mnt/"):
-            return override.replace("\\", "/")
-
-    if os.name != "nt":
-        resolved = shutil.which("codex")
-        if resolved:
-            return resolved
-
-    for ext_dir in _candidate_vscode_extension_dirs():
-        matches = sorted(ext_dir.glob("openai.chatgpt-*/bin/linux-x86_64/codex"), reverse=True)
-        if matches:
-            return _to_wsl_path_text(matches[0])
-
-    return ""
 
 
 def _resolve_llama_model_path() -> Path:
@@ -668,10 +617,6 @@ class Config:
         return data_debug_path(self.DATA_DIR, "tts_debug.txt")
 
     @property
-    def CODEX_ESCALATION_LOG_PATH(self) -> Path:
-        return data_debug_path(self.DATA_DIR, "codex_escalations.jsonl")
-
-    @property
     def LANGGRAPH_TRACE_PATH(self) -> Path:
         return data_debug_path(self.DATA_DIR, "langgraph_trace.jsonl")
 
@@ -698,26 +643,6 @@ class Config:
             path = Path(raw_path).expanduser()
             return path if path.is_absolute() else self.ROOT_DIR / path
         return data_state_path(self.DATA_DIR, "langgraph_interrupt.json")
-
-    @property
-    def CODEX_REPAIR_REQUEST_PATH(self) -> Path:
-        return data_state_path(self.DATA_DIR, "codex_repair_request.json")
-
-    @property
-    def CODEX_REPAIR_STATUS_PATH(self) -> Path:
-        return data_state_path(self.DATA_DIR, "codex_repair_status.json")
-
-    @property
-    def CODEX_REPAIR_RECOVERY_PATH(self) -> Path:
-        return data_state_path(self.DATA_DIR, "codex_recovery.json")
-
-    @property
-    def CODEX_REPAIR_WORKER_LOG_PATH(self) -> Path:
-        return data_debug_path(self.DATA_DIR, "codex_repair_worker.log")
-
-    @property
-    def CODEX_REPAIR_OUTPUT_SCHEMA_PATH(self) -> Path:
-        return self.REFERENCE_DIR / "codex_repair_output.schema.json"
 
     @property
     def COMFY_OUTPUT_DIR(self) -> Path:
@@ -778,16 +703,8 @@ class Config:
     # Stream pipeline trace: prints [PIPE-IN], [FILTER-OUT], [QUEUE-PUT] per token.
     # Disable in production — enable only when debugging streaming regressions.
     DEBUG_STREAMING_PIPELINE: bool = _env_flag("PIPER_DEBUG_STREAMING_PIPELINE", False)
-    CODEX_AUTO_REPAIR_ENABLED: bool = _env_flag("PIPER_CODEX_AUTO_REPAIR_ENABLED", True)
-    CODEX_PREFER_WSL: bool = _env_flag("PIPER_CODEX_PREFER_WSL", os.name == "nt")
-    CODEX_BOOT_PROBE_ENABLED: bool = _env_flag("PIPER_CODEX_BOOT_PROBE_ENABLED", True)
-    CODEX_BOOT_PROBE_TIMEOUT_S: float = float(os.environ.get("PIPER_CODEX_BOOT_PROBE_TIMEOUT_S", "120"))
-    CODEX_REPAIR_POLL_INTERVAL_S: float = float(os.environ.get("PIPER_CODEX_REPAIR_POLL_INTERVAL_S", "1.0"))
-    CODEX_REPAIR_TIMEOUT_S: float = float(os.environ.get("PIPER_CODEX_REPAIR_TIMEOUT_S", "1800"))
     LANGGRAPH_TRACE_HISTORY_LIMIT: int = int(os.environ.get("PIPER_LANGGRAPH_TRACE_HISTORY_LIMIT", "500"))
     LANGGRAPH_CHECKPOINT_HISTORY_LIMIT: int = int(os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_HISTORY_LIMIT", "500"))
-    CODEX_EXECUTABLE: str = _resolve_codex_executable()
-    CODEX_WSL_EXECUTABLE: str = _resolve_codex_wsl_executable()
     MODELS_DIR = ROOT_DIR / "models"
 
     # --- PATH RESOLUTION (Safe & Simple) ---

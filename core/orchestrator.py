@@ -10,11 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from config import CFG
-from core.contracts import EscalationDecision, RuntimeSignal
+from core.contracts import RuntimeSignal
 from core.engines.change_journal import ChangeJournal
 from core.engines.conversation_compressor import ConversationCompressor
 from core.engines.stats_collector import StatsCollector
-from core.engineering_support import EngineeringEscalationDetector
 from core.orchestrator_phases import (
     phase_document_focus,
     phase_manager,
@@ -116,8 +115,6 @@ class Orchestrator:
         self.turn_screen_image_kind = ""
         self.scratchpad = []
         self.context_card = {}
-        self.latest_codex_escalation: EscalationDecision | None = None
-        self.engineering_support = EngineeringEscalationDetector(CFG.CODEX_ESCALATION_LOG_PATH)
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
@@ -148,7 +145,7 @@ class Orchestrator:
             self.ui.put(("status_widget_mode", mode))
         self.ui.put(("status_widget_step", step))
 
-    def emit_runtime_signal(self, signal: RuntimeSignal, *, scratchpad: list[str] | None = None) -> EscalationDecision | None:
+    def emit_runtime_signal(self, signal: RuntimeSignal, *, scratchpad: list[str] | None = None) -> None:
         normalized = {
             "kind": str(signal.get("kind", "")).strip().lower(),
             "severity": str(signal.get("severity", "warning")).strip().lower() or "warning",
@@ -166,45 +163,6 @@ class Orchestrator:
             normalized["step"] = step
         summary = normalized.get("summary") or normalized.get("kind") or "runtime signal"
         self.ui.put(("agent_log", f"[ENGINEERING SIGNAL] {summary}"))
-
-        decision = self.engineering_support.record_signal(
-            normalized,
-            user_msg=self.user_msg,
-            route_decision=self.route_decision,
-            context_card=self.context_card,
-            scratchpad=scratchpad if scratchpad is not None else self.scratchpad,
-            history_tail=self.get_context()[-8:],
-        )
-        if decision:
-            self.latest_codex_escalation = decision
-            self.ui.put(("codex_escalation", decision))
-            self._log_dashboard("Codex support brief prepared.")
-        return decision
-
-    def prepare_manual_codex_snapshot(
-        self,
-        *,
-        note: str = "",
-        source: str = "manual",
-        monitor_text: str = "",
-        dashboard_text: str = "",
-        status_snapshot: str = "",
-    ) -> EscalationDecision:
-        decision = self.engineering_support.manual_snapshot(
-            note=note,
-            user_msg=self.user_msg,
-            history_tail=self.get_context()[-8:],
-            monitor_tail=monitor_text.splitlines(),
-            dashboard_tail=dashboard_text.splitlines(),
-            status_snapshot=status_snapshot,
-            route_decision=self.route_decision,
-            context_card=self.context_card,
-            scratchpad=self.scratchpad,
-            source=source,
-        )
-        self.latest_codex_escalation = decision
-        self.ui.put(("codex_escalation", decision))
-        return decision
 
     def raise_if_cancelled(self) -> None:
         if self.cancel_token is not None:
@@ -249,7 +207,6 @@ class Orchestrator:
         self.document_focus_sources = []
         self.turn_screen_image_path = None
         self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = None
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None

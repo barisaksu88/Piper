@@ -11,11 +11,9 @@ from typing import Dict, List, Tuple
 import dearpygui.dearpygui as dpg
 
 from config import CFG
-from core.codex_bridge import CodexRepairCoordinator
 from core.code_session import EmbeddedCodeSession
 from core.engines.proactive_monitor import ProactiveMonitor
 from core.engines.stats_collector import StatsCollector
-from core.engineering_support import build_manual_codex_snapshot
 from core.pipeline import ChatPipeline
 from core.runtime_control import CancellationToken
 from ui.layout import build_ui
@@ -239,12 +237,6 @@ class PiperController:
             self.agent_brain.workspace,
             lambda kind, payload: self.ui_queue.put((kind, payload)),
         )
-        self.codex_repair = CodexRepairCoordinator(
-            repo_root=CFG.ROOT_DIR,
-            data_dir=CFG.DATA_DIR,
-            auto_enabled=CFG.CODEX_AUTO_REPAIR_ENABLED,
-            poll_interval_s=CFG.CODEX_REPAIR_POLL_INTERVAL_S,
-        )
         self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
 
         self.gen_lock = threading.Lock()
@@ -269,11 +261,6 @@ class PiperController:
         self.code_session_active = False
         self.document_ingest_active = False
         self.event_speech_mode = normalize_event_speech_mode(EVENT_SPEECH_OFF)
-        self.latest_codex_brief_path = ""
-        self.latest_codex_summary = ""
-        self.latest_codex_escalation = None
-        self.pending_codex_recovery = self.codex_repair.peek_recovery()
-        self._last_codex_status_line = ""
         self._chat_rendered_messages: List[Tuple[str, str]] = []
         self._chat_rendered_tags: List[int | str] = []
         self._chat_render_wrap_columns: int | None = None
@@ -1006,8 +993,6 @@ class PiperController:
     def set_boot_ready(self, value: bool) -> None:
         self.boot_ready = bool(value)
         self.refresh_interaction_state()
-        if self.boot_ready:
-            self.resume_codex_recovery_if_needed()
 
     def refresh_documents_view(self) -> None:
         try:
@@ -1084,33 +1069,6 @@ class PiperController:
         self._refresh_top_bar()
         self.refresh_interaction_state()
 
-    def export_codex_support_snapshot(self, note: str = "") -> None:
-        messages_snapshot = self.chat_state.get_messages_snapshot()
-        user_msg = ""
-        for message in reversed(messages_snapshot):
-            if str(message.get("role") or "") == "user":
-                user_msg = str(message.get("content") or "").strip()
-                break
-        monitor_text = ""
-        dashboard_text = ""
-        status_snapshot = self.runtime_mode
-        if dpg.does_item_exist(self.tags.agent_log_text):
-            monitor_text = str(dpg.get_value(self.tags.agent_log_text) or "")
-        if dpg.does_item_exist(self.tags.dashboard_activity_text):
-            dashboard_text = str(dpg.get_value(self.tags.dashboard_activity_text) or "")
-        decision = build_manual_codex_snapshot(
-            log_path=CFG.CODEX_ESCALATION_LOG_PATH,
-            note=note,
-            user_msg=user_msg,
-            history_tail=messages_snapshot[-8:],
-            monitor_text=monitor_text,
-            dashboard_text=dashboard_text,
-            status_snapshot=status_snapshot,
-            source="ui_command",
-        )
-        self.latest_codex_escalation = decision
-        self.ui_queue.put(("codex_escalation", decision))
-
     def submit_user_text(self, user_text: str) -> None:
         text = str(user_text or "").strip()
         if not text or not self.boot_ready or self.has_active_operations() or self.has_active_code_session():
@@ -1124,48 +1082,6 @@ class PiperController:
             dpg.focus_item(self.tags.input_box)
         self.show_thinking_placeholder()
         threading.Thread(target=self.do_generate_stream, daemon=True).start()
-
-    def queue_codex_repair(self, escalation: dict[str, object]) -> None:
-        result = self.codex_repair.request_repair(escalation)
-        message = str(result.get("message") or "").strip()
-        if message and message != self._last_codex_status_line:
-            self._last_codex_status_line = message
-            self.log_agent_monitor(f"[ENGINEERING SUPPORT] {message}")
-            self.ui_queue.put(("status_widget_dashboard_activity", message))
-
-    def poll_codex_repair(self) -> None:
-        status = self.codex_repair.poll_status()
-        if not status:
-            return
-        message = str(status.get("message") or "").strip()
-        if message and message != self._last_codex_status_line:
-            self._last_codex_status_line = message
-            self.log_agent_monitor(f"[ENGINEERING SUPPORT] {message}")
-            self.ui_queue.put(("status_widget_dashboard_activity", message))
-        state = str(status.get("state") or "").strip().lower()
-        startup_recovery_pending = bool(self.pending_codex_recovery)
-        if state == "restart_requested" and startup_recovery_pending:
-            return
-        if state == "restart_requested" and not self.restart_requested:
-            self.chat_append("system", "[Self-Heal] Engineering repair verified. Restarting Piper to resume the interrupted request.")
-            self.on_restart()
-
-    def resume_codex_recovery_if_needed(self) -> None:
-        if not self.boot_ready or self.has_active_operations():
-            return
-        recovery = self.pending_codex_recovery or self.codex_repair.peek_recovery()
-        if not recovery:
-            return
-        self.pending_codex_recovery = {}
-        summary = str(recovery.get("summary") or "").strip()
-        retry_user_message = str(recovery.get("retry_user_message") or "").strip()
-        if summary:
-            self.chat_append("system", f"[Self-Heal] {summary}")
-        self.chat_append("system", "[Self-Heal] Retrying the interrupted request.")
-        self.codex_repair.consume_recovery()
-        if retry_user_message:
-            self.ui_queue.put(("status_widget_dashboard_activity", "Retrying interrupted request after repair."))
-            self.submit_user_text(retry_user_message)
 
     def _reset_mic_ui(self) -> None:
         reset_mic_ui_action(self)
@@ -1290,7 +1206,6 @@ class PiperController:
         try:
             while dpg.is_dearpygui_running():
                 self.pump_ui_queue()
-                self.poll_codex_repair()
                 tts_busy = self.is_tts_active()
                 if tts_busy != self._last_tts_busy:
                     self.refresh_interaction_state()

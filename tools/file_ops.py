@@ -323,5 +323,5 @@ def resolve_workspace_path(workspace: Path, raw_path: Any) -> tuple[Path, str]:
     try:
         canonical_full.relative_to(canonical_root)
     except ValueError:
-        raise FileOpError("FILE_OP path escapes the workspace.")
+        raise FileOpError("FILE_OP path escapes the workspace. I can only read and write files inside the workspace folder.")
     return full_path, candidate.as_posix()

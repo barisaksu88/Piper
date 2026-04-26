@@ -46,7 +46,6 @@ class DummyOrchestrator:
         self.document_focus_sources = []
         self.turn_screen_image_path = None
         self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = {"decision": "monitor"}
         self.failed_task_router_retries = 1
         self.last_stage_outcome = StageOutcomePack(
             status="PARTIAL",

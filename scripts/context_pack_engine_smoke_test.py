@@ -240,10 +240,6 @@ def _run(tmp_workspace: Path) -> int:
             "procedure": ["inspect", "modify", "verify"],
             "persona_hint": "Speak from verified artifact state.",
         },
-        latest_codex_escalation={
-            "summary": "Planner looped during file verification.",
-            "brief_path": "data/debug/codex_escalations.jsonl",
-        },
         persona_runtime=persona_runtime,
     )
     read_directive_pack = service.build_persona_directive_pack(
@@ -251,7 +247,6 @@ def _run(tmp_workspace: Path) -> int:
         ingested_document_chat=False,
         reporter_just_ran=False,
         active_skill={},
-        latest_codex_escalation={},
         persona_runtime=targeted_read_runtime,
     )
     paused_directive_pack = service.build_persona_directive_pack(
@@ -259,7 +254,6 @@ def _run(tmp_workspace: Path) -> int:
         ingested_document_chat=False,
         reporter_just_ran=False,
         active_skill={},
-        latest_codex_escalation={},
         persona_runtime=paused_runtime,
     )
     partial_directive_pack = service.build_persona_directive_pack(
@@ -267,7 +261,6 @@ def _run(tmp_workspace: Path) -> int:
         ingested_document_chat=False,
         reporter_just_ran=False,
         active_skill={},
-        latest_codex_escalation={},
         persona_runtime=partial_runtime,
     )
     failed_directive_pack = service.build_persona_directive_pack(
@@ -275,7 +268,6 @@ def _run(tmp_workspace: Path) -> int:
         ingested_document_chat=False,
         reporter_just_ran=False,
         active_skill={},
-        latest_codex_escalation={},
         persona_runtime=failed_mutation_runtime,
     )
     search_directive_pack = service.build_persona_directive_pack(
@@ -283,7 +275,6 @@ def _run(tmp_workspace: Path) -> int:
         ingested_document_chat=False,
         reporter_just_ran=True,
         active_skill={},
-        latest_codex_escalation={},
         persona_runtime=service.build_persona_runtime_pack([], reporter_just_ran=True),
     )
 

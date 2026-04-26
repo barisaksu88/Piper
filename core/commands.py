@@ -159,12 +159,6 @@ def handle_command(user_text: str, *, style_mgr: StyleManager) -> CommandResult:
             vision_prompt=question,
         )
 
-    if low == "/codex":
-        return CommandResult(True, action="codex_support", support_note="")
-
-    if low.startswith("/codex "):
-        return CommandResult(True, action="codex_support", support_note=txt.split(maxsplit=1)[1].strip())
-
     if low in {"/graph", "/langgraph"}:
         return CommandResult(True, action="langgraph_recovery", graph_action="status")
 

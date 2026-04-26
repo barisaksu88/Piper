@@ -780,8 +780,6 @@ def on_send(controller) -> None:
                 daemon=True,
             ).start()
             return
-        elif res.action == "codex_support":
-            controller.export_codex_support_snapshot(res.support_note or "")
         elif res.action == "langgraph_recovery":
             _handle_langgraph_recovery_command(controller, res.graph_action or "status")
         elif res.action == "set_admin_password" and res.password_value is not None:

@@ -383,8 +383,6 @@ Persona can output `[ROUTER]` to request a re-route to `phase_route`. This is gu
     │       → IGNORE (search cycle is complete)
     │
     ├── outcome_failed?
-    │       ├── codex escalation active?
-    │       │       → IGNORE (user must decide)
     │       ├── reply asks for user confirmation?
     │       │       → IGNORE (let user respond)
     │       ├── failed_task_router_retries >= 1?
@@ -1074,7 +1072,7 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 - No `bytes_b64` write paths remain in the codebase. The only surviving reference is the legacy undo read handler in `change_journal.py`, which skips old entries safely.
 - The repo sweep also capped other JSONL write surfaces discovered during the audit: persisted chat memory and Codex escalation logs now prune on write too.
 
-**Files:** `AGENTS.md` (§10A doctrine); `memory/storage.py` (shared JSONL tail-prune helper); `core/engines/stats_collector.py` (write-side rotation); `memory/chat_state.py` (bounded `memory.jsonl` writes); `core/engineering_support.py` (bounded `codex_escalations.jsonl` writes)
+**Files:** `AGENTS.md` (§10A doctrine); `memory/storage.py` (shared JSONL tail-prune helper); `core/engines/stats_collector.py` (write-side rotation); `memory/chat_state.py` (bounded `memory.jsonl` writes)
 
 ---
 
