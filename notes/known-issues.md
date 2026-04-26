@@ -30,6 +30,16 @@
 - If stale memories still intrude, retrieval thresholds or domain-aware recall gating may need tightening.
 - On the current `Qwen3.5-9B-Q6_K` + `llama-server` b8241 path, enabling global reasoning (`--reasoning-budget -1`) is not a safe replacement for per-phase thinking. Plain reasoning-enabled prompts can 500 with `Failed to parse input`, and `/no_think` does not reliably suppress `reasoning_content`.
 
+## LangGraph Runtime
+
+- **LangGraph silently drops `config` injection if the `config` parameter has a non-`RunnableConfig` type annotation.**
+  - Symptom: Nodes receive `config=None` even though `graph.invoke(state, config={...})` is called correctly.
+  - Error: `"route_node requires an orchestrator instance in config['configurable']['orchestrator']"`
+  - Root cause: LangGraph inspects function signatures at graph compile time. If `config` is annotated as `dict[str, Any] | None` or `Any | None`, LangGraph decides the node does not accept config and never passes it.
+  - Fix: Use untyped `config=None` (no type annotation) for node function signatures.
+  - Affected files: `core/graph_nodes.py` (all four nodes: `route_node`, `manager_node`, `verify_node`, `persona_node`).
+  - Do not re-add type annotations to `config` without first verifying LangGraph behavior in the installed version.
+
 ## FILE_WORK
 
 - Open-ended file reorganization is much safer now, but proposal-first flows are still shallow.

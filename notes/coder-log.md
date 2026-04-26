@@ -1,5 +1,36 @@
 # Coder Log
 
+- 2026-04-26: Phase 4 — LangGraph orchestrator wiring (graph mode) with golden corpus verification.
+  - Scope:
+    - `core/orchestrator_graph_builder.py`: fixed graph routing for Phase 4
+      - Conditional edge from ROUTE: CHAT/SEARCH → PERSONA, TASK → MANAGER
+      - VERIFY always → PERSONA (removed retry loop that caused infinite cycles)
+      - **Critical discovery**: LangGraph inspects `config` parameter type annotations.
+        If `config` is typed as `dict[str, Any] | None` (or `Any | None`), LangGraph
+        silently drops config injection, passing `None` instead. Nodes must use
+        untyped `config=None` signature for config to flow through `graph.invoke()`.
+        This caused "route_node requires an orchestrator instance" errors.
+    - `core/graph_nodes.py`: removed type annotations from `config` in all 4 nodes
+    - `tests/golden/record_piper_turns.py`: added `--graph-mode` flag + `_capturing_run_langgraph` instrumentation
+      - Graph mode bypasses `dispatch_stage`, so the legacy capture hook was never called
+      - New hook patches `Orchestrator._run_langgraph` to extract state after graph completion
+    - `tests/golden/corpus_graph_mode/`: 11-turn corpus recorded with `USE_LANGGRAPH_ORCHESTRATOR=true`
+  - Validation:
+    - `python compare_turns.py corpus corpus_graph_mode --mode=route_only` — 8/11 pass
+      - 3 failures: `ambiguous_input` (LLM variance: task_event vs code_fix),
+        `code_generation` (LLM variance: 1 vs 2 stages),
+        `search_request` (baseline artifact: empty route_decision)
+    - `python compare_turns.py corpus corpus_graph_mode --mode=manager_only` — 8/11 pass
+    - `python compare_turns.py corpus corpus_graph_mode --mode=verify_and_persona_only` — 8/11 pass
+    - For matching-route turns (8/11), full pipeline match is 8/8
+    - `python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean
+    - `scripts/orchestrator_graph_smoke_test.py --json` — pass
+    - `scripts/code_session_smoke_test.py --json` — pass
+    - `scripts/file_edit_smoke_test.py --json` — pass
+    - `scripts/file_lookup_smoke_test.py --json` — pass
+    - `scripts/file_crud_smoke_test.py --json` — pass
+    - `scripts/file_chaos_test.py --json` — pass
+
 - 2026-04-26: Phase 1 — ROUTE node extraction with golden corpus verification (11/11 pass).
   - Scope:
     - `core/graph_nodes.py`: new LangGraph-compatible ROUTE node (`route_node`)

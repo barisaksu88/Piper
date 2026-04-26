@@ -268,6 +268,47 @@ def _install_instrumentation() -> None:
 
     _orc_module.Orchestrator.dispatch_stage = _capturing_dispatch
 
+    # Phase 4 — capture graph-mode turns (dispatch_stage is never called)
+    _orig_run_langgraph = _orc_module.Orchestrator._run_langgraph
+
+    def _capturing_run_langgraph(self) -> None:
+        _orig_run_langgraph(self)
+        global _current_capture
+        if _current_capture is not None:
+            try:
+                _current_capture["route_decision"] = _sanitize_route_decision(
+                    dict(self.route_decision or {})
+                )
+            except Exception:
+                pass
+            try:
+                _current_capture["scratchpad"] = list(self.scratchpad)
+                _current_capture["tool_calls"] = _extract_tool_calls(self.scratchpad)
+                _current_capture["tool_results"] = _extract_tool_results(self.scratchpad)
+            except Exception:
+                pass
+            try:
+                _current_capture["verification_passed"] = _extract_verification_passed(self)
+            except Exception:
+                pass
+            try:
+                _current_capture["pre_persona_output"] = _extract_pre_persona_output(self)
+            except Exception as exc:
+                _current_capture["pre_persona_output"] = f"<ERROR: {exc}>"
+            # Synthesize stage_transitions for graph mode based on route_decision
+            if not _current_capture.get("stage_transitions"):
+                decision = str((self.route_decision or {}).get("decision") or "").strip().upper()
+                if decision == "CHAT":
+                    _current_capture["stage_transitions"] = ["ROUTE", "PERSONA"]
+                elif decision == "SEARCH":
+                    _current_capture["stage_transitions"] = ["ROUTE", "PERSONA"]
+                elif decision == "TASK":
+                    _current_capture["stage_transitions"] = ["ROUTE", "MANAGER", "VERIFY", "PERSONA"]
+                else:
+                    _current_capture["stage_transitions"] = ["ROUTE", "PERSONA"]
+
+    _orc_module.Orchestrator._run_langgraph = _capturing_run_langgraph
+
 
 # ---------------------------------------------------------------------------
 # Golden turn builder
@@ -583,6 +624,11 @@ def main() -> int:
         help="Patch Orchestrator to use core.graph_nodes.persona_node for the PERSONA stage (Phase 3 verification).",
     )
     parser.add_argument(
+        "--graph-mode",
+        action="store_true",
+        help="Enable USE_LANGGRAPH_ORCHESTRATOR feature flag (Phase 4 graph wiring).",
+    )
+    parser.add_argument(
         "--corpus-dir",
         type=Path,
         default=None,
@@ -591,6 +637,11 @@ def main() -> int:
     args = parser.parse_args()
 
     corpus_dir = args.corpus_dir or Path(__file__).resolve().parent / "corpus"
+    if args.graph_mode:
+        from config import CFG
+        CFG.USE_LANGGRAPH_ORCHESTRATOR = True
+        print("[GoldenRecorder] Phase 4 mode: LangGraph orchestrator enabled.")
+
     recorder = GoldenRecorder(
         corpus_dir=corpus_dir,
         use_route_node=args.route_node,

@@ -256,6 +256,10 @@ class Orchestrator:
     def run(self):
         self.prepare_turn()
 
+        if getattr(CFG, "USE_LANGGRAPH_ORCHESTRATOR", False):
+            self._run_langgraph()
+            return
+
         try:
             while self.next_stage != "FINISHED":
                 self.raise_if_cancelled()
@@ -270,6 +274,57 @@ class Orchestrator:
         except Exception as exc:
             self._record_turn_stats_if_ready(aborted=True, detail=str(exc), phase=self.next_stage)
             raise
+
+    def _run_langgraph(self) -> None:
+        """Run the turn through the LangGraph orchestrator (Phase 4)."""
+        from core.orchestrator_graph_builder import build_piper_graph
+        from core.orchestrator_graph import _open_checkpoint_handle
+        from core.graph_nodes import PiperState
+
+        thread_id = str(getattr(getattr(self, "turn_stats", None), "turn_id", "") or "default")
+        handle = _open_checkpoint_handle(
+            with_checkpointer=True,
+            checkpoint_mode=getattr(CFG, "LANGGRAPH_CHECKPOINT_MODE", "sqlite"),
+            checkpoint_path=getattr(CFG, "LANGGRAPH_CHECKPOINT_PATH", None),
+            checkpoint_history_limit=getattr(CFG, "LANGGRAPH_CHECKPOINT_HISTORY_LIMIT", 500),
+        )
+        try:
+            graph = build_piper_graph(checkpointer=handle.checkpointer)
+        except Exception as exc:
+            handle.close()
+            raise RuntimeError(f"Failed to build LangGraph orchestrator: {exc}") from exc
+
+        initial_state = PiperState(
+            messages=[],
+            stage="INIT",
+            route_decision=None,
+            manager_result=None,
+            verification_passed=False,
+            pre_persona_output=None,
+            persona_output=None,
+            workspace_path=str(getattr(getattr(self, "brain", None), "workspace", ".")),
+        )
+        config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "orchestrator": self,
+            }
+        }
+
+        try:
+            self.ui.put(("agent_log", "[LANGGRAPH] Starting graph invocation."))
+            result = graph.invoke(initial_state, config=config)
+            self.ui.put(("agent_log", f"[LANGGRAPH] Graph complete. Final stage: {result.get('stage')}"))
+        except OperationCancelled:
+            self.ui.put(("agent_log", "   -> Action canceled by user."))
+            self._log_dashboard("Canceled.")
+            raise
+        except Exception as exc:
+            self._record_turn_stats_if_ready(aborted=True, detail=str(exc), phase=self.next_stage)
+            raise
+        finally:
+            handle.close()
+        self._record_turn_stats_if_ready()
 
     def _phase_route(self):
         phase_route(self)

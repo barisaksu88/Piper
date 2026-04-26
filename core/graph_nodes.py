@@ -32,7 +32,7 @@ class PiperState(TypedDict, total=False):
     workspace_path: str
 
 
-def route_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+def route_node(state: PiperState, config=None) -> PiperState:
     """ROUTE stage — decide which domain handles the user input.
 
     For Phase 1 this delegates to the existing ``phase_route`` logic via the
@@ -57,7 +57,7 @@ def route_node(state: PiperState, config: dict[str, Any] | None = None) -> Piper
     }
 
 
-def manager_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+def manager_node(state: PiperState, config=None) -> PiperState:
     """MANAGER stage — execute TASK stages through StageExecutor.
 
     For Phase 2 this delegates to the existing ``phase_manager`` logic via the
@@ -89,7 +89,7 @@ def manager_node(state: PiperState, config: dict[str, Any] | None = None) -> Pip
     }
 
 
-def verify_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+def verify_node(state: PiperState, config=None) -> PiperState:
     """VERIFY stage — read the authoritative verification result from the orchestrator.
 
     In the legacy runtime verification happens inside StageExecutor during the
@@ -115,7 +115,7 @@ def verify_node(state: PiperState, config: dict[str, Any] | None = None) -> Pipe
     }
 
 
-def persona_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+def persona_node(state: PiperState, config=None) -> PiperState:
     """PERSONA stage — generate the assistant response.
 
     For Phase 3 this delegates to the existing ``phase_persona`` logic via the
