@@ -152,7 +152,7 @@ def load_langgraph_recovery_record(*, path: Path | str | None = None) -> dict[st
         return {}
     try:
         payload = json.loads(record_path.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -174,7 +174,7 @@ def save_langgraph_recovery_record(record: dict[str, Any], *, path: Path | str |
     except Exception:
         try:
             os.unlink(tmp_name)
-        except Exception:
+        except OSError:
             pass
         raise
 
@@ -230,7 +230,7 @@ def load_langgraph_interrupt_record(*, path: Path | str | None = None) -> dict[s
         return {}
     try:
         payload = json.loads(record_path.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -252,7 +252,7 @@ def save_langgraph_interrupt_record(record: dict[str, Any], *, path: Path | str 
     except Exception:
         try:
             os.unlink(tmp_name)
-        except Exception:
+        except OSError:
             pass
         raise
 
@@ -358,13 +358,23 @@ def _prune_sqlite_checkpoint_store(connection: sqlite3.Connection, *, max_checkp
     if not table_exists:
         return 0
 
+    # Per-thread pruning: keep the N most recent checkpoints for each
+    # (thread_id, checkpoint_ns) tuple.  Using a window function avoids the
+    # old global-rowid trap where one thread's flood could erase another
+    # thread's checkpoints.
     stale_rows = list(
         connection.execute(
             """
             SELECT thread_id, checkpoint_ns, checkpoint_id
-            FROM checkpoints
-            ORDER BY rowid DESC
-            LIMIT -1 OFFSET ?
+            FROM (
+                SELECT thread_id, checkpoint_ns, checkpoint_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY thread_id, checkpoint_ns
+                           ORDER BY rowid DESC
+                       ) as rn
+                FROM checkpoints
+            )
+            WHERE rn > ?
             """,
             (max_checkpoints,),
         )
@@ -525,7 +535,7 @@ def _now_utc_iso() -> str:
 def _relative_debug_path(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(CFG.ROOT_DIR.resolve()))
-    except Exception:
+    except (ValueError, OSError):
         return str(path)
 
 
@@ -655,22 +665,30 @@ def _emit_interrupt_prompt(orc: Orchestrator, payload: dict[str, Any]) -> None:
 def _upsert_runtime_context_for_interrupt(orc: Orchestrator) -> None:
     try:
         from core.runtime_context import LATEST_RUNTIME_CONTEXT_PREFIX
+    except ImportError as exc:
+        _LOG.debug("Could not import runtime context for LangGraph interrupt: %s", exc)
+        return
 
+    try:
         payload = orc.prompt_context.build_runtime_context_message(orc, reporter_just_ran=False)
-        if not payload:
-            return
-        try:
-            orc.chat.upsert_hidden_system_message(LATEST_RUNTIME_CONTEXT_PREFIX, payload)
-        except AttributeError:
-            orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
-    except Exception as exc:
-        _LOG.debug("Could not upsert runtime context for LangGraph interrupt: %s", exc)
+    except AttributeError as exc:
+        _LOG.debug("Prompt context unavailable for LangGraph interrupt: %s", exc)
+        return
+
+    if not payload:
+        return
+
+    try:
+        orc.chat.upsert_hidden_system_message(LATEST_RUNTIME_CONTEXT_PREFIX, payload)
+    except AttributeError:
+        orc.chat.append_message({"role": "system", "content": payload, "hidden": True})
 
 
 def _snapshot_checkpoint_details(runtime: OrchestratorGraphRuntime, *, thread_id: str) -> dict[str, Any]:
     try:
         snapshot = runtime.graph.get_state(_checkpoint_config(thread_id))
-    except Exception:
+    except Exception as exc:
+        _LOG.debug("Could not fetch LangGraph checkpoint state for thread '%s': %s", thread_id, exc)
         return {}
     values = dict(getattr(snapshot, "values", {}) or {})
     config = dict(getattr(snapshot, "config", {}) or {})
@@ -709,7 +727,7 @@ def _record_pending_interrupt(
     }
     try:
         save_langgraph_interrupt_record(record)
-    except Exception as exc:
+    except (OSError, TypeError) as exc:
         _LOG.warning("Could not save LangGraph interrupt record: %s", exc)
         orc.ui.put(("agent_log", f"[LANGGRAPH] interrupt record save failed: {exc}"))
     if payload:
@@ -726,7 +744,8 @@ def _record_pending_interrupt(
                     orc.chat.upsert_hidden_system_message(PENDING_FILE_TARGET_CONFIRMATION_PREFIX, message)
                 except AttributeError:
                     orc.chat.append_message({"role": "system", "content": message, "hidden": True})
-            except Exception:
+            except (ImportError, OSError, AttributeError) as exc:
+                _LOG.debug("Could not append file-target confirmation for interrupt: %s", exc)
                 pass
         if str(payload.get("kind") or "").strip().lower() in {"stage_user_input_pause", "stage_approval_pause"}:
             _upsert_runtime_context_for_interrupt(orc)
@@ -765,7 +784,7 @@ def _record_recoverable_failure(
     }
     try:
         save_langgraph_recovery_record(record)
-    except Exception as exc:
+    except (OSError, TypeError) as exc:
         _LOG.warning("Could not save LangGraph recovery record: %s", exc)
         orc.ui.put(("agent_log", f"[LANGGRAPH] recovery record save failed: {exc}"))
         return
@@ -1133,7 +1152,7 @@ def build_orchestrator_graph_runtime(
     )
     try:
         graph = _compile_orchestrator_graph(checkpointer=handle.checkpointer)
-    except Exception:
+    except (RuntimeError, ImportError):
         handle.close()
         raise
     return OrchestratorGraphRuntime(
@@ -1200,7 +1219,7 @@ def run_agent_loop_with_langgraph(orc_cfg: OrchestratorConfig) -> None:
         orc.prepare_turn()
         if resume_thread_id and getattr(orc, "turn_stats", None) is not None:
             orc.turn_stats.turn_id = resume_thread_id
-    except Exception:
+    except (RuntimeError, TypeError, ValueError, OSError):
         runtime.close()
         raise
     _log_graph_runtime_banner(
