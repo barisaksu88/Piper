@@ -701,6 +701,7 @@ class Config:
     DEBUG_LLM_PROMPTS: bool = _env_flag("PIPER_DEBUG_LLM_PROMPTS", True)
     DEBUG_MANAGER_PROMPTS: bool = _env_flag("PIPER_DEBUG_MANAGER_PROMPTS", False)
     DEBUG_LANGGRAPH_TRACE: bool = _env_flag("PIPER_DEBUG_LANGGRAPH_TRACE", True)
+    DEBUG_LANGGRAPH_VISUALIZE: bool = _env_flag("PIPER_DEBUG_LANGGRAPH_VISUALIZE", False)
     # Stream pipeline trace: prints [PIPE-IN], [FILTER-OUT], [QUEUE-PUT] per token.
     # Disable in production — enable only when debugging streaming regressions.
     DEBUG_STREAMING_PIPELINE: bool = _env_flag("PIPER_DEBUG_STREAMING_PIPELINE", False)

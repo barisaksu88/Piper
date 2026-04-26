@@ -302,6 +302,14 @@ class Orchestrator:
             handle.close()
             raise RuntimeError(f"Failed to build LangGraph orchestrator: {exc}") from exc
 
+        if getattr(CFG, "DEBUG_LANGGRAPH_VISUALIZE", False):
+            from core.orchestrator_graph_builder import save_piper_graph_visualization
+            try:
+                viz_path = save_piper_graph_visualization(graph)
+                self.ui.put(("agent_log", f"[LANGGRAPH] Graph visualization: {viz_path}"))
+            except Exception as exc:
+                self.ui.put(("agent_log", f"[LANGGRAPH] Visualization skipped: {exc}"))
+
         initial_state = PiperState(
             messages=[],
             stage="INIT",

@@ -119,3 +119,36 @@ def build_piper_graph(*, checkpointer: Any | None = None) -> Any:
     builder.add_edge("PERSONA", END)
 
     return builder.compile(checkpointer=checkpointer)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Visual debug traces
+# ---------------------------------------------------------------------------
+
+
+def save_piper_graph_visualization(graph, *, path=None):
+    """Render compiled graph to PNG or Mermaid text fallback.
+
+    PNG is preferred because it renders the full graph with styling.
+    If anything fails (missing playwright, graphviz, etc.) we fall back
+    to plain Mermaid markdown so developers still have a readable diagram.
+    """
+    from pathlib import Path
+
+    out_dir = Path(path or Path("data") / "debug")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    png_path = out_dir / "langgraph_visualization.png"
+    md_path = out_dir / "langgraph_visualization.md"
+
+    try:
+        png_bytes = graph.get_graph().draw_mermaid_png()
+        png_path.write_bytes(png_bytes)
+        if md_path.exists():
+            md_path.unlink()
+        return png_path
+    except Exception:
+        text = graph.get_graph().draw_mermaid()
+        md_path.write_text(text, encoding="utf-8")
+        if png_path.exists():
+            png_path.unlink()
+        return md_path
