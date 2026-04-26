@@ -4,7 +4,6 @@ import json
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -16,38 +15,12 @@ from core.orchestrator_graph import (  # noqa: E402
     snapshot_orchestrator_state,
 )
 from scripts.langgraph_checkpoint_inspect import inspect_checkpoints  # noqa: E402
+from scripts.langgraph_test_fixtures import BaseDummyOrchestrator  # noqa: E402
 
 
-class DummyUi:
+class InspectSmokeOrchestrator(BaseDummyOrchestrator):
     def __init__(self) -> None:
-        self.events: list[object] = []
-
-    def put(self, event) -> None:
-        self.events.append(event)
-
-
-class InspectSmokeOrchestrator:
-    def __init__(self) -> None:
-        self.ui = DummyUi()
-        self.turn_stats = SimpleNamespace(turn_id="checkpoint-inspect-smoke")
-        self.next_stage = "ROUTE"
-        self.user_msg = "Inspect checkpoint state."
-        self.route_decision: dict[str, object] = {}
-        self.context_card: dict[str, object] = {}
-        self.scratchpad: list[str] = []
-        self.ingested_document_chat = False
-        self.document_focus_text = ""
-        self.document_focus_refs: list[str] = []
-        self.document_focus_sources: list[str] = []
-        self.turn_screen_image_path = None
-        self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = None
-        self.failed_task_router_retries = 0
-        self.last_stage_outcome = None
-        self.last_verification = None
-        self.route_interceptor = ""
-        self.reporter_just_ran = False
-        self.latest_search_summary = ""
+        super().__init__(turn_id="checkpoint-inspect-smoke", user_msg="Inspect checkpoint state.")
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.synthetic_user_turn = False

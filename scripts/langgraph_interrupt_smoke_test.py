@@ -20,73 +20,19 @@ from core.orchestrator_graph import (  # noqa: E402
 )
 from core.orchestrator import OrchestratorConfig  # noqa: E402
 from core.runtime_context import LATEST_RUNTIME_CONTEXT_PREFIX  # noqa: E402
+from scripts.langgraph_test_fixtures import (  # noqa: E402
+    BaseDummyOrchestrator,
+    DummyChat,
+    DummyPromptContext,
+    DummyUi,
+)
 
 
-class DummyUi:
+class InterruptDummyOrchestrator(BaseDummyOrchestrator):
     def __init__(self) -> None:
-        self.events: list[object] = []
-
-    def put(self, event) -> None:
-        self.events.append(event)
-
-
-class DummyChat:
-    def __init__(self) -> None:
-        self.messages: list[dict[str, object]] = []
-
-    def append_message(self, message: dict[str, object]) -> None:
-        self.messages.append(dict(message))
-
-    def upsert_hidden_system_message(self, prefix: str, content: str) -> None:
-        marker = str(prefix or "").strip()
-        if not marker:
-            return
-        payload = {"role": "system", "content": str(content or ""), "hidden": True}
-        for index in range(len(self.messages) - 1, -1, -1):
-            message = self.messages[index]
-            role = str(message.get("role") or "").lower()
-            content = str(message.get("content") or "")
-            if role == "system" and content.startswith(marker):
-                self.messages[index] = payload
-                return
-        self.messages.append(payload)
-
-
-class DummyPromptContext:
-    def build_runtime_context_message(self, _orc, *, reporter_just_ran: bool = False) -> str:
-        pause = dict(getattr(_orc, "pending_stage_pause", {}) or {})
-        pause_type = str(pause.get("pause_type") or "user input").replace("_", " ")
-        suffix = "reporter" if reporter_just_ran else "manager"
-        return f"{LATEST_RUNTIME_CONTEXT_PREFIX}\nLatest stage: {suffix} paused for {pause_type}."
-
-
-class InterruptDummyOrchestrator:
-    def __init__(self) -> None:
-        self.ui = DummyUi()
-        self.turn_stats = SimpleNamespace(turn_id="interrupt-smoke")
+        super().__init__(turn_id="interrupt-smoke", user_msg="Interrupt before speaking.")
         self.next_stage = "PERSONA"
-        self.user_msg = "Interrupt before speaking."
         self.route_decision = {"decision": "CHAT"}
-        self.context_card = {}
-        self.scratchpad: list[str] = []
-        self.ingested_document_chat = False
-        self.document_focus_text = ""
-        self.document_focus_refs: list[str] = []
-        self.document_focus_sources: list[str] = []
-        self.turn_screen_image_path = None
-        self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = None
-        self.failed_task_router_retries = 0
-        self.last_stage_outcome = None
-        self.last_verification = None
-        self.route_interceptor = ""
-        self.reporter_just_ran = False
-        self.latest_search_summary = ""
-        self.latest_search_failed = False
-        self.latest_search_error = ""
-        self.synthetic_user_turn = False
-        self.is_search_result = False
-        self.pending_file_target_confirmation = None
         self.pending_stage_pause = None
         self.calls: list[str] = []
 

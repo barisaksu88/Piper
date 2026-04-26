@@ -25,33 +25,12 @@ from core.orchestrator_graph import (  # noqa: E402
     snapshot_orchestrator_state,
 )
 from core.orchestrator import OrchestratorConfig  # noqa: E402
+from scripts.langgraph_test_fixtures import BaseDummyOrchestrator  # noqa: E402
 
 
-class DummyUi:
+class BaseRecoveryOrchestrator(BaseDummyOrchestrator):
     def __init__(self) -> None:
-        self.events: list[object] = []
-
-    def put(self, event) -> None:
-        self.events.append(event)
-
-
-class BaseRecoveryOrchestrator:
-    def __init__(self) -> None:
-        self.ui = DummyUi()
-        self.turn_stats = SimpleNamespace(turn_id="checkpoint-recovery-smoke")
-        self.next_stage = "ROUTE"
-        self.user_msg = "Say hello through the graph."
-        self.route_decision = {}
-        self.context_card = {}
-        self.scratchpad: list[str] = []
-        self.ingested_document_chat = False
-        self.document_focus_text = ""
-        self.document_focus_refs: list[str] = []
-        self.document_focus_sources: list[str] = []
-        self.turn_screen_image_path = None
-        self.turn_screen_image_kind = ""
-        self.latest_codex_escalation = None
-        self.failed_task_router_retries = 0
+        super().__init__(turn_id="checkpoint-recovery-smoke", user_msg="Say hello through the graph.")
         self.last_stage_outcome = StageOutcomePack(
             status="PARTIAL",
             detail="Recovery smoke in progress",
@@ -63,9 +42,6 @@ class BaseRecoveryOrchestrator:
             allow_persona_reroute=True,
         )
         self.last_verification = VerificationResult.partial("Recovery smoke in progress.", retry_budget=1)
-        self.route_interceptor = ""
-        self.reporter_just_ran = False
-        self.latest_search_summary = ""
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.synthetic_user_turn = False
