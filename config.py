@@ -683,6 +683,7 @@ class Config:
     EXECUTOR_MAX_ACTIONS_PER_STAGE: int = int(os.environ.get("PIPER_EXECUTOR_MAX_ACTIONS_PER_STAGE", "15"))
     SKILL_LAYER_ENABLED: bool = _env_flag("PIPER_SKILL_LAYER_ENABLED", True)
     LANGGRAPH_RUNTIME_ENABLED: bool = _env_flag("PIPER_LANGGRAPH_RUNTIME_ENABLED", False)
+    USE_LANGGRAPH_ORCHESTRATOR: bool = _env_flag("PIPER_USE_LANGGRAPH_ORCHESTRATOR", False)
     LANGGRAPH_CHECKPOINT_MODE: str = (
         os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_MODE", "sqlite").strip().lower() or "sqlite"
     )

@@ -511,7 +511,7 @@ class FollowupResolutionEngine:
         if _MEMORY_WORD_RE.search(text):
             return False
         lower = text.lower()
-        if any(token in lower for token in ("web", "workspace", "file", "files", "folder", "directory", "path", "filename")):
+        if any(token in lower for token in ("web", "workspace", "file", "files", "folder", "directory", "path", "filename", "search")):
             return False
         tokens = re.findall(r"[a-z0-9']+", lower)
         if not tokens or len(tokens) > _SHORT_CONTEXTUAL_FOLLOWUP_MAX_TOKENS:
