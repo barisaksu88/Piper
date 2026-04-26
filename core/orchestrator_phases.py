@@ -2105,8 +2105,12 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
                 pass
 
 
-def phase_persona(orc) -> None:
-    orc.raise_if_cancelled()
+def _run_persona_core(orc) -> None:
+    """Core PERSONA execution logic extracted from ``phase_persona``.
+
+    Builds persona prompts, streams the assistant response, handles recall
+    retries, and sets ``next_stage``.  Side-effects on *orc* are expected.
+    """
     orc._update_status(mode="SPEAKING")
     orc.ui.put(("agent_log", "--- PHASE 3: PERSONA (Speaking) ---"))
     orc.stats_collector.start_phase(orc.turn_stats, "persona")
@@ -2542,3 +2546,8 @@ def phase_persona(orc) -> None:
     orc.stats_collector.end_phase(orc.turn_stats, "persona")
     orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
     _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+
+
+def phase_persona(orc) -> None:
+    orc.raise_if_cancelled()
+    _run_persona_core(orc)

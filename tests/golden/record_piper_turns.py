@@ -406,6 +406,34 @@ def _install_manager_node_patch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Persona-node instrumentation (Phase 3 verification)
+# ---------------------------------------------------------------------------
+
+def _install_persona_node_patch() -> None:
+    """Patch Orchestrator._phase_persona so the PERSONA stage runs through persona_node."""
+    import core.orchestrator as _orc_module
+    import core.graph_nodes as _gn_module
+
+    def _patched_phase_persona(self):
+        state = _gn_module.PiperState(
+            messages=[],
+            stage="PERSONA",
+            route_decision=dict(self.route_decision) if getattr(self, "route_decision", None) else None,
+            manager_result=None,
+            verification_passed=False,
+            pre_persona_output=None,
+            persona_output=None,
+            workspace_path=str(getattr(getattr(self, "brain", None), "workspace", ".")),
+        )
+        config = {"configurable": {"orchestrator": self}}
+        _gn_module.persona_node(state, config=config)
+        # persona_node internally calls _run_persona_core, which streams the
+        # assistant response and sets self.next_stage exactly as phase_persona did.
+
+    _orc_module.Orchestrator._phase_persona = _patched_phase_persona
+
+
+# ---------------------------------------------------------------------------
 # Recorder runner
 # ---------------------------------------------------------------------------
 
@@ -418,6 +446,7 @@ class GoldenRecorder:
         timeout_s: float = 180.0,
         use_route_node: bool = False,
         use_manager_node: bool = False,
+        use_persona_node: bool = False,
     ) -> None:
         self.corpus_dir = Path(corpus_dir)
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
@@ -425,6 +454,7 @@ class GoldenRecorder:
         self.timeout_s = timeout_s
         self.use_route_node = use_route_node
         self.use_manager_node = use_manager_node
+        self.use_persona_node = use_persona_node
         self.turn_index = 0
         self.harness: Optional[PiperHarness] = None
 
@@ -476,6 +506,9 @@ class GoldenRecorder:
         if self.use_manager_node:
             _install_manager_node_patch()
             print("[GoldenRecorder] Phase 2 mode: MANAGER stage will use manager_node.")
+        if self.use_persona_node:
+            _install_persona_node_patch()
+            print("[GoldenRecorder] Phase 3 mode: PERSONA stage will use persona_node.")
 
         print("[GoldenRecorder] Starting PiperHarness...")
         self.harness = PiperHarness(
@@ -545,6 +578,11 @@ def main() -> int:
         help="Patch Orchestrator to use core.graph_nodes.manager_node for the MANAGER stage (Phase 2 verification).",
     )
     parser.add_argument(
+        "--persona-node",
+        action="store_true",
+        help="Patch Orchestrator to use core.graph_nodes.persona_node for the PERSONA stage (Phase 3 verification).",
+    )
+    parser.add_argument(
         "--corpus-dir",
         type=Path,
         default=None,
@@ -557,6 +595,7 @@ def main() -> int:
         corpus_dir=corpus_dir,
         use_route_node=args.route_node,
         use_manager_node=args.manager_node,
+        use_persona_node=args.persona_node,
     )
     recorded = recorder.run()
     return 0 if recorded else 1

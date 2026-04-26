@@ -87,3 +87,54 @@ def manager_node(state: PiperState, config: dict[str, Any] | None = None) -> Pip
             "verification_passed": verification_passed,
         },
     }
+
+
+def verify_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+    """VERIFY stage — read the authoritative verification result from the orchestrator.
+
+    In the legacy runtime verification happens inside StageExecutor during the
+    MANAGER phase.  This node acts as a state adapter that surfaces the result
+    into the LangGraph state so downstream nodes (e.g. PERSONA) can read it.
+    """
+    runtime = (config or {}).get("configurable", {}) if config else {}
+    orc = runtime.get("orchestrator")
+    if orc is None:
+        raise RuntimeError(
+            "verify_node requires an orchestrator instance in config['configurable']['orchestrator']. "
+            "Pass it when building the graph or invoking the node."
+        )
+
+    verification_passed = bool(
+        getattr(orc, "last_verification", None)
+        and str(getattr(orc.last_verification, "verdict", "")).strip().upper() == "VERIFIED"
+    )
+    return {
+        **state,
+        "stage": "VERIFY",
+        "verification_passed": verification_passed,
+    }
+
+
+def persona_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+    """PERSONA stage — generate the assistant response.
+
+    For Phase 3 this delegates to the existing ``phase_persona`` logic via the
+    orchestrator instance supplied in *config*.
+    """
+    runtime = (config or {}).get("configurable", {}) if config else {}
+    orc = runtime.get("orchestrator")
+    if orc is None:
+        raise RuntimeError(
+            "persona_node requires an orchestrator instance in config['configurable']['orchestrator']. "
+            "Pass it when building the graph or invoking the node."
+        )
+
+    from core.orchestrator_phases import _run_persona_core  # local: avoid circular import at module load
+
+    _run_persona_core(orc)
+
+    return {
+        **state,
+        "stage": "PERSONA",
+        "persona_output": orc.chat.get_messages_snapshot()[-1].get("content", "") if orc.chat.get_messages_snapshot() else None,
+    }
