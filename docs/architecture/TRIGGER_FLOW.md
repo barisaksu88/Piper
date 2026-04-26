@@ -1070,7 +1070,7 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 - `AGENTS.md` now includes §10A: binary payload prohibition, unbounded-file prohibition, and write-path rotation as a doctrine rule.
 - `stats.jsonl` now prunes to `history_limit` lines on write, using a temp-file plus atomic rename instead of leaving disk growth unbounded.
 - No `bytes_b64` write paths remain in the codebase. The only surviving reference is the legacy undo read handler in `change_journal.py`, which skips old entries safely.
-- The repo sweep also capped other JSONL write surfaces discovered during the audit: persisted chat memory and Codex escalation logs now prune on write too.
+- The repo sweep also capped other JSONL write surfaces discovered during the audit: persisted chat memory and agent escalation logs now prune on write too.
 
 **Files:** `AGENTS.md` (§10A doctrine); `memory/storage.py` (shared JSONL tail-prune helper); `core/engines/stats_collector.py` (write-side rotation); `memory/chat_state.py` (bounded `memory.jsonl` writes)
 

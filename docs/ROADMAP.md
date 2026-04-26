@@ -1,7 +1,7 @@
 # Piper — Roadmap
 
 Status: Active · Prescriptive
-This document owns all planned future work. Before Codex touches any item, its spec must be written here first (document-first doctrine). Implemented items are retired to `docs/architecture/TRIGGER_FLOW.md §13`.
+This document owns all planned future work. Before Kimi Code touches any item, its spec must be written by Kimi Web (the web-based Kimi agent) here first (document-first doctrine).
 
 Build order reflects current priority. Re-order deliberately, not casually.
 For high-risk interaction features, prefer the slice with the strongest verification surface first. In practice that means browser-first computer use before desktop automation, and pattern memory still stays last.
@@ -30,7 +30,7 @@ Pattern hints are injected as a `[PATTERN HINTS]` block — soft suggestions, no
 
 ## Backlog — needs spec before build
 
-*These are approved ideas. Write the spec here before handing to Codex.*
+*These are approved ideas. Write the spec here before handing to Kimi Code.*
 *Ordered by added value, highest first.*
 
 ---
