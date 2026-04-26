@@ -5,6 +5,7 @@ The Executive Board Loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 from typing import Any
@@ -276,9 +277,16 @@ class Orchestrator:
             raise
 
     def _run_langgraph(self) -> None:
-        """Run the turn through the LangGraph orchestrator (Phase 4)."""
+        """Run the turn through the LangGraph orchestrator (Phase 4/5)."""
         from core.orchestrator_graph_builder import build_piper_graph
-        from core.orchestrator_graph import _open_checkpoint_handle
+        from core.orchestrator_graph import (
+            _open_checkpoint_handle,
+            _checkpoint_config,
+            _extract_interrupt_values,
+            load_langgraph_interrupt_record,
+            save_langgraph_interrupt_record,
+            clear_langgraph_interrupt_record,
+        )
         from core.graph_nodes import PiperState
 
         thread_id = str(getattr(getattr(self, "turn_stats", None), "turn_id", "") or "default")
@@ -303,6 +311,7 @@ class Orchestrator:
             pre_persona_output=None,
             persona_output=None,
             workspace_path=str(getattr(getattr(self, "brain", None), "workspace", ".")),
+            interrupt_payload=None,
         )
         config = {
             "configurable": {
@@ -310,6 +319,20 @@ class Orchestrator:
                 "orchestrator": self,
             }
         }
+
+        # Phase 5 — resume support
+        interrupt_record = load_langgraph_interrupt_record()
+        resume_value = None
+        if interrupt_record and str(interrupt_record.get("thread_id") or "").strip() == thread_id:
+            resume_value = interrupt_record.get("langgraph_resume_value")
+            if resume_value is not None:
+                try:
+                    from langgraph.types import Command
+                except ImportError as exc:
+                    handle.close()
+                    raise RuntimeError("LangGraph resume command support is unavailable.") from exc
+                initial_state = Command(resume=resume_value)
+                self.ui.put(("agent_log", f"[LANGGRAPH] Resuming checkpoint thread {thread_id}."))
 
         try:
             self.ui.put(("agent_log", "[LANGGRAPH] Starting graph invocation."))
@@ -324,6 +347,60 @@ class Orchestrator:
             raise
         finally:
             handle.close()
+
+        # Phase 5 — interrupt handling
+        if isinstance(result, dict) and result.get("__interrupt__"):
+            interrupt_values = _extract_interrupt_values(result)
+            payload = dict(interrupt_values[0] or {}) if interrupt_values else {}
+
+            # Snapshot checkpoint details for resume
+            checkpoint_details: dict[str, Any] = {}
+            try:
+                snapshot = graph.get_state(_checkpoint_config(thread_id))
+                cfg = dict(getattr(snapshot, "config", {}) or {})
+                configurable = dict(cfg.get("configurable") or {})
+                checkpoint_details = {
+                    "checkpoint_id": str(configurable.get("checkpoint_id") or ""),
+                    "checkpoint_next": list(getattr(snapshot, "next", []) or []),
+                    "values_present": bool(dict(getattr(snapshot, "values", {}) or {})),
+                }
+            except Exception as exc:
+                self.ui.put(("agent_log", f"[LANGGRAPH] Could not snapshot checkpoint: {exc}"))
+
+            record = {
+                "schema": 1,
+                "status": "pending",
+                "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                "thread_id": thread_id,
+                "checkpoint_id": checkpoint_details.get("checkpoint_id", ""),
+                "checkpoint_next": checkpoint_details.get("checkpoint_next", []),
+                "interrupt_payload": payload,
+                "user_msg": str(getattr(self, "user_msg", "") or ""),
+                "stage_trace": [],
+            }
+            try:
+                save_langgraph_interrupt_record(record)
+            except Exception as exc:
+                self.ui.put(("agent_log", f"[LANGGRAPH] interrupt record save failed: {exc}"))
+
+            # Emit prompt to user
+            question = str(payload.get("question") or "").strip()
+            if question:
+                self.ui.put(("agent_log", f"[LANGGRAPH] Paused for approval: {question}"))
+                stream_payload: dict[str, Any] = {}
+                style_state = getattr(self, "ss", None)
+                if style_state is not None:
+                    stream_payload = {
+                        "tts_voice": getattr(style_state, "tts_voice", None),
+                        "tts_speed": getattr(style_state, "tts_speed", None),
+                    }
+                self.ui.put(("assistant_stream_start", stream_payload))
+                self.ui.put(("assistant_stream_delta", {"text": question}))
+                self.ui.put(("assistant_stream_end", ""))
+            return
+
+        # Clean completion — clear any stale interrupt record
+        clear_langgraph_interrupt_record(thread_id=thread_id)
         self._record_turn_stats_if_ready()
 
     def _phase_route(self):

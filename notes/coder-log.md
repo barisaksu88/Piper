@@ -1,5 +1,37 @@
 # Coder Log
 
+- 2026-04-26: Phase 5 — Interrupt integration into LangGraph orchestrator.
+  - Scope:
+    - `core/graph_nodes.py`: added interrupt support
+      - `interrupt_payload` field in `PiperState`
+      - `verify_node` detects `pending_file_target_confirmation` and `pending_stage_pause`
+      - `await_interrupt_node` calls `langgraph.types.interrupt(payload)` and applies resume
+      - Resume helpers: `_apply_file_target_resume`, `_apply_stage_approval_resume`, `_apply_user_input_resume`
+        - Adapted from legacy `orchestrator_graph.py` resume functions
+        - Update orchestrator directly (adapter pattern) instead of state dict
+    - `core/orchestrator_graph_builder.py`: added `AWAIT_INTERRUPT` node and conditional VERIFY routing
+      - VERIFY → AWAIT_INTERRUPT if `interrupt_payload` present
+      - VERIFY → MANAGER if `orc.next_stage == "MANAGER"` (after file-target or approval resume)
+      - VERIFY → ROUTE if `orc.next_stage == "ROUTE"` (after user-input resume)
+      - VERIFY → PERSONA otherwise
+      - AWAIT_INTERRUPT → VERIFY (loop back for re-evaluation)
+      - **Critical**: conditional edge functions receive `config` when typed as `config=None`
+        (same LangGraph type-annotation trap as node functions)
+    - `core/orchestrator.py`: `_run_langgraph()` updated with resume + interrupt handling
+      - Loads `langgraph_interrupt_record` at turn start; if thread_id matches and `langgraph_resume_value` exists, sends `Command(resume=...)`
+      - After `graph.invoke()`, checks `__interrupt__` in result and persists record to disk
+      - Emits prompt via assistant stream when interrupt has a question
+      - Clears interrupt record on clean completion
+  - Validation:
+    - `python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean
+    - `scripts/orchestrator_graph_smoke_test.py --json` — pass
+    - `scripts/code_session_smoke_test.py --json` — pass
+    - `scripts/file_edit_smoke_test.py --json` — pass
+    - `scripts/file_lookup_smoke_test.py --json` — pass
+    - `scripts/file_crud_smoke_test.py --json` — pass
+    - `scripts/file_chaos_test.py --json` — pass
+    - Golden corpus (graph mode): 8/11 route_only, 8/11 verify_and_persona_only — same as Phase 4, no regression
+
 - 2026-04-26: Phase 4 — LangGraph orchestrator wiring (graph mode) with golden corpus verification.
   - Scope:
     - `core/orchestrator_graph_builder.py`: fixed graph routing for Phase 4
