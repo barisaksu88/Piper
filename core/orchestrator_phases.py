@@ -13,6 +13,7 @@ from core.contracts import RouteDecision, StageOutcomePack
 from core.document_focus import build_document_focus_messages, extract_document_focus
 from core.debug_tools import log_prompt_debug
 from core.feature_hooks import fire_hooks
+from core.engines.context_pack import _hook_upsert_runtime_context
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.engines.summary import SummaryEngine
@@ -1505,8 +1506,13 @@ def phase_reporter(orc) -> None:
     orc.stats_collector.end_phase(orc.turn_stats, "reporter")
     orc.next_stage = "PERSONA"
 
-def phase_manager(orc) -> None:
-    orc.raise_if_cancelled()
+def _run_manager_core(orc) -> None:
+    """Core manager execution logic extracted from ``phase_manager``.
+
+    Runs all stages from the TASK card through ``StageExecutor``, handles
+    pauses, failures, auto-reroutes, and sets ``next_stage``.
+    Side-effects on *orc* are expected (this is the legacy boundary).
+    """
     orc.context_card = orc.route_decision.get("card", {})
     orc.pending_file_target_confirmation = None
     orc.pending_stage_pause = None
@@ -1701,7 +1707,7 @@ def phase_manager(orc) -> None:
             task_failed = True
             if bool(getattr(outcome_pack, "auto_reroute", False)) and int(getattr(orc, "failed_task_router_retries", 0) or 0) < 1:
                 orc.failed_task_router_retries = int(getattr(orc, "failed_task_router_retries", 0) or 0) + 1
-                _upsert_latest_runtime_context(orc, reporter_just_ran=False)
+                _hook_upsert_runtime_context(orc, reporter_just_ran=False)
                 reason = str(getattr(outcome_pack, "reroute_reason", "") or "").strip()
                 if reason:
                     orc.ui.put(("agent_log", f"   -> Auto-rerouting after failed stage: {reason}"))
@@ -1730,6 +1736,11 @@ def phase_manager(orc) -> None:
     orc.stats_collector.note_route(orc.turn_stats, decision="TASK")
     orc.stats_collector.end_phase(orc.turn_stats, "manager")
     orc.next_stage = "PERSONA"
+
+
+def phase_manager(orc) -> None:
+    orc.raise_if_cancelled()
+    _run_manager_core(orc)
 
 
 def phase_undo(orc) -> None:

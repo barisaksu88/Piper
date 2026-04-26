@@ -378,6 +378,34 @@ def _install_route_node_patch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Manager-node instrumentation (Phase 2 verification)
+# ---------------------------------------------------------------------------
+
+def _install_manager_node_patch() -> None:
+    """Patch Orchestrator._phase_manager so the MANAGER stage runs through manager_node."""
+    import core.orchestrator as _orc_module
+    import core.graph_nodes as _gn_module
+
+    def _patched_phase_manager(self):
+        state = _gn_module.PiperState(
+            messages=[],
+            stage="MANAGER",
+            route_decision=dict(self.route_decision) if getattr(self, "route_decision", None) else None,
+            manager_result=None,
+            verification_passed=False,
+            pre_persona_output=None,
+            persona_output=None,
+            workspace_path=str(getattr(getattr(self, "brain", None), "workspace", ".")),
+        )
+        config = {"configurable": {"orchestrator": self}}
+        _gn_module.manager_node(state, config=config)
+        # manager_node internally calls _run_manager_core, which sets
+        # self.scratchpad, self.next_stage, etc. exactly as phase_manager did.
+
+    _orc_module.Orchestrator._phase_manager = _patched_phase_manager
+
+
+# ---------------------------------------------------------------------------
 # Recorder runner
 # ---------------------------------------------------------------------------
 
@@ -389,12 +417,14 @@ class GoldenRecorder:
         enable_memory_learning: bool = False,
         timeout_s: float = 180.0,
         use_route_node: bool = False,
+        use_manager_node: bool = False,
     ) -> None:
         self.corpus_dir = Path(corpus_dir)
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         self.enable_memory_learning = enable_memory_learning
         self.timeout_s = timeout_s
         self.use_route_node = use_route_node
+        self.use_manager_node = use_manager_node
         self.turn_index = 0
         self.harness: Optional[PiperHarness] = None
 
@@ -443,6 +473,9 @@ class GoldenRecorder:
         if self.use_route_node:
             _install_route_node_patch()
             print("[GoldenRecorder] Phase 1 mode: ROUTE stage will use route_node.")
+        if self.use_manager_node:
+            _install_manager_node_patch()
+            print("[GoldenRecorder] Phase 2 mode: MANAGER stage will use manager_node.")
 
         print("[GoldenRecorder] Starting PiperHarness...")
         self.harness = PiperHarness(
@@ -507,6 +540,11 @@ def main() -> int:
         help="Patch Orchestrator to use core.graph_nodes.route_node for the ROUTE stage (Phase 1 verification).",
     )
     parser.add_argument(
+        "--manager-node",
+        action="store_true",
+        help="Patch Orchestrator to use core.graph_nodes.manager_node for the MANAGER stage (Phase 2 verification).",
+    )
+    parser.add_argument(
         "--corpus-dir",
         type=Path,
         default=None,
@@ -518,6 +556,7 @@ def main() -> int:
     recorder = GoldenRecorder(
         corpus_dir=corpus_dir,
         use_route_node=args.route_node,
+        use_manager_node=args.manager_node,
     )
     recorded = recorder.run()
     return 0 if recorded else 1

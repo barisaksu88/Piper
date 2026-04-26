@@ -55,3 +55,35 @@ def route_node(state: PiperState, config: dict[str, Any] | None = None) -> Piper
         "stage": "ROUTE",
         "route_decision": dict(orc.route_decision) if getattr(orc, "route_decision", None) else None,
     }
+
+
+def manager_node(state: PiperState, config: dict[str, Any] | None = None) -> PiperState:
+    """MANAGER stage — execute TASK stages through StageExecutor.
+
+    For Phase 2 this delegates to the existing ``phase_manager`` logic via the
+    orchestrator instance supplied in *config*.
+    """
+    runtime = (config or {}).get("configurable", {}) if config else {}
+    orc = runtime.get("orchestrator")
+    if orc is None:
+        raise RuntimeError(
+            "manager_node requires an orchestrator instance in config['configurable']['orchestrator']. "
+            "Pass it when building the graph or invoking the node."
+        )
+
+    from core.orchestrator_phases import _run_manager_core  # local: avoid circular import at module load
+
+    _run_manager_core(orc)
+
+    verification_passed = bool(
+        getattr(orc, "last_verification", None)
+        and str(getattr(orc.last_verification, "verdict", "")).strip().upper() == "VERIFIED"
+    )
+    return {
+        **state,
+        "stage": "MANAGER",
+        "manager_result": {
+            "next_stage": orc.next_stage,
+            "verification_passed": verification_passed,
+        },
+    }

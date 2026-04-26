@@ -257,6 +257,7 @@ def compare_turns(
     *mode*:
       - "full"   : compare all fields
       - "route_only" : compare only route_decision
+      - "manager_only" : compare route_decision + tool_calls + tool_results + verification_passed
     """
     case_name = str(expected.get("case_name", "unknown"))
     turn_id = str(expected.get("turn_id", "unknown"))
@@ -266,6 +267,38 @@ def compare_turns(
     errs.extend(_compare_route_decision(expected.get("route_decision"), actual.get("route_decision")))
 
     if mode == "route_only":
+        return TurnComparison(
+            turn_id=turn_id,
+            case_name=case_name,
+            mismatches=errs,
+            passed=len(errs) == 0,
+        )
+
+    if mode == "manager_only":
+        # tool_calls — exact match (args normalized)
+        errs.extend(
+            _compare_tool_calls(
+                expected.get("tool_calls") or [],
+                actual.get("tool_calls") or [],
+                "tool_calls",
+            )
+        )
+        # tool_results — normalize then compare
+        errs.extend(
+            _compare_tool_results(
+                expected.get("tool_results") or [],
+                actual.get("tool_results") or [],
+                "tool_results",
+            )
+        )
+        # verification_passed — exact match
+        errs.extend(
+            _compare_exact(
+                bool(expected.get("verification_passed")),
+                bool(actual.get("verification_passed")),
+                "verification_passed",
+            )
+        )
         return TurnComparison(
             turn_id=turn_id,
             case_name=case_name,
@@ -428,7 +461,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Output JSON report")
     parser.add_argument(
         "--mode",
-        choices=["full", "route_only"],
+        choices=["full", "route_only", "manager_only"],
         default="full",
         help="Comparison mode: full (default) or route_only",
     )
