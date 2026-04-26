@@ -140,8 +140,15 @@ class ContextPackRenderer:
         if pack.reporter_just_ran:
             if pack.search_query:
                 lines.append(f"Search query: {pack.search_query}")
-            lines.append("Execution status: SEARCH COMPLETED")
-            lines.append("Runtime note: Search summary was prepared for the user.")
+            if pack.search_failed:
+                lines.append("Execution status: SEARCH FAILED")
+                note = "Search failed before usable web results were retrieved."
+                if pack.search_error:
+                    note += f" Error: {pack.search_error[:500]}"
+                lines.append(f"Runtime note: {note}")
+            else:
+                lines.append("Execution status: SEARCH COMPLETED")
+                lines.append("Runtime note: Search summary was prepared for the user.")
         else:
             if pack.task_goal:
                 lines.append(f"Task goal: {pack.task_goal}")
@@ -375,6 +382,8 @@ class ContextPackEngine:
             runtime_note="" if reporter_just_ran else SummaryEngine.build_runtime_note(getattr(orc, "scratchpad", []) or []),
             relevant_paths=self._collect_runtime_context_paths(orc),
             reporter_just_ran=bool(reporter_just_ran),
+            search_failed=bool(getattr(orc, "latest_search_failed", False)) if reporter_just_ran else False,
+            search_error=str(getattr(orc, "latest_search_error", "") or "") if reporter_just_ran else "",
         )
 
     def render_runtime_context_message(self, pack: RuntimeContextPack) -> str:
@@ -699,11 +708,11 @@ def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
         return ""
     return (
         "[SEARCH_REPORT_RULE]\n"
-        "This turn is the final user-facing summary of a search that already completed.\n"
+        "This turn is the final user-facing summary of a search attempt that already finished.\n"
         "The user already received an initial response while the search was running.\n"
-        "Use the completed search summary to extend, refine, or correct that earlier response.\n"
+        "Use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
         "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
-        "Answer directly from the completed search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this completed search."
+        "Answer directly from the search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
     )
 
 

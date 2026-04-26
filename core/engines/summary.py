@@ -560,6 +560,16 @@ class SummaryEngine:
                     return summary
         if "OBSERVATION_TEXT:" in last_observation:
             try:
+                _, _, payload = last_observation.partition("OBSERVATION_TEXT:")
+                data = json.loads(payload.strip())
+            except Exception:
+                data = {}
+            if isinstance(data, dict):
+                summary = str(data.get("summary") or "").strip()
+                if summary:
+                    return summary
+        if "OBSERVATION_TEXT:" in last_observation:
+            try:
                 parts = last_observation.split("OBSERVATION_TEXT:")
                 if len(parts) > 1:
                     return parts[-1].strip()[:300]
@@ -591,30 +601,48 @@ class SummaryEngine:
         saved_path = str(data.get("saved_path") or "").strip()
         download_label = str(data.get("download_label") or "").strip()
         download_hint = str(data.get("download_hint") or "").strip()
+        history_navigation = str(data.get("history_navigation") or "").strip().lower()
         reported_title = str(data.get("reported_title") or data.get("title") or "").strip()
         current_url = str(data.get("current_url") or "").strip()
         requested_topic = str(data.get("requested_topic") or "").strip()
         matched_heading = str(data.get("matched_heading") or "").strip()
+        selector_hint = str(data.get("selector_hint") or "").strip().lower()
         extracts = [item for item in (data.get("extracts") or []) if isinstance(item, dict)]
         element_inventory = [item for item in (data.get("element_inventory") or []) if isinstance(item, dict)]
 
-        heading_text = ""
-        for item in extracts:
-            selector = str(item.get("selector") or "").strip().lower()
-            text_value = str(item.get("text") or "").strip()
-            topic_value = str(item.get("topic") or "").strip()
-            normalized_text = " ".join(text_value.split())
-            if (
-                selector == "h1"
-                and not topic_value
-                and normalized_text
-                and len(normalized_text) <= 160
-                and normalized_text.count(".") <= 1
-                and normalized_text.count("?") == 0
-                and normalized_text.count("!") == 0
-            ):
-                heading_text = text_value
-                break
+        heading_text = str(data.get("heading_text") or "").strip()
+        if not heading_text:
+            for item in extracts:
+                selector = str(item.get("selector") or "").strip().lower()
+                text_value = str(item.get("text") or "").strip()
+                topic_value = str(item.get("topic") or "").strip()
+                normalized_text = " ".join(text_value.split())
+                if (
+                    selector == "h1"
+                    and not topic_value
+                    and normalized_text
+                    and len(normalized_text) <= 160
+                    and normalized_text.count(".") <= 1
+                    and normalized_text.count("?") == 0
+                    and normalized_text.count("!") == 0
+                ):
+                    heading_text = text_value
+                    break
+        if not heading_text and selector_hint == "h1":
+            for item in element_inventory:
+                tag = str(item.get("tag") or "").strip().lower()
+                text_value = str(item.get("text") or "").strip()
+                normalized_text = " ".join(text_value.split())
+                if (
+                    tag == "h1"
+                    and normalized_text
+                    and len(normalized_text) <= 160
+                    and normalized_text.count(".") <= 1
+                    and normalized_text.count("?") == 0
+                    and normalized_text.count("!") == 0
+                ):
+                    heading_text = text_value
+                    break
 
         extra_headings: list[str] = []
         link_texts: list[str] = []
@@ -651,6 +679,28 @@ class SummaryEngine:
                 if text_value:
                     extracted_text = text_value
                     break
+
+        if history_navigation == "back":
+            if heading_text and current_url:
+                return f'Went back to {current_url}. The main heading is "{heading_text}".'
+            if heading_text:
+                return f'Went back to the previous page. The main heading is "{heading_text}".'
+            if status_text and current_url:
+                return f'Went back to {current_url}. The status text is "{status_text}".'
+            if status_text:
+                return f'Went back to the previous page. The status text is "{status_text}".'
+            if extracted_text:
+                preview = SummaryEngine.truncate_text(" ".join(extracted_text.split()), 260)
+                if current_url:
+                    return f"Went back to {current_url}. Here is the requested text: {preview}"
+                return f"Went back to the previous page. Here is the requested text: {preview}"
+            if reported_title and current_url:
+                return f'Went back to {current_url}. The page title is "{reported_title}".'
+            if reported_title:
+                return f'Went back to the previous page. The page title is "{reported_title}".'
+            if current_url:
+                return f"Went back to {current_url}."
+            return "Went back to the previous browser page."
 
         if status_text and saved_path:
             return f'The status text is "{status_text}", and the download was saved to `{saved_path}`.'

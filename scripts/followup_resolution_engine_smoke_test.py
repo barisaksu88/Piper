@@ -108,6 +108,7 @@ class FollowupResolutionEngineReport:
     browser_topic_reply_route: dict
     browser_anything_else_route: dict
     browser_retrieve_details_route: dict
+    browser_go_back_followup_route: dict
     browser_download_followup_route: dict
 
 
@@ -329,6 +330,29 @@ def run_smoke() -> FollowupResolutionEngineReport:
             operational_state_service=ops,
             knowledge_mgr=knowledge,
         )
+        browser_go_back_followup_route = engine.refine_with_llm(
+            llm=_FallbackOnlyLLM(),
+            decision={"decision": "CHAT"},
+            user_msg="go back",
+            recent_history=[
+                {
+                    "role": "system",
+                    "content": (
+                        "[LATEST_RUNTIME_CONTEXT]\n"
+                        "Previous route: TASK\n"
+                        "Previous user request: Open file:///fixture/index.html in the browser, click the next link, and tell me the page title.\n"
+                        "Task goal: Use the browser to complete the requested interaction at 'file:///fixture/next.html'.\n"
+                        "Execution status: SUCCESS\n"
+                        "Runtime note: Arrived on the next page at file:///fixture/next.html.\n"
+                        "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                    ),
+                },
+                {"role": "assistant", "content": "Arrived on the next page at file:///fixture/next.html."},
+                {"role": "user", "content": "go back"},
+            ],
+            operational_state_service=ops,
+            knowledge_mgr=knowledge,
+        )
         browser_download_followup_route = engine.refine_with_llm(
             llm=_FallbackOnlyLLM(),
             decision={"decision": "CHAT"},
@@ -363,11 +387,13 @@ def run_smoke() -> FollowupResolutionEngineReport:
     browser_topic_stage = dict((((browser_topic_reply_route or {}).get("card") or {}).get("stages") or [{}])[0])
     browser_anything_stage = dict((((browser_anything_else_route or {}).get("card") or {}).get("stages") or [{}])[0])
     browser_details_stage = dict((((browser_retrieve_details_route or {}).get("card") or {}).get("stages") or [{}])[0])
+    browser_go_back_stage = dict((((browser_go_back_followup_route or {}).get("card") or {}).get("stages") or [{}])[0])
     browser_meta = dict(browser_stage.get("computer_use") or {})
     browser_title_meta = dict(browser_title_stage.get("computer_use") or {})
     browser_topic_meta = dict(browser_topic_stage.get("computer_use") or {})
     browser_anything_meta = dict(browser_anything_stage.get("computer_use") or {})
     browser_details_meta = dict(browser_details_stage.get("computer_use") or {})
+    browser_go_back_meta = dict(browser_go_back_stage.get("computer_use") or {})
     browser_download_stage = dict((((browser_download_followup_route or {}).get("card") or {}).get("stages") or [{}])[0])
     browser_download_meta = dict(browser_download_stage.get("computer_use") or {})
 
@@ -399,7 +425,7 @@ def run_smoke() -> FollowupResolutionEngineReport:
         and str(browser_stage.get("stage_type") or "") == "COMPUTER_USE"
         and str(browser_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
         and str(browser_meta.get("selector_hint") or "") == "body"
-        and "requested on-page information" in str(browser_stage.get("stage_goal") or "").lower()
+        and "information about 'general info'" in str(browser_stage.get("stage_goal") or "").lower()
         and (browser_title_followup_route or {}).get("decision") == "TASK"
         and str(browser_title_stage.get("stage_type") or "") == "COMPUTER_USE"
         and str(browser_title_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
@@ -417,6 +443,10 @@ def run_smoke() -> FollowupResolutionEngineReport:
         and str(browser_details_stage.get("stage_type") or "") == "COMPUTER_USE"
         and str(browser_details_meta.get("start_url") or "") == "https://docs.python.org/3/license.html"
         and str(browser_details_meta.get("selector_hint") or "") == "body"
+        and (browser_go_back_followup_route or {}).get("decision") == "TASK"
+        and str(browser_go_back_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and str(browser_go_back_meta.get("start_url") or "") == "file:///fixture/next.html"
+        and str(browser_go_back_meta.get("history_navigation") or "") == "back"
         and (browser_download_followup_route or {}).get("decision") == "TASK"
         and str(browser_download_stage.get("stage_type") or "") == "COMPUTER_USE"
         and str(browser_download_meta.get("start_url") or "") == "http://127.0.0.1:9000/download_hub.html"
@@ -438,6 +468,7 @@ def run_smoke() -> FollowupResolutionEngineReport:
         browser_topic_reply_route=browser_topic_reply_route or {},
         browser_anything_else_route=browser_anything_else_route or {},
         browser_retrieve_details_route=browser_retrieve_details_route or {},
+        browser_go_back_followup_route=browser_go_back_followup_route or {},
         browser_download_followup_route=browser_download_followup_route or {},
     )
 

@@ -221,6 +221,7 @@ JSON only. No extra text. Keep `thought` short and concrete.
         lines.append("active_targets: " + (" | ".join(str(target).strip() for target in active_targets if str(target).strip()) or "(none identified)"))
         if declared_scope_root:
             lines.append(f"declared_scope_root: {declared_scope_root}")
+            lines.append("scope_rule: FILE_OP directory/root actions must stay under declared_scope_root unless this stage names a narrower child path.")
         if declared_exact_targets:
             lines.append("declared_exact_targets: " + " | ".join(str(target).strip() for target in declared_exact_targets if str(target).strip()))
         lines.append(f"evidence_required: {evidence_required or '(none)'}")

@@ -206,6 +206,9 @@ class PlannerBoundary:
                 stage["declared_scope_root"] = declared_scope_root
             elif "declared_scope_root" in stage:
                 stage.pop("declared_scope_root", None)
+            if declared_scope_root and not active_targets:
+                active_targets = [declared_scope_root]
+                stage["active_targets"] = list(active_targets)
         else:
             declared_exact_targets = [
                 str(item).strip()

@@ -771,6 +771,9 @@ class PiperController:
         self,
         *,
         cancel_token: CancellationToken | None = None,
+        langgraph_resume_thread_id: str = "",
+        langgraph_resume_checkpoint_id: str = "",
+        langgraph_resume_value: object | None = None,
     ) -> "OrchestratorConfig":
         from core.orchestrator import OrchestratorConfig
 
@@ -795,6 +798,9 @@ class PiperController:
             release_search_in_flight=self.release_search_in_flight,
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
+            langgraph_resume_thread_id=str(langgraph_resume_thread_id or ""),
+            langgraph_resume_checkpoint_id=str(langgraph_resume_checkpoint_id or ""),
+            langgraph_resume_value=langgraph_resume_value,
         )
 
     def _on_config_changed(self, changed_keys: list[str]) -> None:
@@ -938,18 +944,17 @@ class PiperController:
         return bool(tokens)
 
     def refresh_interaction_state(self) -> None:
-        can_interact = self.boot_ready and not self.has_active_operations()
+        active_operations = self.has_active_operations()
+        can_interact = self.boot_ready and not active_operations
         code_active = self.boot_ready and self.has_active_code_session()
         tts_active = self.boot_ready and self.is_tts_active()
         self._last_tts_busy = bool(tts_active)
-        stop_enabled = self.boot_ready and (self.has_active_operations() or code_active or tts_active)
-        for tag in (
-            self.tags.input_box,
-            self.tags.send_button,
-            self.tags.clear_session_button,
-            self.tags.mic_button,
-            self.tags.restart_button,
-        ):
+        stop_enabled = self.boot_ready and (active_operations or code_active or tts_active)
+        input_enabled = self.boot_ready and (can_interact or code_active or active_operations)
+        for tag in (self.tags.input_box, self.tags.send_button):
+            if dpg.does_item_exist(tag):
+                dpg.configure_item(tag, enabled=input_enabled)
+        for tag in (self.tags.clear_session_button, self.tags.mic_button, self.tags.restart_button):
             if dpg.does_item_exist(tag):
                 dpg.configure_item(tag, enabled=can_interact)
         if dpg.does_item_exist(self.tags.snapshot_button):
@@ -985,12 +990,18 @@ class PiperController:
         if dpg.does_item_exist(self.tags.code_clear_button):
             dpg.configure_item(self.tags.code_clear_button, enabled=self.boot_ready)
         if dpg.does_item_exist(self.tags.input_box):
+            hint = "Type here... (Enter to send)"
+            if active_operations:
+                hint = "Type stop/cancel or press Stop..."
+            elif code_active:
+                hint = "Send input to running code session..."
             dpg.configure_item(
                 self.tags.input_box,
-                hint="Send input to running code session..." if code_active else "Type here... (Enter to send)",
+                hint=hint,
             )
         if dpg.does_item_exist(self.tags.send_button):
-            dpg.set_item_label(self.tags.send_button, "Send to Code" if code_active else "Send")
+            label = "Stop" if active_operations else ("Send to Code" if code_active else "Send")
+            dpg.set_item_label(self.tags.send_button, label)
 
     def set_boot_ready(self, value: bool) -> None:
         self.boot_ready = bool(value)

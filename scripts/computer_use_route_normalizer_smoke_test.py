@@ -43,6 +43,10 @@ class ComputerUseRouteSmokeReport:
     contextual_followup_start_url: str
     contextual_followup_requested_topic: str
     contextual_followup_stage_goal: str
+    history_back_followup_success: bool
+    history_back_followup_start_url: str
+    history_back_followup_history_navigation: str
+    history_back_followup_stage_goal: str
     download_followup_success: bool
     download_followup_start_url: str
     download_followup_hint: str
@@ -50,6 +54,9 @@ class ComputerUseRouteSmokeReport:
     download_only_success: bool
     download_only_require_extract: bool
     download_only_stage_goal: str
+    placeholder_browser_url_clarifies: bool
+    placeholder_browser_stage_type: str
+    placeholder_browser_goal: str
     abbreviation_url_blocked: bool
     file_followup_browser_blocked: bool
     file_followup_stage_type: str
@@ -207,6 +214,40 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         and contextual_followup_requested_topic == "warranty disclaimers and liability limitations"
         and "requested information about 'warranty disclaimers and liability limitations'" in contextual_followup_stage_goal.lower()
     )
+    history_back_followup = normalize_route_decision(
+        {"decision": "CHAT"},
+        "go back",
+        [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Previous user request: Open https://example.com in the browser and click the next link.\n"
+                    "Task goal: Use the browser to complete the requested interaction at 'https://example.com/next'.\n"
+                    "Execution status: SUCCESS\n"
+                    "Runtime note: Arrived on the next page at https://example.com/next.\n"
+                    "Use this block as authoritative runtime context for follow-up routing and clarification handling. Prefer it over assistant narration when they conflict."
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": "Arrived on the next page at https://example.com/next.",
+            },
+        ],
+    )
+    history_back_stage = (((history_back_followup or {}).get("card") or {}).get("stages") or [{}])[0]
+    history_back_meta = history_back_stage.get("computer_use") or {}
+    history_back_followup_start_url = str(history_back_meta.get("start_url") or "")
+    history_back_followup_history_navigation = str(history_back_meta.get("history_navigation") or "")
+    history_back_followup_stage_goal = str(history_back_stage.get("stage_goal") or "")
+    history_back_followup_success = (
+        str((history_back_followup or {}).get("decision") or "") == "TASK"
+        and str(history_back_stage.get("stage_type") or "") == "COMPUTER_USE"
+        and history_back_followup_start_url == "https://example.com/next"
+        and history_back_followup_history_navigation == "back"
+        and "go back to the previous browser page" in history_back_followup_stage_goal.lower()
+    )
     download_followup_history = [
         {
             "role": "system",
@@ -259,6 +300,19 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         and not download_only_require_extract
         and "requested on-page information" not in download_only_stage_goal.lower()
     )
+    placeholder_browser = normalize_route_decision(
+        {"decision": "CHAT"},
+        "Open http://127.0.0.1:<fixture-port>/index.html in the browser, click the next link, and tell me the page title.",
+        [],
+    )
+    placeholder_browser_stage = (((placeholder_browser or {}).get("card") or {}).get("stages") or [{}])[0]
+    placeholder_browser_goal = str(((placeholder_browser or {}).get("card") or {}).get("goal") or "")
+    placeholder_browser_stage_type = str(placeholder_browser_stage.get("stage_type") or "")
+    placeholder_browser_clarifies = (
+        str((placeholder_browser or {}).get("decision") or "") == "TASK"
+        and placeholder_browser_stage_type == "CHAT"
+        and "clarify the browser url" in placeholder_browser_goal.lower()
+    )
     abbreviation_url_blocked = extract_browser_url("e.g., `grocery-list.txt`") == ""
     file_followup_history = [
         {
@@ -287,8 +341,10 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         and alt_heading_success
         and heading_success
         and contextual_followup_success
+        and history_back_followup_success
         and download_followup_success
         and download_only_success
+        and placeholder_browser_clarifies
         and abbreviation_url_blocked
         and file_followup_browser_blocked
     )
@@ -320,6 +376,10 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         contextual_followup_start_url=contextual_followup_start_url,
         contextual_followup_requested_topic=contextual_followup_requested_topic,
         contextual_followup_stage_goal=contextual_followup_stage_goal,
+        history_back_followup_success=bool(history_back_followup_success),
+        history_back_followup_start_url=history_back_followup_start_url,
+        history_back_followup_history_navigation=history_back_followup_history_navigation,
+        history_back_followup_stage_goal=history_back_followup_stage_goal,
         download_followup_success=bool(download_followup_success),
         download_followup_start_url=download_followup_start_url,
         download_followup_hint=download_followup_hint,
@@ -327,6 +387,9 @@ def run_smoke() -> ComputerUseRouteSmokeReport:
         download_only_success=bool(download_only_success),
         download_only_require_extract=bool(download_only_require_extract),
         download_only_stage_goal=download_only_stage_goal,
+        placeholder_browser_url_clarifies=bool(placeholder_browser_clarifies),
+        placeholder_browser_stage_type=placeholder_browser_stage_type,
+        placeholder_browser_goal=placeholder_browser_goal,
         abbreviation_url_blocked=bool(abbreviation_url_blocked),
         file_followup_browser_blocked=bool(file_followup_browser_blocked),
         file_followup_stage_type=file_followup_stage_type,
@@ -372,6 +435,10 @@ def main() -> int:
         print(f"CONTEXTUAL_FOLLOWUP_START_URL: {report.contextual_followup_start_url}")
         print(f"CONTEXTUAL_FOLLOWUP_REQUESTED_TOPIC: {report.contextual_followup_requested_topic}")
         print(f"CONTEXTUAL_FOLLOWUP_STAGE_GOAL: {report.contextual_followup_stage_goal}")
+        print(f"HISTORY_BACK_FOLLOWUP_SUCCESS: {report.history_back_followup_success}")
+        print(f"HISTORY_BACK_FOLLOWUP_START_URL: {report.history_back_followup_start_url}")
+        print(f"HISTORY_BACK_FOLLOWUP_HISTORY_NAVIGATION: {report.history_back_followup_history_navigation}")
+        print(f"HISTORY_BACK_FOLLOWUP_STAGE_GOAL: {report.history_back_followup_stage_goal}")
         print(f"DOWNLOAD_FOLLOWUP_SUCCESS: {report.download_followup_success}")
         print(f"DOWNLOAD_FOLLOWUP_START_URL: {report.download_followup_start_url}")
         print(f"DOWNLOAD_FOLLOWUP_HINT: {report.download_followup_hint}")
@@ -379,6 +446,9 @@ def main() -> int:
         print(f"DOWNLOAD_ONLY_SUCCESS: {report.download_only_success}")
         print(f"DOWNLOAD_ONLY_REQUIRE_EXTRACT: {report.download_only_require_extract}")
         print(f"DOWNLOAD_ONLY_STAGE_GOAL: {report.download_only_stage_goal}")
+        print(f"PLACEHOLDER_BROWSER_URL_CLARIFIES: {report.placeholder_browser_url_clarifies}")
+        print(f"PLACEHOLDER_BROWSER_STAGE_TYPE: {report.placeholder_browser_stage_type}")
+        print(f"PLACEHOLDER_BROWSER_GOAL: {report.placeholder_browser_goal}")
         print(f"ABBREVIATION_URL_BLOCKED: {report.abbreviation_url_blocked}")
         print(f"FILE_FOLLOWUP_BROWSER_BLOCKED: {report.file_followup_browser_blocked}")
         print(f"FILE_FOLLOWUP_STAGE_TYPE: {report.file_followup_stage_type}")

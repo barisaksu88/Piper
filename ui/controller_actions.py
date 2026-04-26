@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Dict
@@ -14,6 +15,12 @@ from core.engines.proactive_monitor import (
 )
 from core.orchestrator import run_agent_loop
 from core.runtime_control import CancellationToken, OperationCancelled
+from core.search_contracts import (
+    SEARCH_FAILURE_REPORTER_INSTRUCTION,
+    SEARCH_REPORTER_INSTRUCTION,
+    build_background_search_content,
+    is_search_error_result,
+)
 from tools.screen_capture import ScreenCaptureError
 from tools.vision import VisionError, VisionRequest, analyze_image, resolve_vision_request
 from ui.event_speech import normalize_event_speech_mode
@@ -25,10 +32,31 @@ LIVE_SCREEN_MODE_LABELS = {
     "pointer": "Pointer",
 }
 LIVE_SCREEN_INTERVAL_OPTIONS = (2.0, 5.0, 10.0, 15.0)
+_ACTIVE_TURN_CANCEL_COMMANDS = {
+    "/cancel",
+    "/stop",
+    "cancel",
+    "stop",
+    "halt",
+    "interrupt",
+    "abort",
+    "nevermind",
+    "never mind",
+}
+_ACTIVE_TURN_CANCEL_RE = re.compile(
+    r"(?is)^\s*/?(?:please\s+)?(?:stop|cancel|halt|interrupt|abort)"
+    r"(?:\s+(?:please|now|it|this|that|the\s+turn|the\s+request|everything))?\s*[.!?]*\s*$"
+    r"|^\s*never\s*mind\s*[.!?]*\s*$"
+)
 
 
 def _clear_conversation_summary_file() -> None:
     _clear_conversation_summary_file_at()
+
+
+def _is_active_turn_cancel_request(text: str) -> bool:
+    clean = str(text or "").strip()
+    return bool(clean and (clean.casefold() in _ACTIVE_TURN_CANCEL_COMMANDS or _ACTIVE_TURN_CANCEL_RE.match(clean)))
 
 
 def _clear_conversation_summary_file_at(path: Path | None = None) -> None:
@@ -210,6 +238,165 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
         controller.ui_queue.put(("clear_thinking", ""))
         _finalize_operation(controller, token)
         controller.gen_lock.release()
+
+
+def do_resume_langgraph_recovery(controller, recovery: dict[str, object], cancel_token: CancellationToken | None = None) -> None:
+    if not controller.gen_lock.acquire(blocking=False):
+        return
+    token = cancel_token or controller.create_cancel_token()
+    controller.retain_cancel_token(token)
+    thread_id = str(recovery.get("thread_id") or "").strip()
+    checkpoint_id = str(recovery.get("checkpoint_id") or "").strip()
+    try:
+        token.raise_if_cancelled()
+        if not thread_id:
+            raise RuntimeError("LangGraph recovery record has no thread_id.")
+        run_agent_loop(
+            controller.build_orchestrator_config(
+                cancel_token=token,
+                langgraph_resume_thread_id=thread_id,
+                langgraph_resume_checkpoint_id=checkpoint_id,
+            )
+        )
+    except OperationCancelled:
+        controller.ui_queue.put(("status_widget_dashboard_activity", "LangGraph recovery canceled."))
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        controller.ui_queue.put(("error", f"LangGraph Recovery Error: {exc}"))
+    finally:
+        controller.agent_brain.suspend_runtime_sessions()
+        controller.ui_queue.put(("clear_thinking", ""))
+        _finalize_operation(controller, token)
+        controller.gen_lock.release()
+
+
+def do_resume_langgraph_interrupt(
+    controller,
+    interrupt_record: dict[str, object],
+    user_text: str,
+    cancel_token: CancellationToken | None = None,
+) -> None:
+    if not controller.gen_lock.acquire(blocking=False):
+        return
+    token = cancel_token or controller.create_cancel_token()
+    controller.retain_cancel_token(token)
+    thread_id = str(interrupt_record.get("thread_id") or "").strip()
+    checkpoint_id = str(interrupt_record.get("checkpoint_id") or "").strip()
+    try:
+        token.raise_if_cancelled()
+        if not thread_id:
+            raise RuntimeError("LangGraph interrupt record has no thread_id.")
+        run_agent_loop(
+            controller.build_orchestrator_config(
+                cancel_token=token,
+                langgraph_resume_thread_id=thread_id,
+                langgraph_resume_checkpoint_id=checkpoint_id,
+                langgraph_resume_value={"user_msg": str(user_text or "").strip()},
+            )
+        )
+    except OperationCancelled:
+        controller.ui_queue.put(("status_widget_dashboard_activity", "LangGraph interrupt resume canceled."))
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        controller.ui_queue.put(("error", f"LangGraph Interrupt Resume Error: {exc}"))
+    finally:
+        controller.agent_brain.suspend_runtime_sessions()
+        controller.ui_queue.put(("clear_thinking", ""))
+        _finalize_operation(controller, token)
+        controller.gen_lock.release()
+
+
+def _try_resume_langgraph_interrupt(controller, user_text: str) -> bool:
+    if str(user_text or "").strip().startswith("/"):
+        return False
+    from core.orchestrator_graph import load_langgraph_interrupt_record
+
+    interrupt_record = load_langgraph_interrupt_record()
+    if not interrupt_record:
+        return False
+    text = str(user_text or "").strip()
+    if not text:
+        return False
+    controller.chat_append("user", text)
+    controller.persist_turn("user", text)
+    controller.session_meta = "Session: active"
+    controller._refresh_top_bar()
+    if dpg.does_item_exist(controller.tags.input_box):
+        dpg.set_value(controller.tags.input_box, "")
+        dpg.focus_item(controller.tags.input_box)
+    controller.show_thinking_placeholder()
+    threading.Thread(
+        target=do_resume_langgraph_interrupt,
+        kwargs={
+            "controller": controller,
+            "interrupt_record": interrupt_record,
+            "user_text": text,
+        },
+        daemon=True,
+    ).start()
+    return True
+
+
+def _handle_langgraph_recovery_command(controller, action: str) -> None:
+    from core.orchestrator_graph import (
+        clear_langgraph_interrupt_record,
+        clear_langgraph_recovery_record,
+        describe_langgraph_interrupt_record,
+        describe_langgraph_recovery_record,
+        load_langgraph_recovery_record,
+    )
+
+    normalized = str(action or "status").strip().lower() or "status"
+    if normalized == "status":
+        recovery_status = describe_langgraph_recovery_record()
+        interrupt_status = describe_langgraph_interrupt_record()
+        if "No recoverable" in recovery_status and "No pending" not in interrupt_status:
+            controller.chat_append("system", interrupt_status)
+        elif "No recoverable" not in recovery_status and "No pending" not in interrupt_status:
+            controller.chat_append("system", recovery_status + "\n\n" + interrupt_status)
+        else:
+            controller.chat_append("system", recovery_status)
+        return
+    if normalized == "clear":
+        cleared_recovery = clear_langgraph_recovery_record()
+        cleared_interrupt = clear_langgraph_interrupt_record()
+        cleared = bool(cleared_recovery or cleared_interrupt)
+        message = "[LangGraph] Recovery/interrupt record cleared." if cleared else "[LangGraph] No recovery or interrupt record to clear."
+        controller.chat_append("system", message)
+        return
+    if normalized != "resume":
+        controller.chat_append("system", "[UI] Usage: /graph status | /graph resume | /graph clear")
+        return
+
+    recovery = load_langgraph_recovery_record()
+    if not recovery:
+        controller.chat_append("system", "[LangGraph] No recoverable graph turn is recorded.")
+        return
+
+    thread_id = str(recovery.get("thread_id") or "").strip()
+    if not thread_id:
+        controller.chat_append("system", "[LangGraph] Recovery record is missing its thread id. Use /graph clear.")
+        return
+
+    controller.chat_append("system", f"[LangGraph] Resuming checkpoint thread {thread_id}.")
+    controller.session_meta = "Session: active"
+    controller._refresh_top_bar()
+    if dpg.does_item_exist(controller.tags.input_box):
+        dpg.set_value(controller.tags.input_box, "")
+        dpg.focus_item(controller.tags.input_box)
+    controller.show_thinking_placeholder()
+    threading.Thread(
+        target=do_resume_langgraph_recovery,
+        kwargs={
+            "controller": controller,
+            "recovery": recovery,
+        },
+        daemon=True,
+    ).start()
 
 
 def do_vision_query(
@@ -524,11 +711,22 @@ def on_clear(controller) -> None:
 def on_send(controller) -> None:
     if not controller.boot_ready:
         return
-    if controller.has_active_operations():
-        return
 
     raw = dpg.get_value(controller.tags.input_box) or ""
     input_text = str(raw).rstrip("\n")
+    if controller.has_active_operations():
+        text = input_text.strip()
+        if not text or _is_active_turn_cancel_request(text):
+            if dpg.does_item_exist(controller.tags.input_box):
+                dpg.set_value(controller.tags.input_box, "")
+            on_stop(controller)
+            return
+        controller.chat_append("system", "[UI] Piper is busy. Press Stop or type `stop` / `cancel` to interrupt the running turn.")
+        if dpg.does_item_exist(controller.tags.input_box):
+            dpg.set_value(controller.tags.input_box, "")
+            dpg.focus_item(controller.tags.input_box)
+        return
+
     if not input_text.strip():
         dpg.set_value(controller.tags.input_box, "")
         return
@@ -584,6 +782,8 @@ def on_send(controller) -> None:
             return
         elif res.action == "codex_support":
             controller.export_codex_support_snapshot(res.support_note or "")
+        elif res.action == "langgraph_recovery":
+            _handle_langgraph_recovery_command(controller, res.graph_action or "status")
         elif res.action == "set_admin_password" and res.password_value is not None:
             outcome = controller.user_runtime.set_admin_password(res.password_value)
             controller.chat_append("system", outcome.message)
@@ -600,6 +800,9 @@ def on_send(controller) -> None:
         if res.ui_message:
             controller.chat_append("system", res.ui_message)
         dpg.set_value(controller.tags.input_box, "")
+        return
+
+    if _try_resume_langgraph_interrupt(controller, user_text):
         return
 
     handled_identity, identity_message = _observe_typed_speaker_identity(controller, user_text)
@@ -862,22 +1065,24 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
     query = payload.get("query", "")
     data = payload.get("data", "")
     cancel_token = payload.get("cancel_token")
+    failed = bool(payload.get("error")) or is_search_error_result(data)
 
     if isinstance(cancel_token, CancellationToken) and cancel_token.is_cancelled:
         return
 
-    controller.ui_queue.put(("status_widget_dashboard_activity", "Summarizing findings..."))
+    status_text = "Search failed; preparing honest status..." if failed else "Summarizing findings..."
+    controller.ui_queue.put(("status_widget_dashboard_activity", status_text))
     controller.chat_state.append_message(
         {
             "role": "system",
-            "content": f"Background search complete for '{query}'. Data:\n{data[:16000]}",
+            "content": build_background_search_content(query, data[:16000], failed=failed),
             "hidden": True,
         }
     )
     controller.chat_state.append_message(
         {
             "role": "system",
-            "content": "The web search is complete. Summarize the findings for the user now.",
+            "content": SEARCH_FAILURE_REPORTER_INSTRUCTION if failed else SEARCH_REPORTER_INSTRUCTION,
             "hidden": True,
         }
     )

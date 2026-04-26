@@ -672,6 +672,34 @@ class Config:
         return data_debug_path(self.DATA_DIR, "codex_escalations.jsonl")
 
     @property
+    def LANGGRAPH_TRACE_PATH(self) -> Path:
+        return data_debug_path(self.DATA_DIR, "langgraph_trace.jsonl")
+
+    @property
+    def LANGGRAPH_CHECKPOINT_PATH(self) -> Path:
+        raw_path = os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_PATH", "").strip()
+        if raw_path:
+            path = Path(raw_path).expanduser()
+            return path if path.is_absolute() else self.ROOT_DIR / path
+        return data_state_path(self.DATA_DIR, "langgraph_checkpoints.sqlite")
+
+    @property
+    def LANGGRAPH_RECOVERY_PATH(self) -> Path:
+        raw_path = os.environ.get("PIPER_LANGGRAPH_RECOVERY_PATH", "").strip()
+        if raw_path:
+            path = Path(raw_path).expanduser()
+            return path if path.is_absolute() else self.ROOT_DIR / path
+        return data_state_path(self.DATA_DIR, "langgraph_recovery.json")
+
+    @property
+    def LANGGRAPH_INTERRUPT_PATH(self) -> Path:
+        raw_path = os.environ.get("PIPER_LANGGRAPH_INTERRUPT_PATH", "").strip()
+        if raw_path:
+            path = Path(raw_path).expanduser()
+            return path if path.is_absolute() else self.ROOT_DIR / path
+        return data_state_path(self.DATA_DIR, "langgraph_interrupt.json")
+
+    @property
     def CODEX_REPAIR_REQUEST_PATH(self) -> Path:
         return data_state_path(self.DATA_DIR, "codex_repair_request.json")
 
@@ -729,6 +757,10 @@ class Config:
     EXECUTOR_MAX_STAGE_RUNTIME_S: float = float(os.environ.get("PIPER_EXECUTOR_MAX_STAGE_RUNTIME_S", "120"))
     EXECUTOR_MAX_ACTIONS_PER_STAGE: int = int(os.environ.get("PIPER_EXECUTOR_MAX_ACTIONS_PER_STAGE", "15"))
     SKILL_LAYER_ENABLED: bool = _env_flag("PIPER_SKILL_LAYER_ENABLED", True)
+    LANGGRAPH_RUNTIME_ENABLED: bool = _env_flag("PIPER_LANGGRAPH_RUNTIME_ENABLED", False)
+    LANGGRAPH_CHECKPOINT_MODE: str = (
+        os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_MODE", "sqlite").strip().lower() or "sqlite"
+    )
     COMPUTER_USE_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_ENABLED", True)
     COMPUTER_USE_HTTP_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_HTTP_ENABLED", True)
     COMPUTER_USE_ALLOWED_HTTP_DOMAINS: list[str] = field(
@@ -742,6 +774,7 @@ class Config:
     # Prompt debug is light enough to keep on by default; full HTTP payload dumps stay opt-in.
     DEBUG_LLM_PROMPTS: bool = _env_flag("PIPER_DEBUG_LLM_PROMPTS", True)
     DEBUG_MANAGER_PROMPTS: bool = _env_flag("PIPER_DEBUG_MANAGER_PROMPTS", False)
+    DEBUG_LANGGRAPH_TRACE: bool = _env_flag("PIPER_DEBUG_LANGGRAPH_TRACE", True)
     # Stream pipeline trace: prints [PIPE-IN], [FILTER-OUT], [QUEUE-PUT] per token.
     # Disable in production — enable only when debugging streaming regressions.
     DEBUG_STREAMING_PIPELINE: bool = _env_flag("PIPER_DEBUG_STREAMING_PIPELINE", False)
@@ -751,6 +784,8 @@ class Config:
     CODEX_BOOT_PROBE_TIMEOUT_S: float = float(os.environ.get("PIPER_CODEX_BOOT_PROBE_TIMEOUT_S", "120"))
     CODEX_REPAIR_POLL_INTERVAL_S: float = float(os.environ.get("PIPER_CODEX_REPAIR_POLL_INTERVAL_S", "1.0"))
     CODEX_REPAIR_TIMEOUT_S: float = float(os.environ.get("PIPER_CODEX_REPAIR_TIMEOUT_S", "1800"))
+    LANGGRAPH_TRACE_HISTORY_LIMIT: int = int(os.environ.get("PIPER_LANGGRAPH_TRACE_HISTORY_LIMIT", "500"))
+    LANGGRAPH_CHECKPOINT_HISTORY_LIMIT: int = int(os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_HISTORY_LIMIT", "500"))
     CODEX_EXECUTABLE: str = _resolve_codex_executable()
     CODEX_WSL_EXECUTABLE: str = _resolve_codex_wsl_executable()
     MODELS_DIR = ROOT_DIR / "models"

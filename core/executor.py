@@ -16,7 +16,7 @@ from core.debug_tools import log_prompt_debug
 from llm.llm_server_client import LLMClientError
 from core.contracts import FileCheckDecision, PlannerDecision, StageCard
 from core.planner_boundary import PlannerBoundary
-from core.json_utils import parse_json_response
+from core.json_utils import normalize_tool_invocation, parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
 from core.engines.change_journal import ChangeJournal
@@ -42,6 +42,7 @@ from core.executor_support import (
 )
 from core.stage_policy import stage_is_chat
 from core.runtime_control import CancellationToken
+from tools.file_ops import FileOpError, parse_normalized_tool_tag_payload
 from tools.registry import get_tool_spec, resolve_domain_tools, tool_result_is_success
 
 
@@ -97,6 +98,9 @@ class StageExecutor:
         self._stage_action_count = 0
         self._stage_timeout_hit = False
         self._stage_action_budget_hit = False
+        self._last_computer_use_block_signature = ""
+        self._computer_use_completion_block_count = 0
+        self._computer_use_completion_stuck = False
 
     def _log_dashboard(self, text: str):
         """Logs a clean message to the UI Dashboard."""
@@ -358,6 +362,41 @@ class StageExecutor:
         stage_type = planner_input.stage_type
         chat_stage = stage_is_chat(stage)
         allowed_tools = planner_input.allowed_tools
+
+        missing_scope_target = self._preflight_missing_declared_scope_target(stage)
+        if missing_scope_target:
+            self.terminal_missing_file_target = missing_scope_target
+            tool_result = {
+                "tool": "FILE_OP",
+                "status": "FAILED",
+                "summary": f"FILE_OP target not found: {missing_scope_target}",
+                "action": "preflight_scope_check",
+                "requested_root": missing_scope_target,
+                "workspace_changed": False,
+                "created_files": [],
+                "updated_files": [],
+                "deleted_files": [],
+                "created_dirs": [],
+                "deleted_dirs": [],
+                "evidence_files": [],
+                "file_snippets": {},
+            }
+            entry = ScratchpadFormatter.format_step(
+                1,
+                "Declared FILE_WORK scope is missing, so the stage cannot proceed safely.",
+                "[NO_TOOL_PREFLIGHT]",
+                tool_result,
+            )
+            self.scratchpad.append(entry)
+            self.ui.put(("agent_log", f"   -> Explicit file target is missing: {missing_scope_target}. Ending the stage as a normal failure."))
+            self._log_dashboard("Explicit file target missing.")
+            self._record_stage_metrics(
+                stage_started_at=stage_started_at,
+                planner_time_s=planner_time_s,
+                step_count=1,
+                action_count=0,
+            )
+            return False, self.scratchpad
         
         # Load Planner Template
         prompt_path = CFG.DATA_DIR / "prompts" / "manager.txt"
@@ -477,7 +516,14 @@ class StageExecutor:
                 return False, self.scratchpad
             self._raise_if_cancelled()
 
-            self.ui.put(("agent_log", f"[PLANNER] {raw.strip()}"))
+            if isinstance(raw, str):
+                raw_text = raw
+            else:
+                try:
+                    raw_text = json.dumps(raw, ensure_ascii=False)
+                except Exception:
+                    raw_text = str(raw or "")
+            self.ui.put(("agent_log", f"[PLANNER] {raw_text.strip()}"))
             decision: PlannerDecision = parse_json_response(raw)
 
             # CHECK FOR PARSE FAILURE
@@ -503,7 +549,8 @@ class StageExecutor:
                 return False, self.scratchpad
 
             thought = decision.get("thought", "") or ""
-            tool_tag = decision.get("tool", "") or ""
+            tool_tag = normalize_tool_invocation(decision.get("tool", "")) or ""
+            decision["tool"] = tool_tag
             tool_tag_normalized = str(tool_tag or "").strip().lower()
             decision_sig = decision_signature(decision)
             if decision_sig and decision_sig == self._last_decision_signature:
@@ -682,6 +729,10 @@ class StageExecutor:
                     self.ui.put(("agent_log", f"   -> {hint}"))
                     continue
                 if self._stage_is_computer_use(stage) and not self._accept_computer_use_completion(stage):
+                    if self._computer_use_completion_stuck:
+                        self.ui.put(("agent_log", "   -> COMPUTER_USE completion is stuck without new verified evidence; treating stage as incomplete."))
+                        success = False
+                        break
                     continue
                 self.ui.put(("agent_log", "   -> Planner signaled completion."))
                 self._log_dashboard("Stage Complete.")
@@ -766,6 +817,10 @@ class StageExecutor:
                         self.scratchpad.append("SYSTEM ERROR: FILE_WORK cannot complete until FILE_CHECKER_VERDICT is VERIFIED.")
                         continue
                 if self._stage_is_computer_use(stage) and not self._accept_computer_use_completion(stage):
+                    if self._computer_use_completion_stuck:
+                        self.ui.put(("agent_log", "   -> COMPUTER_USE completion is stuck without new verified evidence; treating stage as incomplete."))
+                        success = False
+                        break
                     continue
                 self.ui.put(("agent_log", "   -> Planner signaled completion (tool: null)."))
                 self._log_dashboard("Stage Complete.")
@@ -790,6 +845,8 @@ class StageExecutor:
             # TOOL ENFORCEMENT
             tag_match = re.match(r'\[([A-Za-z_]+)', tool_tag)
             base_tag = tag_match.group(1).upper() if tag_match else "UNKNOWN"
+            if base_tag == "FILE_OP":
+                tool_tag = self._apply_declared_scope_to_file_op_tag(tool_tag, stage)
             tool_spec = get_tool_spec(base_tag)
 
             if base_tag not in allowed_tools:
@@ -1284,6 +1341,12 @@ class StageExecutor:
                     break
                 self.ui.put(("agent_log", "   -> Inspector Triggered."))
                 if self._run_inspector(stage):
+                    if self._stage_is_computer_use(stage) and not self._accept_computer_use_completion(stage):
+                        if self._computer_use_completion_stuck:
+                            self.ui.put(("agent_log", "   -> COMPUTER_USE completion is stuck without new verified evidence; treating stage as incomplete."))
+                            success = False
+                            break
+                        continue
                     if not self._inspector_finish_has_stage_evidence():
                         hint = (
                             "SYSTEM ERROR: Inspector cannot finish this stage because no successful tool result "
@@ -1428,6 +1491,25 @@ class StageExecutor:
         self.terminal_missing_file_target = requested_target
         self.ui.put(("agent_log", "   -> Exact delete target is absent, but a close workspace match exists. Holding for confirmation."))
         return True
+
+    def _preflight_missing_declared_scope_target(self, stage: StageCard) -> str:
+        if not FileStagePolicy.stage_is_file_work(stage):
+            return ""
+        if not FileStagePolicy.stage_is_non_mutating_file_stage(stage):
+            return ""
+        if FileStagePolicy.stage_allows_absence_confirmation(stage):
+            return ""
+        if self._stage_may_create_missing_file_target(stage):
+            return ""
+
+        scope_root = FileStagePolicy.stage_scope_root(stage)
+        if not scope_root or scope_root == ".":
+            return ""
+
+        workspace = Path(getattr(self.brain, "workspace", "."))
+        if (workspace / scope_root).exists():
+            return ""
+        return scope_root
 
     def _append_file_lookup_note_if_available(self, stage: StageCard) -> None:
         if not (
@@ -1591,7 +1673,25 @@ class StageExecutor:
             if not self.scratchpad or self.scratchpad[-1] != hint:
                 self.scratchpad.append(hint)
             self.ui.put(("agent_log", f"   -> {hint}"))
+            block_signature = f"{verification.verdict}|{verification.evidence_summary}".strip().lower()
+            if block_signature and block_signature == self._last_computer_use_block_signature:
+                self._computer_use_completion_block_count += 1
+            else:
+                self._last_computer_use_block_signature = block_signature
+                self._computer_use_completion_block_count = 1
+            self._computer_use_completion_stuck = self._computer_use_completion_block_count >= 2
+            if self._computer_use_completion_stuck:
+                stuck_hint = (
+                    "SYSTEM ERROR: COMPUTER_USE completion keeps failing with the same missing evidence. "
+                    "Stop retrying the same completion path and fail this stage honestly unless a different browser action can change the state."
+                )
+                if not self.scratchpad or self.scratchpad[-1] != stuck_hint:
+                    self.scratchpad.append(stuck_hint)
+                self.ui.put(("agent_log", f"   -> {stuck_hint}"))
             return False
+        self._last_computer_use_block_signature = ""
+        self._computer_use_completion_block_count = 0
+        self._computer_use_completion_stuck = False
         self._append_verified_computer_use_result_note(stage, verification)
         return True
 
@@ -1641,6 +1741,12 @@ class StageExecutor:
             if requested_topic:
                 payload["topic"] = requested_topic
                 changed = True
+        if action == "extract_text":
+            selector_hint = str(meta.get("selector_hint") or "").strip()
+            current_selector = str(payload.get("selector") or "").strip()
+            if selector_hint and (not current_selector or current_selector.lower() in {"body", "html"}):
+                payload["selector"] = selector_hint
+                changed = True
         if action == "extract_text" and not payload.get("avoid_heading"):
             avoid_heading = str(meta.get("avoid_heading") or "").strip()
             if avoid_heading:
@@ -1662,6 +1768,36 @@ class StageExecutor:
 
         normalized_payload = json.dumps(payload, ensure_ascii=False)
         return f"[BROWSER_OP]\n{normalized_payload}\n[/BROWSER_OP]"
+
+    @staticmethod
+    def _apply_declared_scope_to_file_op_tag(tool_tag: str, stage: StageCard) -> str:
+        scope_root = FileStagePolicy.stage_scope_root(stage)
+        if not scope_root or scope_root == ".":
+            return tool_tag
+        try:
+            payload = parse_normalized_tool_tag_payload(tool_tag, tag="FILE_OP")
+        except FileOpError:
+            return tool_tag
+
+        action = str(payload.get("action") or "").strip().lower()
+        if action not in {
+            "list_tree",
+            "find_paths",
+            "extension_inventory",
+            "consolidate_by_extension",
+            "delete_empty_dirs",
+        }:
+            return tool_tag
+
+        requested_root = FileStagePolicy._normalize_stage_path_target(payload.get("root") or ".")
+        if requested_root and requested_root != ".":
+            if requested_root == scope_root:
+                payload["root"] = scope_root
+                return f"[FILE_OP] {json.dumps(payload, ensure_ascii=False)} [/FILE_OP]"
+            return tool_tag
+
+        payload["root"] = scope_root
+        return f"[FILE_OP] {json.dumps(payload, ensure_ascii=False)} [/FILE_OP]"
 
     def _maybe_launch_code_session(self, tool_result: Any) -> None:
         if not isinstance(tool_result, dict):
@@ -1716,20 +1852,28 @@ class StageExecutor:
             return False
         if self._stage_may_create_missing_file_target(stage):
             return False
-        targets = [str(path).strip().lower() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
-        if not targets:
+        target_terms = set(FileStagePolicy.stage_missing_target_terms(stage))
+        if not target_terms:
             return False
-        target_terms = set(targets) | {Path(path).stem.lower() for path in targets}
         if not isinstance(tool_result, dict):
             return False
         if str(tool_result.get("tool", "")).upper() != "FILE_OP":
             return False
 
-        action = str(tool_result.get("action", "")).lower()
-        if action == "read_text":
-            summary = str(tool_result.get("summary", "")).strip().lower()
+        summary = str(tool_result.get("summary", "")).strip().lower()
+        if "not found" in summary:
             requested = self._missing_file_request_target(tool_result).lower()
-            return "target not found" in summary and self._matches_missing_target(requested, target_terms)
+            if self._matches_missing_target(requested, target_terms):
+                return True
+
+        action = str(tool_result.get("action", "")).lower()
+        if action == "read_many":
+            missing_paths = [
+                str(item).strip().lower()
+                for item in (tool_result.get("missing_files") or [])
+                if str(item).strip()
+            ]
+            return any(self._matches_missing_target(path, target_terms) for path in missing_paths)
 
         if action == "find_paths":
             query = str(tool_result.get("requested_query") or "").strip().lower()
@@ -1756,7 +1900,13 @@ class StageExecutor:
     def _missing_file_request_target(tool_result: Any) -> str:
         if not isinstance(tool_result, dict):
             return ""
-        requested = str(tool_result.get("requested_path") or tool_result.get("path") or "").strip()
+        requested = str(
+            tool_result.get("requested_path")
+            or tool_result.get("path")
+            or tool_result.get("requested_root")
+            or tool_result.get("root")
+            or ""
+        ).strip()
         if requested:
             return requested
         summary = str(tool_result.get("summary", "")).strip()
@@ -1769,7 +1919,7 @@ class StageExecutor:
     def _extract_missing_file_target(stage: StageCard, tool_result: Any) -> str:
         if isinstance(tool_result, dict):
             action = str(tool_result.get("action", "")).lower()
-            if action == "read_text":
+            if "not found" in str(tool_result.get("summary", "")).lower():
                 path = StageExecutor._missing_file_request_target(tool_result)
                 if path:
                     return path
@@ -1777,7 +1927,7 @@ class StageExecutor:
                 query = str(tool_result.get("requested_query") or "").strip()
                 if query:
                     return query
-        targets = [str(path).strip() for path in FileStagePolicy.stage_named_file_targets(stage) if str(path).strip()]
+        targets = [str(path).strip() for path in FileStagePolicy.stage_missing_target_terms(stage) if str(path).strip()]
         return targets[0] if targets else ""
 
     @staticmethod

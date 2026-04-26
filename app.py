@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import warnings
 
 from config import CFG
+
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 logging.basicConfig(
     level=getattr(logging, CFG.LOG_LEVEL, logging.INFO),
@@ -10,8 +15,22 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+warnings.filterwarnings(
+    "ignore",
+    message=r".*unauthenticated requests to the HF Hub.*",
+)
+
+for logger_name, level in (
+    ("httpx", logging.WARNING),
+    ("httpcore", logging.WARNING),
+    ("huggingface_hub", logging.ERROR),
+    ("huggingface_hub.utils._http", logging.ERROR),
+    ("sentence_transformers", logging.WARNING),
+    ("transformers", logging.WARNING),
+):
+    logging.getLogger(logger_name).setLevel(level)
+
 import atexit
-import os
 import queue
 import sys
 from pathlib import Path

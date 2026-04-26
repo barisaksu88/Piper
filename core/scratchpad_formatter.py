@@ -342,7 +342,7 @@ RESULT: {pack.status}{detail}"""
 
         target_terms = {
             str(term).strip().lower()
-            for term in FileStagePolicy.stage_target_terms(stage)
+            for term in FileStagePolicy.stage_missing_target_terms(stage)
             if str(term).strip()
         }
         if not target_terms:
@@ -351,12 +351,6 @@ RESULT: {pack.status}{detail}"""
         entries = [str(entry or "") for entry in (stage_entries or []) if str(entry or "").strip()]
         if any("FILE_WORK_VERIFIED_RESULT:" in entry for entry in entries):
             return False
-
-        target_terms |= {
-            Path(term).stem.lower()
-            for term in list(target_terms)
-            if str(term).strip()
-        }
         for entry in entries:
             missing_target = ScratchpadFormatter._extract_missing_named_target(entry)
             if missing_target and ScratchpadFormatter._term_matches_target(missing_target, target_terms):

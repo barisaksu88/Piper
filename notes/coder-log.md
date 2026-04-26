@@ -1,5 +1,134 @@
 # Coder Log
 
+- 2026-04-21: Hardened the LangGraph runtime with real SQLite checkpoints.
+  - Scope:
+    - `PIPER_LANGGRAPH_RUNTIME_ENABLED=1` now uses SQLite checkpoints by default through `PIPER_LANGGRAPH_CHECKPOINT_MODE=sqlite`.
+    - checkpoint DB defaults to `data/state/langgraph_checkpoints.sqlite`; override with `PIPER_LANGGRAPH_CHECKPOINT_PATH`.
+    - checkpoint rows are capped on the write path by `PIPER_LANGGRAPH_CHECKPOINT_HISTORY_LIMIT` (default 500) so the SQLite file is not logically unbounded.
+    - LangGraph trace entries and runtime UI logs now include checkpoint backend/path details.
+    - added `scripts/langgraph_checkpoint_inspect.py` to inspect checkpoint rows without launching Piper.
+  - Validation:
+    - `./.venv/Scripts/python.exe scripts/orchestrator_graph_smoke_test.py` — pass; verifies a toy `ROUTE -> PERSONA` graph turn writes SQLite checkpoints.
+    - `./.venv/Scripts/python.exe scripts/langgraph_checkpoint_inspect.py --json --limit 3` — pass; reports missing default DB cleanly when Piper has not written one yet.
+    - `./.venv/Scripts/python.exe -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean.
+
+- 2026-04-21: Added a deterministic LangGraph checkpoint recovery proof.
+  - Scope:
+    - added `scripts/langgraph_checkpoint_recovery_smoke_test.py`.
+    - the smoke runs `ROUTE`, intentionally crashes in `PERSONA`, closes the first runtime, opens a new SQLite-backed runtime with the same `thread_id`, and resumes with `graph.invoke(None, ...)`.
+    - expected proof: first run calls `ROUTE`, `PERSONA`; failure checkpoint has `next=["persona"]`; resumed run calls only `PERSONA`; final trace is `ROUTE -> PERSONA`.
+  - Validation:
+    - `./.venv/Scripts/python.exe scripts/langgraph_checkpoint_recovery_smoke_test.py` — pass.
+
+- 2026-04-21: Wired LangGraph checkpoint recovery into Piper behind explicit slash commands.
+  - Scope:
+    - graph failures now save a bounded `data/state/langgraph_recovery.json` record when a durable SQLite checkpoint exists.
+    - `/graph status` reports the saved thread, next checkpoint node, trace so far, original request, and last error.
+    - `/graph resume` explicitly resumes the saved thread through `run_agent_loop_with_langgraph(... graph.invoke(None, same thread_id) ...)`.
+    - `/graph clear` discards the saved recovery record.
+    - `run_agent_loop()` now honors a resume-thread config even if the normal LangGraph runtime flag is off, so the explicit recovery command can still use the graph runtime.
+  - Validation:
+    - `./.venv/Scripts/python.exe scripts/langgraph_checkpoint_recovery_smoke_test.py` — pass; now also verifies the orchestrator entrypoint resume path clears recovery after success.
+    - `./.venv/Scripts/python.exe scripts/langgraph_recovery_command_smoke_test.py` — pass.
+    - `./.venv/Scripts/python.exe scripts/orchestrator_graph_smoke_test.py` — pass.
+    - `./.venv/Scripts/python.exe -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean.
+
+- 2026-04-21: Added a real LangGraph interrupt node to Piper's graph wrapper.
+  - Scope:
+    - `core/orchestrator_graph.py` now supports a generic `AWAIT_INTERRUPT` node driven by graph state fields: `interrupt_before_stage`, `interrupt_payload`, `interrupt_resume_value`, and `langgraph_interrupt_consumed`.
+    - the interrupt node uses LangGraph's real `interrupt(...)` primitive and resumes through `Command(resume=...)`.
+    - this is intentionally a foundation layer; it does not yet replace Piper's executor-level approval/confirmation rails for FILE_WORK.
+  - Validation:
+    - `./.venv/Scripts/python.exe scripts/langgraph_interrupt_smoke_test.py` — pass; proves interrupt persistence across a fresh SQLite-backed runtime and resumes the target stage only after `Command(resume=...)`.
+    - `./.venv/Scripts/python.exe scripts/orchestrator_graph_smoke_test.py` — pass.
+    - `./.venv/Scripts/python.exe scripts/langgraph_checkpoint_recovery_smoke_test.py` — pass.
+    - `./.venv/Scripts/python.exe scripts/langgraph_recovery_command_smoke_test.py` — pass.
+    - `./.venv/Scripts/python.exe -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean.
+
+- 2026-04-14: Fixed LangGraph-mode search crash and the stuck active-operation cleanup path.
+  - Symptom:
+    - explicit web searches could fail with `Orchestrator Error: name 'threading' is not defined`.
+    - when that happened before the background search worker started, Piper could keep the search/cancel state retained and leave the UI effectively stuck.
+  - Root cause:
+    - `core/orchestrator_phases.py` used `threading.Thread(...)` in `phase_search()` without importing `threading`.
+    - the retained cancel token and search-in-flight state were unwound only after `worker.start()`, so failures during thread construction/start could leak active-operation state.
+  - Fix:
+    - imported `threading` in `core/orchestrator_phases.py`.
+    - moved search worker construction inside the existing guarded startup block so any thread startup failure releases both retained search and cancel state.
+    - added `scripts/search_thread_cleanup_smoke_test.py` to force thread-start failure and verify Piper does not leave the UI stuck in an active-operation state.
+  - Validation:
+    - `./.venv/Scripts/python.exe -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean
+    - `./.venv/Scripts/python.exe scripts/search_thread_cleanup_smoke_test.py` — pass
+    - `./.venv/Scripts/python.exe scripts/explicit_web_search_topic_smoke_test.py --json` — pass
+
+- 2026-04-14: Started the LangGraph migration with a phase-faithful turn driver scaffold instead of a full cutover.
+  - Scope:
+    - added `core/orchestrator_graph.py` to model Piper's real top-level turn phases (`ROUTE`, `DOC_FOCUS`, `SEARCH`, `REPORTER`, `MANAGER`, `UNDO`, `REMINDER_SET`, `EXPLAIN`, `PERSONA`) as LangGraph nodes.
+    - extracted `Orchestrator.prepare_turn()` and `Orchestrator.dispatch_stage()` so both the legacy loop and the graph driver share the same turn setup and phase dispatch behavior.
+    - gated the graph runtime behind `PIPER_LANGGRAPH_RUNTIME_ENABLED`; the legacy orchestrator loop remains the default.
+  - Important limitation:
+    - the current graph scaffold snapshots high-signal turn state for observability and future checkpoint work, but it does not yet claim full crash-safe resume across a fresh process. Durable recovery still needs a broader serialized turn snapshot covering the remaining runtime-owned state.
+  - Validation:
+    - use `scripts/orchestrator_graph_smoke_test.py` for snapshot/restore coverage.
+
+- 2026-04-13: Fixed browser heading follow-ups that answered with generic page text instead of the heading.
+  - Symptom:
+    - a two-turn browser flow like `Open example.com in the browser and tell me the page title.` -> `What's the main heading?` could complete as VERIFIED but still reply with `Here is the requested text ...` and a body preview.
+  - Root cause:
+    - the planner could try to finish a heading stage from `goto_url` inventory/proposal evidence before a dedicated extract step.
+    - even when the stage carried `selector_hint: h1`, executor was not injecting that hint into later `BROWSER_OP extract_text` calls, so a generic `body` extract could still happen.
+    - the verified browser answer formatter only treated explicit `extracts[].selector == "h1"` as heading evidence and ignored the verified `h1` in `element_inventory`.
+    - the quiet sentence-transformer wrapper used for startup-noise suppression also needed to mimic Chroma's older embedding function interface (`name()`, `embed_query`, `embed_documents`) to avoid harness-side recall errors.
+  - Fix:
+    - `core/executor.py` now blocks COMPUTER_USE inspector completion unless the dedicated browser verifier accepts the stage, and it injects `selector_hint` into `extract_text` calls when the planner left a generic selector.
+    - `core/engines/computer_use_verifier.py` now carries `selector_hint` and explicit `heading_text` in the verified payload.
+    - `core/engines/summary.py` now falls back to verified `h1` inventory for heading answers when the stage was specifically a heading request.
+    - `memory/brain.py` now keeps the quiet wrapper Chroma-compatible by reusing the original embedding function name and exposing `embed_query` / `embed_documents` with compatible signatures.
+    - `scripts/computer_use_playwright_example_two_turn_harness_smoke_test.py` now fails if the second reply falls back to generic `requested text` phrasing instead of a main-heading answer.
+  - Validation:
+    - `python3 -m compileall core/executor.py core/engines/computer_use_verifier.py core/engines/summary.py memory/brain.py scripts/computer_use_playwright_example_two_turn_harness_smoke_test.py` — clean
+    - `./.venv/Scripts/python.exe scripts/computer_use_playwright_example_two_turn_harness_smoke_test.py --json --timeout 120` — pass
+
+- 2026-04-12: Quieted third-party startup chatter and hardened malformed browser URL handling.
+  - Symptom:
+    - terminal startup showed `httpx`, `huggingface_hub`, `sentence_transformers`, and progress-bar noise after `System Ready.`
+    - a browser prompt using `http://127.0.0.1:<fixture-port>/index.html` was treated like a real URL, leading Piper to drift into a bogus browser answer instead of asking for the actual URL.
+  - Root cause:
+    - structured logging work exposed third-party INFO/WARNING output during vector-memory warm-up.
+    - `memory/brain.py` used Chroma's convenience sentence-transformer embedding path, which allowed extra library noise and progress output.
+    - `core/browser_route_utils.py` accepted placeholder browser URLs as if they were valid and `core/routing/route_normalizer.py` had no clarification path for malformed browser URLs.
+  - Fix:
+    - `app.py` now suppresses noisy third-party loggers and the specific unauthenticated HF warning while keeping Piper boot logs at INFO.
+    - `memory/brain.py` now uses a quiet local sentence-transformer embedding wrapper with `show_progress_bar=False`.
+    - placeholder browser URLs like `<fixture-port>` are now rejected, and route normalization converts those turns into a CHAT clarification asking for the real URL or port.
+  - Validation:
+    - `python3 -m compileall app.py core/routing/route_normalizer.py core/browser_route_utils.py memory/brain.py scripts/computer_use_route_normalizer_smoke_test.py` — clean
+    - `python3 scripts/computer_use_route_normalizer_smoke_test.py --json` — pass
+    - `./.venv/Scripts/python.exe -u - <<'PY' import app; from memory.brain import PiperBrain; ... PY` — only Piper brain logs remained; no `httpx` / HF / progress-bar chatter
+
+- 2026-04-12: Added browser history-back support for COMPUTER_USE follow-ups.
+  - Symptom:
+    - after navigating to a second page, a follow-up like `go back` had no first-class route/action path.
+    - the planner could reopen the original page instead of using browser history, and the stage could look verified even when the page never changed.
+  - Root cause:
+    - `core/browser_route_utils.py` did not classify browser history-back intent.
+    - `core/engines/computer_use_engine.py` had no `go_back` action or cross-turn browser history state.
+    - runtime URL extraction for browser follow-ups preferred the original task URL before the latest runtime note URL, which made back-navigation anchor to the wrong page after a click.
+    - verifier logic treated back-navigation like generic click navigation and could accept a false success.
+  - Fix:
+    - added `history_navigation: back` routing and planner guidance for `BROWSER_OP {"action":"go_back"}`.
+    - added lightweight session history tracking in `ComputerUseEngine`, plus real `go_back` handling for local fixtures and Playwright.
+    - browser follow-ups now prefer the latest runtime-note URL over the original request URL so `go back` targets the active page.
+    - verifier now requires `go_back` evidence that the current URL actually changed to the previous URL.
+    - added back-navigation regression coverage in the engine smokes, route/follow-up smokes, and `scripts/computer_use_back_followup_harness_smoke_test.py`.
+  - Validation:
+    - `python3 -m compileall core/browser_route_utils.py core/engines/computer_use_engine.py core/engines/computer_use_verifier.py core/engines/summary.py tools/registry.py scripts/computer_use_engine_smoke_test.py scripts/computer_use_playwright_localhost_engine_smoke_test.py scripts/computer_use_route_normalizer_smoke_test.py scripts/followup_resolution_engine_smoke_test.py scripts/computer_use_back_followup_harness_smoke_test.py` — clean
+    - `python3 scripts/computer_use_engine_smoke_test.py --json` — pass
+    - `python3 scripts/computer_use_route_normalizer_smoke_test.py --json` — pass
+    - `python3 scripts/followup_resolution_engine_smoke_test.py` — pass
+    - `./.venv/Scripts/python.exe scripts/computer_use_playwright_localhost_engine_smoke_test.py --json` — pass
+    - `./.venv/Scripts/python.exe scripts/computer_use_back_followup_harness_smoke_test.py --json --timeout 120` — pass
+
 - 2026-04-05: Fixed untimed reminder phrasing being misrouted as proactive reminders instead of task/event state.
   - Root cause:
     - the `REMINDER_SET` route interceptor in `core/engines/proactive_monitor.py` matched every `remind me to ...` request, even when the user gave no fire time.
@@ -473,3 +602,32 @@
     - `./.venv/Scripts/python.exe scripts/file_edit_smoke_test.py --json --keep-data-copy` — first turn passes through the refactored orchestrator path; later turns still hit existing suite/runtime instability
   - current limitation:
     - `scripts/run_smoke_tests.py --skip-harness` is not a trustworthy green gate in the current environment yet; after the harness caller fix, the broad pack still reports many unrelated model/runtime reds, so do not use its aggregate result alone as evidence against this DI refactor
+2026-04-13
+- Browser download fix: the RFC `download the text version` flow could reach `rfc2606.txt` and still time out because `BROWSER_OP download` kept waiting for a Playwright download event on a plain-text artifact page. `core/engines/computer_use_engine.py` now treats an explicit non-HTML artifact `url` as authoritative and saves it directly via the existing HTTP fallback instead of looping on a nonexistent click/download event. Added a direct-artifact regression to `scripts/computer_use_engine_smoke_test.py`.
+2026-04-13
+- Browser back-navigation fix: manual `go back` could loop as `PARTIAL` because `core/engines/computer_use_engine.py` enforced HTTP scope only against the current page host. Cross-host history navigation inside the pilot allowlist (for example `localhost` back to `127.0.0.1`, or one allowlisted live host back to another) was getting blocked after the browser had already navigated. `go_back` now uses a merged history scope from the current and previous URLs, updates the session scope after the back action, and `core/executor.py` now fails COMPUTER_USE stages honestly if the same unverified completion evidence repeats instead of spinning identical finish attempts. Added a cross-host back regression to `scripts/computer_use_playwright_localhost_engine_smoke_test.py`.
+
+2026-04-19
+- Search backend error contract: DuckDuckGo/DDGS provider failures such as `Search Error: 403 Ratelimit` are now carried through the async search handoff as failed search attempts instead of normal search evidence. Added `core/search_contracts.py`, failure payload handling in `phase_search()` / `phase_reporter()`, and a deterministic regression in `scripts/search_error_contract_smoke_test.py`.
+- Validation: `compileall` passed for the main runtime/test paths; `scripts/search_error_contract_smoke_test.py`, `scripts/search_thread_cleanup_smoke_test.py`, `scripts/context_pack_engine_smoke_test.py --json`, `scripts/search_tool_fallback_smoke_test.py`, `scripts/orchestrator_graph_smoke_test.py`, and `scripts/summary_engine_smoke_test.py` passed. `scripts/search_flow_smoke_test.py --json` completed the search path but failed an older prompt-shape assertion because the first-pass prompt lacked `[WORLD STATE]`; this was not part of the backend-error fix.
+- Caution: do not run multiple llama-backed harness smokes in parallel on this PC. A parallel file-smoke attempt spawned three `llama-server.exe` processes and was stopped manually; run harness/model checks sequentially.
+- Follow-up search quality fix: the live `latest Python 3.13 news` run still produced a `VERIFIED` summary from low-relevance syntax snippets plus blocked pages. `tools/search.py` now filters DDGS candidates against core query terms, requires version tokens such as `3.13` to appear in returned result metadata, and skips obvious blocked deep-dive pages. Recency-sensitive first-pass prompts now forbid current/live/version claims from memory before web evidence arrives. Validation: `py_compile`, `compileall`, `scripts/search_tool_fallback_smoke_test.py`, `scripts/search_prompt_isolation_smoke_test.py`, and `scripts/search_error_contract_smoke_test.py` passed.
+- Follow-up search quality fix #2: a later live `latest Python 3.13 news` run had a cautious first pass but the reporter treated low-quality InfoQ/login/navigation content about agent workflows and transport as Python 3.13 evidence. `tools/search.py` now gates deep-dive page bodies for versioned recency/news queries: fetched content must repeatedly mention the versioned subject before it can be added as full-content evidence. If only snippets remain, the search payload explicitly tells the reporter not to infer details beyond the title/snippet. Validation: `scripts/search_tool_fallback_smoke_test.py`, `scripts/search_error_contract_smoke_test.py`, `scripts/search_prompt_isolation_smoke_test.py`, and `compileall` passed.
+- Follow-up search quality fix #3: a live retest returned sane Python 3.13 facts, but only one readable source and the first-pass reply leaked a stray `</think>`. Search collection now accumulates relevant results across news/text fallback strategies instead of stopping at the first relevant strategy, emits `SEARCH META` / `SOURCE COVERAGE`, and the reporter prompt must disclose single-source or snippet-only evidence. Recency-sensitive search previews now use a deterministic short acknowledgment instead of asking the persona to improvise current facts, and `sanitize_persona_output()` strips stray think tags. Validation: `scripts/search_tool_fallback_smoke_test.py`, `scripts/search_prompt_isolation_smoke_test.py`, `scripts/persona_output_sanitizer_smoke_test.py`, `scripts/search_error_contract_smoke_test.py`, and `compileall` passed.
+- Follow-up search failure narration fix: a live DDGS `403 Ratelimit` run was internally recorded as `SEARCH FAILED`, but the final persona pass still improvised wording that sounded like unsupported web context. Failed search reporter turns now bypass the persona LLM and stream a deterministic failure reply with the normalized provider error and `Verified web findings from this attempt: none.` The search error contract smoke now asserts reporter/persona LLM calls stay disabled on failed-search turns. Validation: `py_compile`, `scripts/search_error_contract_smoke_test.py`, `scripts/search_tool_fallback_smoke_test.py`, `scripts/search_prompt_isolation_smoke_test.py`, `scripts/persona_output_sanitizer_smoke_test.py`, and `compileall` passed.
+- Follow-up search provider fix: the real error source was DDGS' unofficial `news.js` endpoint returning provider-side `403 Ratelimit`, not the reporter wording. `tools/search.py` now leads recency/news queries with resilient DuckDuckGo HTML/lite result pages and only falls back to DDGS if those pages cannot produce relevant candidates; it also prefers the maintained `ddgs` package when installed, keeps the old package as a compatibility fallback, suppresses the rename warning, and sends browser-like headers. A live direct `latest Python 3.13 news` search completed from HTML results with no `403`, `Ratelimit`, `return None`, or `Search Error` log. Validation: `scripts/search_tool_fallback_smoke_test.py`, `scripts/search_error_contract_smoke_test.py`, `scripts/search_prompt_isolation_smoke_test.py`, `scripts/persona_output_sanitizer_smoke_test.py`, and `compileall` passed.
+
+2026-04-21
+- LangGraph interrupt bridge: missing-file-target confirmation now pauses at a durable LangGraph interrupt instead of flowing straight into persona narration. The graph records `data/state/langgraph_interrupt.json`, `/graph status` shows pending interrupts, `/graph clear` removes recovery and interrupt records, and the next non-slash user reply resumes the graph with `Command(resume={"user_msg": ...})`.
+- The first real pause point is the FILE_WORK target confirmation rail. On affirmative/explicit candidate replies, the graph rewrites the route decision with the confirmed target and reruns `MANAGER`; on decline, it routes to `PERSONA` with a deterministic cancellation notice and leaves the workspace unchanged.
+- Validation: `py_compile` for LangGraph/UI touched files, `scripts/langgraph_interrupt_smoke_test.py`, `scripts/langgraph_recovery_command_smoke_test.py`, `scripts/orchestrator_graph_smoke_test.py`, `scripts/langgraph_checkpoint_recovery_smoke_test.py`, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` all passed. No llama/model server tests were run for this pass.
+- UI active-turn brake: while an agent/search operation is active, the main input and send button now stay enabled as a cancellation path only. The send button label changes to `Stop`, empty send or typed phrases like `stop`, `cancel`, or `please stop` call the same stop path, and non-cancel text is rejected with a visible busy message instead of starting a second turn. Validation: `scripts/ui_active_cancel_smoke_test.py`, `scripts/search_thread_cleanup_smoke_test.py`, `scripts/search_error_contract_smoke_test.py`, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` passed.
+- LangGraph checkpoint inspection: `scripts/langgraph_checkpoint_inspect.py` now supports thread summaries plus selected-checkpoint state previews via `--checkpoint-id --values`, with scratchpad redacted unless `--scratchpad` is passed. Added `scripts/langgraph_checkpoint_inspect_smoke_test.py`. Validation: checkpoint inspect smoke, checkpoint inspect CLI against the default path, graph smoke, checkpoint recovery smoke, interrupt smoke, recovery command smoke, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` passed.
+- LangGraph stage-pause interrupts: `phase_manager` now records a structured `pending_stage_pause` for `PAUSED / AWAITING USER INPUT` and approval pauses. The graph currently migrates only `pause_type=user_input` into a real LangGraph interrupt (`stage_user_input_pause`); resume routes the user's reply through `ROUTE` as a fresh follow-up turn, with `[LATEST_RUNTIME_CONTEXT]` upserted when the interrupt is recorded because persona turn-end hooks do not run on paused graph turns. Approval/mutation pauses intentionally remain on the legacy persona path until their semantics get a separate safety pass. Validation: `scripts/stage_pause_snapshot_smoke_test.py`, `scripts/langgraph_interrupt_smoke_test.py`, `scripts/orchestrator_graph_smoke_test.py`, `scripts/langgraph_checkpoint_recovery_smoke_test.py`, `scripts/langgraph_recovery_command_smoke_test.py`, `scripts/langgraph_checkpoint_inspect_smoke_test.py`, `scripts/context_pack_engine_smoke_test.py --json`, `scripts/summary_engine_smoke_test.py`, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` passed.
+
+2026-04-22
+- LangGraph entrypoint interrupt regression: extended `scripts/langgraph_interrupt_smoke_test.py` with an entrypoint-level `stage_user_input_pause` case that drives `run_agent_loop_with_langgraph()`, records a temp SQLite checkpoint, persists a pending interrupt record, emits the user prompt, and verifies the hidden `[LATEST_RUNTIME_CONTEXT]` upsert. Run this smoke from the Windows `.venv`; WSL `python3` may not have LangGraph installed. Validation: Windows `.venv` `py_compile`, `scripts/stage_pause_snapshot_smoke_test.py`, `scripts/langgraph_interrupt_smoke_test.py`, `scripts/orchestrator_graph_smoke_test.py`, `scripts/langgraph_checkpoint_recovery_smoke_test.py`, `scripts/langgraph_checkpoint_inspect_smoke_test.py`, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` passed.
+- LangGraph approval interrupts: `pause_type=approval` manager pauses now become durable `stage_approval_pause` graph interrupts. Resume is conservative: clear approval continues only the recorded approved stage route, clear decline routes to a deterministic stopped/unchanged reply, and ambiguous replies re-interrupt with a yes/no request. `pending_stage_pause` now stores an approval-only `approved_route_decision` so approval-first proposal stages resume after the proposal stage, while dynamic safety pauses can rerun the current stage. Added `core/stage_approval.py` and expanded `scripts/stage_pause_snapshot_smoke_test.py` plus `scripts/langgraph_interrupt_smoke_test.py` for approve/decline/ambiguous and entrypoint interrupt-record coverage. Validation: Windows `.venv` `py_compile`, `scripts/stage_pause_snapshot_smoke_test.py`, `scripts/langgraph_interrupt_smoke_test.py`, `scripts/orchestrator_graph_smoke_test.py`, `scripts/langgraph_checkpoint_recovery_smoke_test.py`, `scripts/langgraph_recovery_command_smoke_test.py`, `scripts/langgraph_checkpoint_inspect_smoke_test.py`, `scripts/context_pack_engine_smoke_test.py --json`, `scripts/summary_engine_smoke_test.py`, and `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` passed. No llama/model server tests were run.
+- First live approval test follow-up: the saved LangGraph recovery record showed `MANAGER: 'dict' object has no attribute 'strip'` after stage 1 verified. Root causes were stacked: planner tool calls can arrive as structured dicts, target directories supplied only in route-card context were not promoted to `declared_scope_root`, and approval constraints supplied only in context were not considered by the pause detector. `core/json_utils.py` now normalizes structured planner tool objects, `core/executor.py` avoids raw `.strip()` on non-string planner replies and scopes root-style FILE_OP calls to declared scope, `core/file_stage_policy.py` / `core/planner_boundary.py` promote `Target directory: data/workspace/...` into workspace-relative scope, and `core/stage_policy.py` counts context-only approval constraints only for proposal/mutation stages so harmless inventory stages do not pause early. Added `scripts/planner_tool_normalization_smoke_test.py` and context-derived scope/approval coverage in `scripts/planner_boundary_smoke_test.py`. Validation: Windows `.venv` `py_compile`; `scripts/planner_boundary_smoke_test.py`; `scripts/planner_tool_normalization_smoke_test.py`; `scripts/stage_pause_snapshot_smoke_test.py`; `scripts/langgraph_interrupt_smoke_test.py`; `scripts/orchestrator_graph_smoke_test.py`; `set PYTHONPATH=%CD%&& .venv\Scripts\python scripts\test_engines.py` passed with 115 tests and one unrelated deprecation warning. Initial `scripts/test_engines.py` without `PYTHONPATH` failed with repo-import errors only.
+- Missing declared directory scopes are now terminal FILE_WORK failures instead of planner-repeat escalations. If a stage has a normalized `declared_scope_root` such as `langgraph_approval_test` and FILE_OP reports that target missing, the executor stops honestly and the persona reroute guard treats it as terminal. Validation: `scripts/planner_tool_normalization_smoke_test.py`, `scripts/planner_boundary_smoke_test.py`, targeted `py_compile`, `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts`, and Windows `.venv` `scripts/test_engines.py` via `cmd.exe /C "set PYTHONPATH=%CD%&& ..."`.
+- Live retest still looped when `data/workspace/langgraph_approval_test` was absent, likely because the running app reached planner steps before terminal handling. Added an executor preflight for missing non-mutating `declared_scope_root` directories so explicit absent inspection targets fail before any planner LLM call, and summary detail extraction now prefers structured tool-result `summary` over raw JSON. Validation: targeted Windows `.venv` `py_compile`, `scripts/planner_tool_normalization_smoke_test.py`, and `scripts/summary_engine_smoke_test.py`.

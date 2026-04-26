@@ -349,6 +349,8 @@ class RuntimeContextPack:
     runtime_note: str = ""
     relevant_paths: List[str] = field(default_factory=list)
     reporter_just_ran: bool = False
+    search_failed: bool = False
+    search_error: str = ""
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from core.debug_tools import log_prompt_debug
 from core.feature_hooks import fire_hooks
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
+from core.engines.summary import SummaryEngine
 from core.engines.proactive_monitor import (
     PROACTIVE_TRIGGER_PREFIX,
     ReminderStore,
@@ -35,6 +37,13 @@ from core.routing.route_normalizer import (
     looks_like_explicit_browser_request,
     normalize_route_decision,
 )
+from core.search_contracts import (
+    is_background_search_payload,
+    is_search_error_result,
+    is_search_reporter_instruction,
+    normalize_search_error,
+    parse_background_search_content,
+)
 from core.skills import apply_route_skill_layer
 from core.stage_policy import stage_requires_user_approval, stage_requires_user_input
 from core.stream_filter import stream_thinking_filter
@@ -45,8 +54,6 @@ from tools.vision import VisionError, generate_stream_with_image_attachment, gen
 _LOG = logging.getLogger(__name__)
 
 FALLBACK_SECRETARY = "You are a Router. Output JSON: {decision: 'CHAT' or 'TASK', card: {goal, context}}."
-SEARCH_RESULT_PREFIX = "Background search complete for '"
-SEARCH_REPORTER_INSTRUCTION = "The web search is complete. Summarize the findings for the user now."
 _CONFIRMATION_PHRASES = (
     "shall i",
     "should i",
@@ -66,6 +73,7 @@ _SCRATCHPAD_ERROR_PREFIXES = (
     "exception:",
     "execution error:",
 )
+_SEARCH_RECENCY_HINT_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b")
 _INGESTED_DOC_META_ACTION_RE = re.compile(
     r"(?i)^\s*/ingest\b|\b(ingest|upload|import|attach|add)\b.*\b(document|pdf|docx|file)\b"
 )
@@ -164,7 +172,7 @@ def _is_live_environment_chat_query(text: str) -> bool:
 def _is_pending_search_payload(message: dict) -> bool:
     return (
         message.get("role") == "system"
-        and str(message.get("content", "")).startswith(SEARCH_RESULT_PREFIX)
+        and is_background_search_payload(message.get("content", ""))
     )
 
 
@@ -189,7 +197,43 @@ def _latest_proactive_trigger_payload(messages: list[dict] | tuple[dict, ...] | 
 def _is_search_reporter_instruction(message: dict) -> bool:
     return (
         message.get("role") == "system"
-        and str(message.get("content", "")).strip() == SEARCH_REPORTER_INSTRUCTION
+        and is_search_reporter_instruction(message.get("content", ""))
+    )
+
+
+def _build_search_failure_summary(query: str, error_text: str) -> str:
+    clean_error = normalize_search_error(error_text) or "The search backend failed before returning usable results."
+    clean_query = str(query or "Unknown Query").strip() or "Unknown Query"
+    return "\n".join(
+        [
+            "The web search failed before usable results were retrieved.",
+            f"- Query: {clean_query}",
+            f"- Error: {clean_error}",
+            "- Verified web findings: none.",
+        ]
+    )
+
+
+def _summarize_search_error_for_user(error_text: str) -> str:
+    clean_error = normalize_search_error(error_text) or "the search backend failed"
+    lower = clean_error.casefold()
+    if "zero results" in lower:
+        return "the search provider returned zero usable results"
+    if "403" in lower and "ratelimit" in lower:
+        return "the search provider returned HTTP 403 Ratelimit"
+    if "403" in lower:
+        return "the search provider returned HTTP 403"
+    if "rate" in lower and "limit" in lower:
+        return "the search provider rate-limited the request"
+    return clean_error
+
+
+def _build_search_failed_persona_reply(orc) -> str:
+    error_text = _summarize_search_error_for_user(str(getattr(orc, "latest_search_error", "") or ""))
+    return (
+        "The web search failed before usable results were retrieved. "
+        f"Reason: {error_text}. "
+        "Verified web findings from this attempt: none."
     )
 
 
@@ -238,11 +282,25 @@ def _build_search_first_pass_rule(query: str) -> str:
             "Do not emit control tags such as [ROUTER] or [RECALL].",
         ]
     )
+    if _SEARCH_RECENCY_HINT_RE.search(clean_query):
+        lines.extend(
+            [
+                "The query is recency-sensitive. Do not state current/live facts, release status, dates, version status, rankings, prices, or 'latest news' claims from memory.",
+                "For recency-sensitive searches, keep the first-pass response brief: say what you are checking and defer factual claims until the web results arrive.",
+                "Do not say a version is already out, current, upcoming, quiet, settled, or lacking news unless supplied by explicit current system evidence.",
+            ]
+        )
     return "\n".join(lines)
 
 
 def _build_search_first_pass_fallback(query: str) -> str:
     clean_query = str(query or "").strip()
+    clean_query = re.sub(
+        r"(?i)^\s*(?:please\s+)?(?:search(?:\s+the\s+web)?\s+for|look\s+up|look\s+for|find|locate)\s+",
+        "",
+        clean_query,
+        count=1,
+    ).strip(" .?!")
     if clean_query:
         return f'I\'m checking the web for "{clean_query}" now. I\'ll bring the results back automatically in a moment.'
     return "I'm checking the web for that now. I'll bring the results back automatically in a moment."
@@ -504,6 +562,8 @@ def _consume_pipeline_stream_metrics(orc) -> list[dict[str, float | str]]:
 def _finalize_persona_turn(orc, *, reporter_just_ran: bool = False) -> None:
     orc.reporter_just_ran = False
     orc.latest_search_summary = ""
+    orc.latest_search_failed = False
+    orc.latest_search_error = ""
     orc.undo_notice_pending = False
     fire_hooks("on_turn_end", orc, reporter_just_ran=reporter_just_ran)
 
@@ -554,7 +614,27 @@ def _build_file_target_confirmation_cancelled_reply(system_notice: dict[str, Any
     return "Understood. I will leave the workspace unchanged."
 
 
-def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index: int) -> dict[str, Any]:
+def _build_stage_approval_cancelled_reply(system_notice: dict[str, Any]) -> str:
+    reply = str(system_notice.get("reply") or "").strip()
+    if reply:
+        return reply
+    stage_goal = str(system_notice.get("stage_goal") or "").strip()
+    if stage_goal:
+        return f"Understood. I will stop before `{stage_goal}` and leave things unchanged."
+    return "Understood. I will stop here and leave things unchanged."
+
+
+def _build_stage_approval_no_remaining_work_reply(system_notice: dict[str, Any]) -> str:
+    reply = str(system_notice.get("reply") or "").strip()
+    if reply:
+        return reply
+    return (
+        "I have your approval, but there is no follow-up execution stage recorded, "
+        "so I will stop here instead of guessing."
+    )
+
+
+def _build_remaining_route_decision(orc, *, start_stage_index: int) -> dict[str, Any]:
     route = json.loads(json.dumps(dict(getattr(orc, "route_decision", {}) or {}), ensure_ascii=False))
     if not isinstance(route, dict):
         return {}
@@ -563,9 +643,14 @@ def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index:
     card = dict(route.get("card") or {})
     stages = [dict(item) for item in (card.get("stages") or []) if isinstance(item, dict)]
     if stages:
-        card["stages"] = stages[stage_index:]
+        start_index = max(0, min(int(start_stage_index or 0), len(stages)))
+        card["stages"] = stages[start_index:]
     route["card"] = card
     return route
+
+
+def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index: int) -> dict[str, Any]:
+    return _build_remaining_route_decision(orc, start_stage_index=stage_index)
 
 
 def _maybe_pause_for_missing_file_target_confirmation(
@@ -622,6 +707,54 @@ def _maybe_pause_for_missing_file_target_confirmation(
     orc.ui.put(("agent_log", "   -> Exact file target is missing, but a close workspace match exists. Pausing for confirmation."))
     orc._log_dashboard("Awaiting file-target confirmation.")
     return True
+
+
+def _build_pending_stage_pause(
+    orc,
+    *,
+    pause_type: str,
+    stage: dict[str, Any],
+    stage_index: int,
+    stage_num: int,
+    total_stages: int,
+    stage_log: list[str],
+    pause_status: str,
+) -> dict[str, Any]:
+    normalized_pause_type = str(pause_type or "").strip().lower() or "user_input"
+    question = SummaryEngine.extract_proposal(stage_log)
+    if not question:
+        if normalized_pause_type == "approval":
+            question = "Please review the proposal and confirm whether I should continue."
+        else:
+            question = "Please provide the requested details so I can continue."
+    approved_start_index = stage_index
+    if normalized_pause_type == "approval" and stage_requires_user_approval(stage):
+        approved_start_index = stage_index + 1
+    payload = {
+        "kind": "stage_pause",
+        "pause_type": normalized_pause_type,
+        "question": question,
+        "stage_index": int(stage_index),
+        "stage_num": int(stage_num),
+        "total_stages": int(total_stages),
+        "stage_type": str(stage.get("stage_type") or "").strip(),
+        "stage_goal": str(stage.get("stage_goal") or "").strip(),
+        "success_condition": str(stage.get("success_condition") or "").strip(),
+        "status": str(pause_status or "").strip(),
+        "stage": json.loads(json.dumps(dict(stage or {}), ensure_ascii=False)),
+        "route_decision": _build_remaining_route_decision_for_target_confirmation(
+            orc,
+            stage_index=stage_index,
+        ),
+        "scratchpad_tail": [str(item) for item in stage_log[-6:]],
+    }
+    if normalized_pause_type == "approval":
+        payload["approved_route_decision"] = _build_remaining_route_decision(
+            orc,
+            start_stage_index=approved_start_index,
+        )
+        payload["approval_resume_mode"] = "after_stage" if approved_start_index > stage_index else "current_stage"
+    return payload
 
 
 def _build_compound_file_sequence_final_state_reply(orc) -> str:
@@ -1099,44 +1232,47 @@ def phase_search(orc) -> None:
         log_prompt_debug(CFG.PERSONA_DEBUG_PATH, speak_messages, "SEARCH_FIRST_PASS")
 
     fallback_text = _build_search_first_pass_fallback(query)
-    orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
     full_answer = ""
-    try:
-        full_answer, _ = _stream_or_capture_persona_answer_text_only(
-            orc,
-            speak_messages,
-            allow_recall=False,
-        )
-    except OperationCancelled:
-        orc.ui.put(("assistant_stream_end", ""))
-        raise
-    except LLMClientError as exc:
-        orc.emit_runtime_signal(
-            {
-                "kind": "search_preview_error",
-                "severity": "warning",
-                "source": "search",
-                "summary": f"Search first-pass error: {exc}",
-                "details": str(exc),
-            }
-        )
-        orc.ui.put(("agent_log", f"   -> Search first-pass error: {exc}"))
-    except Exception as exc:
-        orc.ui.put(("agent_log", f"   -> Search first-pass fallback: {exc}"))
-
-    clean_answer = sanitize_persona_output(
-        _strip_persona_control_tags(full_answer),
-        route_decision=orc.route_decision,
-        outcome_block="",
-        user_msg=orc.user_msg,
-    )
-    if clean_answer:
-        orc.ui.put(("assistant_stream_end", ""))
-        if clean_answer != full_answer.strip():
-            orc.chat.replace_last_assistant_content(clean_answer)
-    else:
-        orc.ui.put(("agent_log", "   -> Search first-pass reply unavailable. Using brief fallback acknowledgment."))
+    if _SEARCH_RECENCY_HINT_RE.search(str(query or "")):
         _emit_fallback_assistant_answer(orc, fallback_text)
+    else:
+        orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
+        try:
+            full_answer, _ = _stream_or_capture_persona_answer_text_only(
+                orc,
+                speak_messages,
+                allow_recall=False,
+            )
+        except OperationCancelled:
+            orc.ui.put(("assistant_stream_end", ""))
+            raise
+        except LLMClientError as exc:
+            orc.emit_runtime_signal(
+                {
+                    "kind": "search_preview_error",
+                    "severity": "warning",
+                    "source": "search",
+                    "summary": f"Search first-pass error: {exc}",
+                    "details": str(exc),
+                }
+            )
+            orc.ui.put(("agent_log", f"   -> Search first-pass error: {exc}"))
+        except Exception as exc:
+            orc.ui.put(("agent_log", f"   -> Search first-pass fallback: {exc}"))
+
+        clean_answer = sanitize_persona_output(
+            _strip_persona_control_tags(full_answer),
+            route_decision=orc.route_decision,
+            outcome_block="",
+            user_msg=orc.user_msg,
+        )
+        if clean_answer:
+            orc.ui.put(("assistant_stream_end", ""))
+            if clean_answer != full_answer.strip():
+                orc.chat.replace_last_assistant_content(clean_answer)
+        else:
+            orc.ui.put(("agent_log", "   -> Search first-pass reply unavailable. Using brief fallback acknowledgment."))
+            _emit_fallback_assistant_answer(orc, fallback_text)
 
     orc.stats_collector.end_phase(orc.turn_stats, "persona")
     orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
@@ -1157,6 +1293,8 @@ def phase_search(orc) -> None:
                 log_callback=orc._log_dashboard,
                 cancel_token=orc.cancel_token,
             )
+            if is_search_error_result(data):
+                raise RuntimeError(normalize_search_error(data))
             orc.raise_if_cancelled()
             orc.ui.put(("search_result", {"query": query, "data": data, "cancel_token": orc.cancel_token}))
             queued_result = True
@@ -1172,8 +1310,20 @@ def phase_search(orc) -> None:
                     "details": str(exc),
                 }
             )
-            orc.ui.put(("error", f"Search Error: {exc}"))
-            orc._log_dashboard(f"Search Error: {exc}")
+            error_data = f"Search Error: {exc}"
+            orc.ui.put(
+                (
+                    "search_result",
+                    {
+                        "query": query,
+                        "data": error_data,
+                        "error": True,
+                        "cancel_token": orc.cancel_token,
+                    },
+                )
+            )
+            queued_result = True
+            orc._log_dashboard(error_data)
         finally:
             orc.release_search_in_flight()
             if orc.cancel_token is not None:
@@ -1181,8 +1331,8 @@ def phase_search(orc) -> None:
             if not queued_result:
                 orc.ui.put(("status", "Canceled" if orc.cancel_token and orc.cancel_token.is_cancelled else "IDLE"))
 
-    worker = threading.Thread(target=_do_search, daemon=True)
     try:
+        worker = threading.Thread(target=_do_search, daemon=True)
         worker.start()
     except Exception:
         orc.release_search_in_flight()
@@ -1263,50 +1413,54 @@ def phase_reporter(orc) -> None:
             instruction_content = message.get("content", "")
             break
 
-    query = "Unknown Query"
-    data = raw_content
-    if SEARCH_RESULT_PREFIX in raw_content:
-        try:
-            parts = raw_content.split("'", 2)
-            if len(parts) >= 2:
-                query = parts[1]
-            if "Data:\n" in raw_content:
-                data = raw_content.split("Data:\n", 1)[1]
-        except Exception:
-            pass
+    payload = parse_background_search_content(raw_content)
+    query = payload.query
+    data = payload.data
+    search_failed = bool(payload.failed)
 
-    reporter_path = CFG.PROMPTS_DIR / "reporter.txt"
-    sys_template = reporter_path.read_text(encoding="utf-8") if reporter_path.exists() else "Summarize this."
-    sys_prompt = sys_template.replace("{query}", query).replace("{data}", data)
     orc.stats_collector.note_reporter_query(orc.turn_stats, query)
+    orc.latest_search_failed = search_failed
+    orc.latest_search_error = normalize_search_error(data) if search_failed else ""
 
     orc.ui.put(("status", "Analyzing Search Results..."))
-    try:
-        reporter_messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": f"Summarize the search findings for '{query}' using the instructions above."},
-        ]
-        summary = orc.llm.generate(
-            reporter_messages,
-            temperature=0.1,
-            max_tokens=int(getattr(CFG, "REPORTER_MAX_TOKENS", 700)),
-            cancel_token=orc.cancel_token,
+    if search_failed:
+        summary = _build_search_failure_summary(query, data)
+        orc.ui.put(("agent_log", f"   -> Search failed: {normalize_search_error(data)[:100]}..."))
+        orc.stats_collector.finalize_outcome(
+            orc.turn_stats,
+            outcome="FAILED",
+            detail=f"Search failed: {normalize_search_error(data)[:500]}",
         )
-        orc.ui.put(("agent_log", f"   -> Reporter Summary: {summary[:100]}..."))
-    except OperationCancelled:
-        raise
-    except Exception as exc:
-        orc.emit_runtime_signal(
-            {
-                "kind": "runtime_error",
-                "severity": "warning",
-                "source": "reporter",
-                "summary": f"Reporter error: {exc}",
-                "details": str(exc),
-            }
-        )
-        orc.ui.put(("agent_log", f"   -> Reporter Error: {exc}"))
-        summary = data
+    else:
+        reporter_path = CFG.PROMPTS_DIR / "reporter.txt"
+        sys_template = reporter_path.read_text(encoding="utf-8") if reporter_path.exists() else "Summarize this."
+        sys_prompt = sys_template.replace("{query}", query).replace("{data}", data)
+        try:
+            reporter_messages = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": f"Summarize the search findings for '{query}' using the instructions above."},
+            ]
+            summary = orc.llm.generate(
+                reporter_messages,
+                temperature=0.1,
+                max_tokens=int(getattr(CFG, "REPORTER_MAX_TOKENS", 700)),
+                cancel_token=orc.cancel_token,
+            )
+            orc.ui.put(("agent_log", f"   -> Reporter Summary: {summary[:100]}..."))
+        except OperationCancelled:
+            raise
+        except Exception as exc:
+            orc.emit_runtime_signal(
+                {
+                    "kind": "runtime_error",
+                    "severity": "warning",
+                    "source": "reporter",
+                    "summary": f"Reporter error: {exc}",
+                    "details": str(exc),
+                }
+            )
+            orc.ui.put(("agent_log", f"   -> Reporter Error: {exc}"))
+            summary = data
 
     new_msg = {"role": "system", "content": f"[SEARCH SUMMARY FOR '{query}']\n{summary}", "hidden": True}
     if raw_content:
@@ -1323,6 +1477,7 @@ def phase_manager(orc) -> None:
     orc.raise_if_cancelled()
     orc.context_card = orc.route_decision.get("card", {})
     orc.pending_file_target_confirmation = None
+    orc.pending_stage_pause = None
     orc._update_status(mode="PLANNING", goal=orc.context_card.get("goal", "Unknown"))
     orc.ui.put(("agent_log", "--- PHASE 2: EXECUTIVE LOOP (Task) ---"))
     orc.stats_collector.start_phase(orc.turn_stats, "manager")
@@ -1476,11 +1631,32 @@ def phase_manager(orc) -> None:
 
         if true_success:
             if needs_user_input:
+                if not getattr(orc, "pending_file_target_confirmation", None):
+                    orc.pending_stage_pause = _build_pending_stage_pause(
+                        orc,
+                        pause_type="user_input",
+                        stage=stage,
+                        stage_index=index,
+                        stage_num=stage_num,
+                        total_stages=total_stages,
+                        stage_log=stage_log,
+                        pause_status=pause_status,
+                    )
                 orc.ui.put(("agent_log", f"   -> Stage {stage_num} Ready. Awaiting user input."))
                 orc._log_dashboard(f"Stage {stage_num} awaiting user input.")
                 task_paused = True
                 break
             if needs_user_approval:
+                orc.pending_stage_pause = _build_pending_stage_pause(
+                    orc,
+                    pause_type="approval",
+                    stage=stage,
+                    stage_index=index,
+                    stage_num=stage_num,
+                    total_stages=total_stages,
+                    stage_log=stage_log,
+                    pause_status=pause_status,
+                )
                 orc.ui.put(("agent_log", f"   -> Stage {stage_num} Ready. Awaiting user approval before execution."))
                 orc._log_dashboard(f"Stage {stage_num} awaiting approval.")
                 task_paused = True
@@ -1895,6 +2071,17 @@ def phase_persona(orc) -> None:
     reporter_just_ran = bool(getattr(orc, "reporter_just_ran", False))
     system_notice = dict((getattr(orc, "route_decision", {}) or {}).get("system_notice") or {})
     explain_last_turn = str(system_notice.get("kind") or "").strip().lower() == "explain_last_turn"
+    if reporter_just_ran and bool(getattr(orc, "latest_search_failed", False)):
+        _finish_persona_fast_path(
+            orc,
+            _build_search_failed_persona_reply(orc),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
     if str(system_notice.get("kind") or "").strip().lower() == "search_in_flight":
         _finish_persona_fast_path(
             orc,
@@ -1921,6 +2108,28 @@ def phase_persona(orc) -> None:
         _finish_persona_fast_path(
             orc,
             _build_file_target_confirmation_cancelled_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
+    if str(system_notice.get("kind") or "").strip().lower() == "stage_approval_cancelled":
+        _finish_persona_fast_path(
+            orc,
+            _build_stage_approval_cancelled_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
+    if str(system_notice.get("kind") or "").strip().lower() == "stage_approval_no_remaining_work":
+        _finish_persona_fast_path(
+            orc,
+            _build_stage_approval_no_remaining_work_reply(system_notice),
             reporter_just_ran=reporter_just_ran,
             emit_start=True,
         )

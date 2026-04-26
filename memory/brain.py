@@ -16,10 +16,10 @@ from typing import List, Dict, Optional
 
 try:
     import chromadb
-    from chromadb.utils import embedding_functions
+    from sentence_transformers import SentenceTransformer
 except ImportError:
     chromadb = None
-    embedding_functions = None
+    SentenceTransformer = None
 
 _LOG = logging.getLogger(__name__)
 
@@ -39,6 +39,51 @@ def _tokenize(text: str) -> set[str]:
         if token
     }
 
+
+class _QuietSentenceTransformerEmbeddingFunction:
+    def __init__(self, model_name: str) -> None:
+        self.model_name = str(model_name or "").strip() or "all-MiniLM-L6-v2"
+        self._model = None
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def name() -> str:
+        # Keep Chroma embedding-function identity compatible with the original
+        # SentenceTransformer wrapper so persisted collections remain reusable.
+        return "sentence_transformer"
+
+    @staticmethod
+    def build_from_config(config: Dict[str, object]) -> "_QuietSentenceTransformerEmbeddingFunction":
+        model_name = str((config or {}).get("model_name") or "all-MiniLM-L6-v2")
+        return _QuietSentenceTransformerEmbeddingFunction(model_name)
+
+    def get_config(self) -> Dict[str, object]:
+        return {"model_name": self.model_name}
+
+    def _ensure_model(self):
+        if self._model is not None:
+            return self._model
+        with self._lock:
+            if self._model is None:
+                self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        model = self._ensure_model()
+        texts = [str(item or "") for item in (input or [])]
+        vectors = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+        if hasattr(vectors, "tolist"):
+            return vectors.tolist()
+        return [list(vector) for vector in vectors]
+
+    def embed_documents(self, texts: list[str] | None = None, *, input: list[str] | None = None) -> list[list[float]]:
+        items = texts if texts is not None else input
+        return self.__call__(items or [])
+
+    def embed_query(self, text: str | None = None, *, input: str | None = None) -> list[list[float]]:
+        query_text = text if text is not None else input
+        return self.__call__([query_text or ""])
+
 class PiperBrain:
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
@@ -46,7 +91,7 @@ class PiperBrain:
         self._fallback_store_path = data_dir / "state" / "brain_fallback.json"
         self._fallback_lock = threading.Lock()
         self._fallback_entries: list[dict] = []
-        self._vector_memory_available = chromadb is not None and embedding_functions is not None
+        self._vector_memory_available = chromadb is not None and SentenceTransformer is not None
         self._vector_init_lock = threading.Lock()
         self._vector_init_started = False
         self._vector_init_failed = False
@@ -97,9 +142,7 @@ class PiperBrain:
 
     def _initialize_vector_backend(self) -> None:
         try:
-            embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="all-MiniLM-L6-v2"
-            )
+            embedding_func = _QuietSentenceTransformerEmbeddingFunction("all-MiniLM-L6-v2")
             client = chromadb.PersistentClient(path=str(self.db_path))
             collection = client.get_or_create_collection(
                 name="piper_memory",

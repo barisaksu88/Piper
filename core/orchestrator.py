@@ -68,6 +68,11 @@ class OrchestratorConfig:
     # -- Paths --
     conversation_summary_path: Path | None = None
 
+    # -- LangGraph Recovery --
+    langgraph_resume_thread_id: str = ""
+    langgraph_resume_checkpoint_id: str = ""
+    langgraph_resume_value: Any | None = None
+
 
 class Orchestrator:
     """Manages the flow between Routing, Planning, and Speaking."""
@@ -116,6 +121,8 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_failed = False
+        self.latest_search_error = ""
         self.conversation_compressor = ConversationCompressor()
         self.conversation_summary = self._load_conversation_summary()
         self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
@@ -128,6 +135,7 @@ class Orchestrator:
         self.last_change_journal_entry: dict | None = None
         self.synthetic_user_turn = False
         self.pending_file_target_confirmation: dict | None = None
+        self.pending_stage_pause: dict | None = None
         # Tracks which style's bootstrap was last injected into history.
         # Bootstrap is prepended only on session start (empty) or style change.
         self._bootstrap_injected_for_style: str = ""
@@ -218,7 +226,8 @@ class Orchestrator:
         self.conversation_summary = normalized
         self.save_conversation_summary()
 
-    def run(self):
+    def prepare_turn(self) -> None:
+        """Reset per-turn orchestration state before phase dispatch begins."""
         _reloaded = CFG.reload_if_stale()
         if _reloaded:
             _LOG.info("Config hot-reloaded: %s", ", ".join(_reloaded))
@@ -244,6 +253,8 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_failed = False
+        self.latest_search_error = ""
         self.turn_stats = self.stats_collector.resume_or_start_turn(
             cancel_token=self.cancel_token,
             fallback_owner=self.chat,
@@ -254,29 +265,45 @@ class Orchestrator:
         self.last_change_journal_entry = None
         self.synthetic_user_turn = False
         self.pending_file_target_confirmation = None
+        self.pending_stage_pause = None
+
+    def dispatch_stage(self, stage_name: str | None = None) -> str:
+        """Execute exactly one top-level phase and return the dispatched stage name."""
+        stage = str(stage_name or self.next_stage or "").strip().upper()
+        if not stage:
+            self.next_stage = "FINISHED"
+            return ""
+
+        if stage == "ROUTE":
+            self._phase_route()
+        elif stage == "DOC_FOCUS":
+            self._phase_document_focus()
+        elif stage == "SEARCH":
+            self._phase_search()
+        elif stage == "REPORTER":
+            self._phase_reporter()
+        elif stage == "MANAGER":
+            self._phase_manager()
+        elif stage == "UNDO":
+            self._phase_undo()
+        elif stage == "REMINDER_SET":
+            self._phase_reminder_set()
+        elif stage == "EXPLAIN":
+            self._phase_explain()
+        elif stage == "PERSONA":
+            self._phase_persona()
+        else:
+            self.next_stage = "FINISHED"
+        return stage
+
+    def run(self):
+        self.prepare_turn()
 
         try:
             while self.next_stage != "FINISHED":
                 self.raise_if_cancelled()
-                if self.next_stage == "ROUTE":
-                    self._phase_route()
-                elif self.next_stage == "DOC_FOCUS":
-                    self._phase_document_focus()
-                elif self.next_stage == "SEARCH":
-                    self._phase_search()
-                elif self.next_stage == "REPORTER":
-                    self._phase_reporter()
-                elif self.next_stage == "MANAGER":
-                    self._phase_manager()
-                elif self.next_stage == "UNDO":
-                    self._phase_undo()
-                elif self.next_stage == "REMINDER_SET":
-                    self._phase_reminder_set()
-                elif self.next_stage == "EXPLAIN":
-                    self._phase_explain()
-                elif self.next_stage == "PERSONA":
-                    self._phase_persona()
-                else:
+                dispatched = self.dispatch_stage(self.next_stage)
+                if not dispatched:
                     break
             self._record_turn_stats_if_ready()
         except OperationCancelled:
@@ -334,5 +361,10 @@ class Orchestrator:
 
 
 def run_agent_loop(orc_cfg: OrchestratorConfig) -> None:
+    if CFG.LANGGRAPH_RUNTIME_ENABLED or str(getattr(orc_cfg, "langgraph_resume_thread_id", "") or "").strip():
+        from core.orchestrator_graph import run_agent_loop_with_langgraph
+
+        run_agent_loop_with_langgraph(orc_cfg)
+        return
     orc = Orchestrator(orc_cfg)
     orc.run()

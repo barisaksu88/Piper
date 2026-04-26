@@ -12,6 +12,7 @@ from core.runtime_context import extract_latest_runtime_context_fields
 _BROWSER_HTTP_SCHEME_RE = re.compile(r"^https?://", re.IGNORECASE)
 _BROWSER_URL_RE = re.compile(r"(?P<url>(?:https?://|file://)[^\s'\"<>]+)", re.IGNORECASE)
 _BROWSER_FILE_SCHEME_RE = re.compile(r"^file://", re.IGNORECASE)
+_BROWSER_URL_PLACEHOLDER_RE = re.compile(r"(?i)(?:https?://|file://)[^\s'\"<>]*<[^>\s]+>[^\s'\"<>]*")
 _BROWSER_BARE_URL_RE = re.compile(
     r"""(?P<url>(?<!@)(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z0-9-]{2,})(?::\d{2,5})?(?:/[^\s'"<>]*)?)""",
     re.IGNORECASE,
@@ -49,6 +50,9 @@ _BROWSER_TYPE_HUMAN_SELECTOR_RE = re.compile(
 )
 _BROWSER_CLICK_HUMAN_HINT_RE = re.compile(
     r"""(?is)\b(?:click|press|follow)\s+(?:the\s+)?(?P<label>[A-Za-z][\w-]*)(?:\s+(?P<kind>link|button))\b"""
+)
+_BROWSER_HISTORY_BACK_RE = re.compile(
+    r"""(?is)\b(?:go\s+back|take\s+me\s+back|return\s+to\s+(?:the\s+)?previous\s+page|(?:go\s+to\s+)?(?:the\s+)?previous\s+page|back)\b"""
 )
 _BROWSER_HEADING_HINT_RE = re.compile(r"(?i)\b(?:main|page)?\s*(?:heading|headline)\b")
 _BROWSER_READLIKE_HINT_RE = re.compile(
@@ -126,13 +130,23 @@ _COMMON_FILEISH_SUFFIXES = {
 
 
 def extract_browser_url(text: str) -> str:
-    match = _BROWSER_URL_RE.search(str(text or ""))
+    raw = str(text or "")
+    if _BROWSER_URL_PLACEHOLDER_RE.search(raw):
+        return ""
+    match = _BROWSER_URL_RE.search(raw)
     if match:
         return _normalize_browser_url_candidate(str(match.group("url") or "").strip())
-    bare_match = _BROWSER_BARE_URL_RE.search(str(text or ""))
+    bare_match = _BROWSER_BARE_URL_RE.search(raw)
     if bare_match:
         return _normalize_browser_url_candidate(str(bare_match.group("url") or "").strip())
     return ""
+
+
+def has_placeholder_browser_url(text: str) -> bool:
+    raw = str(text or "")
+    if not raw:
+        return False
+    return bool(_BROWSER_URL_PLACEHOLDER_RE.search(raw))
 
 
 def looks_like_explicit_browser_request(text: str) -> bool:
@@ -174,7 +188,8 @@ def build_explicit_browser_task_card(
     download_dir = _extract_browser_download_dir(user_msg)
     wants_download = bool(_BROWSER_DOWNLOAD_HINT_RE.search(raw_text))
     wants_form_fill = bool(_BROWSER_FORM_HINT_RE.search(raw_text))
-    wants_click = bool(re.search(r"(?i)\b(click|press|follow|continue|next)\b", raw_text))
+    wants_history_back = bool(_BROWSER_HISTORY_BACK_RE.search(raw_text))
+    wants_click = wants_history_back or bool(re.search(r"(?i)\b(click|press|follow|continue|next)\b", raw_text))
     wants_title = bool(re.search(r"(?i)\btitle\b", raw_text))
     wants_status = bool(re.search(r"(?i)\bstatus\b", raw_text))
     wants_extract = bool(_BROWSER_EXTRACT_HINT_RE.search(raw_text) or wants_heading)
@@ -222,6 +237,8 @@ def build_explicit_browser_task_card(
         computer_use["requested_topic"] = clean_requested_topic
     if clean_avoid_heading:
         computer_use["avoid_heading"] = clean_avoid_heading
+    if wants_history_back:
+        computer_use["history_navigation"] = "back"
     if wants_download:
         computer_use["download_dir"] = download_dir or "computer_downloads"
     if download_hint:
@@ -242,8 +259,12 @@ def build_explicit_browser_task_card(
             stage_steps.append("complete the requested form interaction")
             success_steps.append("the requested form interaction is verified from browser state")
     if wants_click and goal_kind != "download":
-        stage_steps.append("follow the requested navigation step")
-        success_steps.append("the requested navigation step is verified from browser state")
+        if wants_history_back:
+            stage_steps.append("go back to the previous browser page")
+            success_steps.append("the browser returns to the previous page with verified browser state")
+        else:
+            stage_steps.append("follow the requested navigation step")
+            success_steps.append("the requested navigation step is verified from browser state")
     if wants_extract:
         if wants_title:
             stage_steps.append("report the page title")
@@ -308,6 +329,8 @@ def build_explicit_browser_task_card(
         context.append(f"Expected text token: {expected_text}")
     if navigation_hint:
         context.append(f"Navigation hint: {navigation_hint}")
+    if wants_history_back:
+        context.append("Browser history action: back")
     if wants_download:
         context.append(f"Requested download dir: {computer_use.get('download_dir') or 'computer_downloads'}")
         context.append("If the page already exposes the artifact link or button, prefer BROWSER_OP download over a generic click.")
@@ -374,6 +397,12 @@ def build_browser_context_followup_route(
             requested_topic=requested_topic,
         )
     if intent == "navigate":
+        return build_explicit_browser_task_card(
+            f"Open {url} in the browser and {text.rstrip('.!?')}.",
+            url,
+            requested_topic=requested_topic,
+        )
+    if intent == "history_back":
         return build_explicit_browser_task_card(
             f"Open {url} in the browser and {text.rstrip('.!?')}.",
             url,
@@ -654,8 +683,8 @@ def _runtime_context_implies_browser_task(runtime: dict[str, str]) -> bool:
 
 def _extract_browser_url_from_runtime(runtime: dict[str, str]) -> str:
     for candidate in (
-        str(runtime.get("task_goal") or "").strip(),
         str(runtime.get("runtime_note") or "").strip(),
+        str(runtime.get("task_goal") or "").strip(),
         str(runtime.get("previous_user_request") or "").strip(),
     ):
         url = extract_browser_url(candidate)
@@ -788,6 +817,8 @@ def _classify_browser_followup_intent(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
+    if _BROWSER_HISTORY_BACK_RE.search(raw):
+        return "history_back"
     if _BROWSER_DOWNLOAD_HINT_RE.search(raw):
         return "download"
     if re.search(r"(?i)\b(?:page\s+)?title\b", raw):

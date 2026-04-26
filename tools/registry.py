@@ -178,6 +178,7 @@ _TOOL_SPECS: Tuple[ToolSpec, ...] = (
             '[BROWSER_OP]\n{"action":"extract_text","selector":"body","topic":"warranty disclaimer"}\n[/BROWSER_OP]',
             '[BROWSER_OP]\n{"action":"download","text":"quarterly report","download_dir":"browser_downloads"}\n[/BROWSER_OP]',
             '[BROWSER_OP]\n{"action":"wait_for","selector":"#destination"}\n[/BROWSER_OP]',
+            '[BROWSER_OP]\n{"action":"go_back"}\n[/BROWSER_OP]',
             '[BROWSER_OP]\n{"action":"download","selector":"#download-link","download_dir":"browser_downloads"}\n[/BROWSER_OP]',
             '[BROWSER_OP]\n{"action":"capture_state"}\n[/BROWSER_OP]',
         ),
