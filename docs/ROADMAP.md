@@ -279,6 +279,82 @@ Foundation: `knowledge_enabled` gating from R-2. The `user_id` filter is the nat
 
 ---
 
+**MCP client support**
+
+Piper should be able to call external Model Context Protocol servers without turning every integration into a bespoke in-repo tool. Add a thin MCP client layer that resolves external tool descriptors into Piper's existing `ToolSpec` / domain model so the Executor can use them without caring whether a tool is local or remote.
+
+**Architecture guardrails:**
+- MCP tools must still enter through Router-selected stage domains and Prompt Builder allowed-tool resolution.
+- External tool metadata should normalize into the same structured contracts Piper already expects from `tools/registry.py`.
+- Remote tool results must be schema-bound and checker-friendly; freeform success narration is not enough.
+- Keep Piper local-first: MCP extends the tool surface, but does not replace first-party tools or bypass safety rails.
+
+**Value-add:** plugin-style extensibility for local MCP servers, remote sandboxes, and proprietary internal tools without hand-authoring a new Piper integration each time.
+
+**Files (when specced):** `tools/mcp_client.py` (new); `tools/registry.py`; `core/planner_boundary.py`; `core/prompt_builder.py`; `core/executor.py`
+
+---
+
+**Task eval harness (`inspect-ai`-style)**
+
+Piper has smoke tests and harnesses, but it still needs a structured task-evaluation layer that measures whether the system got the *right result* across real end-to-end turns. Add an eval suite that scores route accuracy, stage completion truthfulness, checker alignment, and final answer quality across versions.
+
+**Architecture guardrails:**
+- Grade from structured execution evidence (`VERIFIED` / `PARTIAL` / `FAILED`, checker outputs, tool logs), not persona polish.
+- Start with deterministic fixtures and golden tasks before widening to heavier live integrations.
+- Report regressions by domain (`FILE_WORK`, `SEARCH_WORK`, `COMPUTER_USE`, etc.) so failures stay diagnosable.
+
+**Value-add:** a durable regression signal for execution quality, not just crash resistance, plus a way to track whether Piper is actually improving or quietly degrading.
+
+**Files (when specced):** `tests/eval/` or `AGENTS/harness/eval/`; `scripts/` eval runners; score-reporting docs and fixtures
+
+---
+
+**Full-text search engine**
+
+Chroma-backed semantic recall is useful, but Piper also needs exact keyword retrieval for commands, snippets, filenames, and previously seen lines. Add a local full-text index that complements vector recall instead of replacing it.
+
+**Architecture guardrails:**
+- Give the index a single owner module under `memory/` rather than scattering ad hoc search logic across the stack.
+- Keep ingestion bounded and write-path-capped in the same spirit as the repo's data-hygiene rules.
+- Surface exact-match evidence as a separate retrieval source so the model can distinguish semantic recall from literal hits.
+
+**Value-add:** semantic recall can find "deployment notes"; full-text recall can find the exact `docker run -p 8080:8080` line from weeks ago.
+
+**Files (when specced):** `memory/search_engine.py` (new); `core/search_contracts.py`; `core/engines/context_pack.py`; retrieval plumbing in the search/memory path
+
+---
+
+**Async task queue for background work**
+
+Long-running operations such as large indexing jobs, document ingestion, or extended code execution should not freeze the chat loop. Add an internal task queue so Piper can enqueue background work, surface progress, and let the user keep interacting while the job runs.
+
+**Architecture guardrails:**
+- Queueing is a scheduling layer, not a bypass around Router, Executor, or checker rails.
+- Background jobs need explicit status/progress events visible to the UI.
+- Cancellation, failure, and partial completion must stay first-class states rather than getting narrated away.
+
+**Value-add:** "index my whole Documents folder" or "run this long script" becomes a managed background task instead of a turn-blocking operation.
+
+**Files (when specced):** `core/task_queue.py` (new); `core/orchestrator.py`; `ui/controller_queue.py`; background worker / progress event plumbing
+
+---
+
+**Notebook-aware file tools**
+
+Piper can already inspect and edit plain code files, but data-science workflows often live in `.ipynb` notebooks. Add notebook-aware read/write/execute support so Piper can inspect cells, rerun notebooks for verification, and produce reproducible notebook artifacts.
+
+**Architecture guardrails:**
+- Prefer structured notebook actions with explicit outputs and execution evidence rather than treating notebooks as opaque blobs.
+- Respect the repo's data-hygiene rules: large binary-rich outputs should not be shoved wholesale into JSON logs.
+- Keep non-mutating notebook inspection stages non-mutating at runtime, just like existing `FILE_WORK` doctrine.
+
+**Value-add:** Piper becomes much more useful for research, experimentation, and reproducible analysis workflows that currently sit outside normal file tooling.
+
+**Files (when specced):** extend `FILE_OP` with notebook actions or add `NOTEBOOK_WORK`; `tools/registry.py`; `tools/workspace_runtime.py` or notebook-specific runtime module(s); `core/file_stage_policy.py`
+
+---
+
 **Active image selection (cortex tab)**
 
 The cortex/vision tab already auto-updates the active image in certain scenarios. Add a manual "choose file" control in the cortex tab so the user can explicitly designate any image as the current visual reference, overriding the auto-selected one. The chosen file becomes the active cortex image for the session until changed or cleared.
