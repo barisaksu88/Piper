@@ -1,5 +1,30 @@
 # Coder Log
 
+- 2026-04-26: Phase 1 — ROUTE node extraction with golden corpus verification (11/11 pass).
+  - Scope:
+    - `core/graph_nodes.py`: new LangGraph-compatible ROUTE node (`route_node`)
+      - `PiperState` TypedDict mirroring orchestrator state
+      - Adapter pattern: receives orchestrator via `config["configurable"]["orchestrator"]`
+      - Delegates to existing `_run_route_core` without duplicating 320+ lines of routing logic
+    - `core/orchestrator_phases.py`: extracted `_run_route_core` from `phase_route`
+      - **Bug fix**: `orc.latest_route_error` → `getattr(orc, "latest_route_error", "")`
+        - Previously `_run_route_core` crashed with `AttributeError` when called directly
+        - `phase_route` always set `latest_route_error` before calling `_run_route_core`,
+          but `route_node` calls `_run_route_core` directly, bypassing `phase_route`
+    - `tests/golden/record_piper_turns.py`: added `--route-node` flag
+      - Patches `Orchestrator._phase_route` to invoke `route_node` via adapter
+    - `tests/golden/compare_turns.py`: added `--mode=route_only` + structural comparator
+      - `_compare_route_decision()` compares decision type, stage_type, skill.name,
+        file_stage_kind, allowed_tools, mutation exactly
+      - Ignores free-form LLM text (goal, context, stage_goal, success_condition)
+      - This is necessary because exact match on full route_decision fails due to
+        LLM wording variance and history-dependent context strings
+    - `tests/golden/corpus_route_node/`: 11-turn isolated corpus recorded against live server
+  - Validation:
+    - `python compare_turns.py corpus corpus_route_node --mode=route_only` — 11/11 pass
+    - `python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean
+  - Commit: `84ac379`
+
 - 2026-04-21: Hardened the LangGraph runtime with real SQLite checkpoints.
   - Scope:
     - `PIPER_LANGGRAPH_RUNTIME_ENABLED=1` now uses SQLite checkpoints by default through `PIPER_LANGGRAPH_CHECKPOINT_MODE=sqlite`.
