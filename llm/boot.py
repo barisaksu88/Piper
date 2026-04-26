@@ -326,6 +326,7 @@ class BootManager:
             self.log("System Failed.")
 
     def shutdown(self):
+        killed = False
         if self.process and self.process.poll() is None:
             self.log("[System] Terminating LLM Server...")
             try:
@@ -337,4 +338,10 @@ class BootManager:
                     pass
             finally:
                 self._close_server_log_handle()
-                self.process = None
+            killed = True
+
+        # If we didn't manage to kill our own process (e.g. the server was
+        # already running when the harness started), sweep for managed orphans
+        # so test harnesses don't leak llama-server instances.
+        if not killed:
+            self._kill_orphans()
