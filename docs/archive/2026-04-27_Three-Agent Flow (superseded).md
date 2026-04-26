@@ -1,3 +1,8 @@
+---
+**ARCHIVED:** Superseded by `docs/DEVELOPMENT_WORKFLOW.md` as of 2026-04-27.
+The Three-Agent Flow (GLM + Codex + Claude) is no longer the active development model.
+---
+
 You pick next roadmap item
         │
         ▼
