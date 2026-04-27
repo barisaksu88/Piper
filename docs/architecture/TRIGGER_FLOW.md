@@ -4,6 +4,8 @@ Status: Active · Prescriptive
 Authoritative doctrine: `AGENTS.md`
 This document is the **optimized target spec** for Piper's runtime flow. Code must conform to this document. If the code and this document diverge, file a bug against the code.
 
+> **Dual runtime:** Piper has two orchestrator implementations. The legacy `while`-loop runtime (`core/orchestrator_phases.py`) is the default. The LangGraph runtime (`core/orchestrator_graph_builder.py`) is enabled via `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true`. Both runtimes execute the same phase logic and produce identical outcomes — the LangGraph path adds checkpoint persistence, interrupt/resume, and visual debugging. This document describes both paths; graph-specific behaviour is called out explicitly.
+
 ---
 
 ## 1. Top-Level Turn Flow
@@ -92,11 +94,118 @@ graph, but it is mandatory for keeping the shipped Windows entrypoint working.
 
 ---
 
+## 1.5 LangGraph Runtime (when `USE_LANGGRAPH_ORCHESTRATOR=True`)
+
+When the feature flag is set, `Orchestrator.run()` delegates to `_run_langgraph()` instead of the legacy `while` loop. The graph is compiled once per turn from `core/orchestrator_graph_builder.py` and invoked via `graph.invoke(state, config)`.
+
+### Graph structure
+
+```
+START
+  │
+  ▼
+ROUTE  ──[conditional]──► MANAGER  (if TASK)
+  │                         │
+  └───────────────────────► PERSONA  (if CHAT / SEARCH)
+                            │
+                            ▼
+                          VERIFY
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+              ▼             ▼             ▼
+      AWAIT_INTERRUPT    MANAGER      PERSONA
+              │          (resume)     (normal)
+              └──────────► VERIFY ◄────┘
+                            │
+                            ▼
+                          PERSONA
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+              ▼             ▼             ▼
+             END          ROUTE        MANAGER
+                        (reroute)     (reroute)
+```
+
+**Nodes:**
+
+| Node | File | Delegates to |
+|---|---|---|
+| `ROUTE` | `core/graph_nodes.py` → `route_node()` | `_run_route_core()` in `orchestrator_phases.py` |
+| `MANAGER` | `core/graph_nodes.py` → `manager_node()` | `_run_manager_core()` in `orchestrator_phases.py` |
+| `VERIFY` | `core/graph_nodes.py` → `verify_node()` | Reads `orc.last_verification` + pending interrupt state |
+| `AWAIT_INTERRUPT` | `core/graph_nodes.py` → `await_interrupt_node()` | Calls `langgraph.types.interrupt()`, applies resume helper |
+| `PERSONA` | `core/graph_nodes.py` → `persona_node()` | `_run_persona_core()` in `orchestrator_phases.py` |
+
+**Conditional edges:**
+
+- `ROUTE → {MANAGER, PERSONA}` — based on `route_decision.decision`
+- `VERIFY → {AWAIT_INTERRUPT, MANAGER, ROUTE, PERSONA}` — based on `interrupt_payload` + `orc.next_stage`
+- `PERSONA → {END, ROUTE, MANAGER}` — based on `orc.next_stage` (mirrors legacy [ROUTER] / auto-reroute)
+
+### State schema (`PiperState`)
+
+```python
+class PiperState(TypedDict, total=False):
+    messages: Any
+    stage: str
+    route_decision: dict[str, Any] | None
+    manager_result: dict[str, Any] | None
+    verification_passed: bool
+    pre_persona_output: str | None
+    persona_output: str | None
+    workspace_path: str
+    interrupt_payload: dict[str, Any] | None
+```
+
+The orchestrator instance itself is **not** in state — it is passed via `config["configurable"]["orchestrator"]` at invocation time. State only holds the serializable subset needed for checkpointing.
+
+### Checkpoints
+
+Three checkpoint modes (via `PIPER_LANGGRAPH_CHECKPOINT_MODE`):
+
+| Mode | Persistence | Use case |
+|---|---|---|
+| `sqlite` (default) | `data/state/langgraph_checkpoints.sqlite` | Production — durable, survives restart |
+| `memory` | In-process only | Tests / ephemeral sessions |
+| `none` | Disabled | Debugging / legacy fallback |
+
+Per-thread pruning keeps the N most recent checkpoints (`PIPER_LANGGRAPH_CHECKPOINT_HISTORY_LIMIT`, default 500). Old checkpoints are pruned via SQL window function — one thread's flood cannot erase another thread's history.
+
+### Interrupt / resume flow
+
+1. `VERIFY` node detects `pending_stage_pause` or `pending_file_target_confirmation` on the orchestrator
+2. `VERIFY` routing returns `AWAIT_INTERRUPT`
+3. `await_interrupt_node()` calls `langgraph.types.interrupt(payload)` — graph execution pauses and state is checkpointed
+4. UI layer (`controller_actions.py`) detects the interrupt, presents the question, and queues user input
+5. On resume, `graph.invoke(state, config)` receives the user's reply as the `resume_value`
+6. `await_interrupt_node()` applies the appropriate resume helper (`_apply_stage_approval_resume`, `_apply_file_target_resume`, or `_apply_user_input_resume`)
+7. State is updated, `interrupt_payload` is cleared, and the graph loops back to `VERIFY` for re-evaluation
+
+### Recovery records
+
+On graph failure (exception mid-turn), a recovery record is written to `data/state/langgraph_recovery.json` if checkpoint mode is `sqlite`. The record contains thread ID, checkpoint ID, next node, stage trace, and error. Users can resume with `/graph resume` or discard with `/graph clear`.
+
+Interrupt records are written to `data/state/langgraph_interrupt.json` when the graph pauses for user input. These are consumed on resume and cleared on completion.
+
+### Visual debug traces
+
+When `PIPER_DEBUG_LANGGRAPH_VISUALIZE=true`, the compiled graph is rendered to `data/debug/langgraph_visualization.png` (or `.md` fallback) on every turn. When `PIPER_DEBUG_LANGGRAPH_TRACE=true`, structured trace lines are appended to `data/debug/langgraph_trace.jsonl` with stage timings, route decisions, and checkpoint metadata.
+
+### Feature-flag fallback
+
+If LangGraph dependencies are missing or graph compilation fails, `_run_langgraph()` logs a fallback banner and falls back to the legacy `while` loop for that turn. The fallback is per-turn — the next turn will attempt LangGraph again.
+
+---
+
 ## 2. Route Phase (phase_route)
 
 **Triggered by:** every user turn, and on [ROUTER] / auto-reroute loops
-**File:** `orchestrator_phases.py` → `phase_route()`
+**File:** `orchestrator_phases.py` → `phase_route()` (legacy) or `core/graph_nodes.py` → `route_node()` (LangGraph)
 **LLM role:** Secretary / Router (prompt: `data/prompts/secretary.txt`)
+
+> **LangGraph note:** `route_node()` delegates to `_run_route_core(orc)` — the same helper the legacy loop uses. The graph node additionally writes `route_decision` into `PiperState` for downstream conditional routing.
 
 ### User turn ingestion
 
@@ -200,8 +309,10 @@ Search can take seconds. The async design avoids blocking the UI. When the searc
 ## 6. Manager Phase (phase_manager)
 
 **Triggered by:** router returning `TASK`
-**File:** `orchestrator_phases.py` → `phase_manager()`
+**File:** `orchestrator_phases.py` → `phase_manager()` (legacy) or `core/graph_nodes.py` → `manager_node()` (LangGraph)
 **Handles both planning and execution** — no separate phase_plan / phase_act split
+
+> **LangGraph note:** `manager_node()` delegates to `_run_manager_core(orc)` — the same helper the legacy loop uses. The graph node additionally snapshots `verification_passed` into `PiperState` for `VERIFY` routing.
 
 ### Flow inside phase_manager:
 
@@ -299,8 +410,10 @@ For each stage in StageCard:
 ## 7. Persona Phase (phase_persona)
 
 **Triggered by:** all paths (CHAT, SEARCH/REPORTER, DOC_FOCUS, MANAGER)
-**File:** `orchestrator_phases.py` → `phase_persona()`
+**File:** `orchestrator_phases.py` → `phase_persona()` (legacy) or `core/graph_nodes.py` → `persona_node()` (LangGraph)
 **LLM role:** Persona / Speaker (prompt: `data/prompts/instructions.txt`)
+
+> **LangGraph note:** `persona_node()` delegates to `_run_persona_core(orc)`. After persona completes, the graph reads `orc.next_stage` and routes conditionally: `ROUTE` → loopback to `ROUTE` node; `MANAGER` → loopback to `MANAGER` node; `FINISHED` → `END`.
 
 ### Context assembly (ContextPackEngine + PromptContextService):
 
@@ -399,6 +512,8 @@ Persona can output `[ROUTER]` to request a re-route to `phase_route`. This is gu
 
 **Max re-routes per turn:** 1 (enforced by `failed_task_router_retries` counter)
 
+> **LangGraph note:** The guard cascade lives in `_run_persona_core()` — behaviour is identical in both runtimes. In the graph, the same `orc.next_stage` mutation drives the `_persona_routing` conditional edge instead of a `while` loop condition.
+
 ### Output — streaming pipeline:
 
 ```
@@ -463,6 +578,8 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 
 **Reset rule:** `orc.failed_task_router_retries` must be reset to `0` at the start of each new user turn (before `phase_route` runs). If it is not reset, a failed re-route from a previous turn will silently block legitimate re-routing in all subsequent turns.
 
+> **LangGraph note:** In the graph runtime, these same two triggers mutate `orc.next_stage` to `"ROUTE"`, which the `_persona_routing` conditional edge reads. The graph then loops back to the `ROUTE` node instead of exiting to `END`. The retry counter and guard logic are unchanged — only the loop mechanism differs (`while` vs. conditional edge).
+
 ---
 
 ## 10. Memory Read / Write Map
@@ -517,6 +634,10 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change streaming behavior | `core/stream_filter.py` + `core/pipeline.py` |
 | Change UI event handling | `ui/controller_queue.py` |
 | Add a re-route path | Update §9 of this document first, then implement |
+| Change graph node behaviour | `core/graph_nodes.py` (delegates to `orchestrator_phases.py` helpers) |
+| Change graph topology / edges | `core/orchestrator_graph_builder.py` |
+| Change checkpoint / interrupt policy | `core/orchestrator_graph.py` |
+| Change graph recovery commands | `core/orchestrator_graph.py` + `ui/controller_actions.py` |
 
 ---
 
@@ -1156,6 +1277,73 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 - Public `Config` class attrs such as `MODEL_PATH` and `MMPROJ_PATH` are mirrored alongside dataclass fields, so legacy `CFG.X` access and override/revert behavior stay compatible.
 
 **Files:** `config.py` (`LiveConfig`, override watcher, revert path); `llm/llm_server_client.py` (`reconnect()`); `ui/controller.py` (config change subscriber + LLM/log-level refresh); `core/orchestrator.py` (turn-start reload check)
+
+---
+
+### 13.27 LangGraph Orchestrator Migration ✓ IMPLEMENTED
+
+**Status:** Implemented. All migration spec phases (0–8) are live. The LangGraph runtime is the active path when `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true`.
+
+**Problem:**
+
+The legacy `while`-loop orchestrator in `orchestrator_phases.py` grew to ~2500 lines of phase-dispatch spaghetti. Adding checkpointing, interrupt/resume, and visual debugging would have required hand-rolling infrastructure that already exists in proven libraries.
+
+**Design:**
+
+Adopt LangGraph `StateGraph` as an alternative runtime behind a feature flag. The graph delegates to the same phase helpers (`_run_route_core`, `_run_manager_core`, `_run_persona_core`) so behaviour is identical between runtimes. Only the loop mechanism changes: `while next_stage != "FINISHED"` becomes a compiled graph with conditional edges.
+
+**Nodes extracted (`core/graph_nodes.py`):**
+
+| Node | Phase | Delegates to |
+|---|---|---|
+| `route_node` | Phase 1 | `_run_route_core(orc)` |
+| `manager_node` | Phase 2 | `_run_manager_core(orc)` |
+| `verify_node` | Phase 3 | Reads verification + interrupt state |
+| `persona_node` | Phase 3 | `_run_persona_core(orc)` |
+| `await_interrupt_node` | Phase 5 | `langgraph.types.interrupt()` + resume helpers |
+
+**Graph builder (`core/orchestrator_graph_builder.py`):**
+
+- `ROUTE → {MANAGER, PERSONA}` conditional on `route_decision.decision`
+- `MANAGER → VERIFY` fixed edge
+- `VERIFY → {AWAIT_INTERRUPT, MANAGER, ROUTE, PERSONA}` conditional on `interrupt_payload` + `orc.next_stage`
+- `AWAIT_INTERRUPT → VERIFY` fixed edge (loop back for re-evaluation)
+- `PERSONA → {END, ROUTE, MANAGER}` conditional on `orc.next_stage`
+
+**Checkpoint integration (`core/orchestrator_graph.py`):**
+
+- SQLite (default), in-memory, or disabled checkpoint modes
+- Per-thread pruning with configurable history limit
+- Recovery records on failure (`/graph resume`, `/graph clear`)
+- Interrupt records on pause (`/graph resume` with user reply)
+- State serialization / deserialization helpers (`snapshot_orchestrator_state`, `restore_orchestrator_state`)
+
+**Visual debug (`orchestrator_graph_builder.py` → `save_piper_graph_visualization`):**
+
+Renders compiled graph to PNG/Mermaid on every turn when `PIPER_DEBUG_LANGGRAPH_VISUALIZE=true`.
+
+**Trace logging (`core/orchestrator_graph.py` → `_write_graph_trace`):**
+
+Appends structured trace lines to `data/debug/langgraph_trace.jsonl` with stage timings, route decisions, and checkpoint metadata when `PIPER_DEBUG_LANGGRAPH_TRACE=true`.
+
+**Feature flag:**
+
+- `PIPER_USE_LANGGRAPH_ORCHESTRATOR` — enables graph runtime
+- `PIPER_LANGGRAPH_CHECKPOINT_MODE` — `sqlite` / `memory` / `none`
+- `PIPER_LANGGRAPH_CHECKPOINT_PATH` — SQLite file location
+- `PIPER_LANGGRAPH_CHECKPOINT_HISTORY_LIMIT` — per-thread checkpoint retention
+- `PIPER_DEBUG_LANGGRAPH_TRACE` — structured trace logging
+- `PIPER_DEBUG_LANGGRAPH_VISUALIZE` — graph PNG/Mermaid output
+
+**Validation:**
+
+- `scripts/phase8_checklist_test.py` — 10/10 automated checklist tests pass (chat, search, file creation/edit, approval approve/deny, change-mind, memory, complex task, edge case)
+- `scripts/langgraph_interrupt_smoke_test.py` — interrupt/resume roundtrip
+- `scripts/langgraph_checkpoint_recovery_smoke_test.py` — checkpoint save/restore
+- `scripts/langgraph_recovery_command_smoke_test.py` — `/graph resume` and `/graph clear`
+- `scripts/orchestrator_graph_smoke_test.py` — graph compilation and basic invocation
+
+**Files:** `core/graph_nodes.py` (node implementations); `core/orchestrator_graph_builder.py` (graph builder + visual debug); `core/orchestrator_graph.py` (checkpoint runtime, recovery, interrupt handling, trace logging); `core/orchestrator.py` (feature flag dispatch, `_run_langgraph()`); `config.py` (LangGraph env flags)
 
 ---
 
