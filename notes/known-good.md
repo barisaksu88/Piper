@@ -94,10 +94,25 @@
 
 ## File Management
 
-- Graded stress test (`scripts/piper_graded_stress_test.py`) passes 17/17 (100%) on the live `qwen3.5 q6` path.
+- Graded stress test (`scripts/piper_graded_stress_test.py`) passes 17/17 (100%) on the live `qwen3.5 q6` path before stricter harness hardening.
   - Grades: 1=chat, 2=file ops, 3=approvals, 4=edge cases, 5=adversarial, 6=memory/chains
   - Key fix: behavior-based checks (no_files_deleted) instead of strict text patterns for adversarial tests
-  - Key fix: 2-step chain (create+rename) instead of 3-step (mkdir+write+rename) for chained_task — 9B model capability ceiling
+- 2026-04-27 harness hardening:
+  - dict-union text checks were replaced with explicit OR helpers
+  - route checks now receive current-turn stats instead of an empty dict
+  - file snapshots compare workspace-relative paths instead of basenames
+  - timed-out turns fail and suite failures exit nonzero
+  - `chained_task` now requires artifact-backed file state, not narrated intent
+  - optional `--include-probes` adds a non-gating 3-step mkdir/write/rename capability probe
+  - adversarial destructive prompt-injection cases now route to CHAT and never enter FILE_WORK
+  - full strict suite passed 17/17; Grade 6 passed 3/3 with the stricter artifact checks; the 3-step probe passed 1/1 after recovery/reroute.
+- 2026-04-27 gap closure (Grade 7):
+  - Multi-turn conversation support via `turns` field in test cases
+  - `multi_turn_file_edit`: turn 1 creates file, turn 2 appends — both VERIFIED
+  - `search_routing`: verifies SEARCH route decision from stats
+  - `browser_routing`: verifies TASK with COMPUTER_USE stage; actually executes browser
+  - `doc_ingest_and_query` (probe): `/ingest` command + follow-up query; model references doc topic
+  - full suite with probes: 20/20 PASS (100%)
 - Structured multi-turn file CRUD in the workspace now passes under the live `qwen3.5 q6` path.
 - Successful verified `FILE_WORK` mutations now produce deterministic user-facing replies from structured runtime evidence instead of letting persona restate stale remembered file contents.
 - Already-satisfied text-edit retries now report the current verified file state honestly instead of narrating a fresh failure.
