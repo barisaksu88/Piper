@@ -53,6 +53,8 @@ class ChatState:
     # (mid-convo), without touching existing messages.
     style_bootstrap_pending: bool = False
 
+    _ASSISTANT_PLACEHOLDERS = frozenset({"Thinking...", "Thinking…"})
+
     def load_recent_memory(self, *, limit: int = 50) -> None:
         loaded: List[Dict[str, str]] = []
         for t in load_recent_turns(self.memory_path, limit=limit):
@@ -124,8 +126,12 @@ class ChatState:
                 or active_index >= len(self.messages)
                 or self.messages[active_index].get("role") != "assistant"
             ):
-                self.messages.append({"role": "assistant", "content": ""})
-                self._streaming_assistant_index = len(self.messages) - 1
+                placeholder_index = self._find_trailing_assistant_placeholder_locked()
+                if placeholder_index is None:
+                    self.messages.append({"role": "assistant", "content": ""})
+                    self._streaming_assistant_index = len(self.messages) - 1
+                else:
+                    self._streaming_assistant_index = placeholder_index
                 active_index = self._streaming_assistant_index
             self.messages[active_index]["content"] = text
 
@@ -206,6 +212,8 @@ class ChatState:
             content = (m.get("content") or "")
             if role == "system" and content.strip().startswith(self.session_marker_prefix):
                 continue
+            if role == "assistant" and content.strip() in self._ASSISTANT_PLACEHOLDERS:
+                continue
             out.append(m)
         return out
     
@@ -261,3 +269,14 @@ class ChatState:
             return
         self.messages.pop(active_index)
         self._streaming_assistant_index = None
+
+    def _find_trailing_assistant_placeholder_locked(self) -> int | None:
+        for i in range(len(self.messages) - 1, -1, -1):
+            role = str(self.messages[i].get("role") or "").lower()
+            if role == "assistant":
+                if str(self.messages[i].get("content") or "").strip() in self._ASSISTANT_PLACEHOLDERS:
+                    return i
+                return None
+            if role == "user":
+                return None
+        return None

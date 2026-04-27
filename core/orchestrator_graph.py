@@ -1062,6 +1062,8 @@ def _resume_stage_approval_pause(
         updated["scratchpad"] = scratchpad
         return updated
 
+    for s in approved_stages:
+        s["approved"] = True
     approved_card["stages"] = approved_stages
     approved_route["card"] = approved_card
     updated["route_decision"] = _serialize_state_value(approved_route)

@@ -46,7 +46,7 @@ from core.search_contracts import (
     parse_background_search_content,
 )
 from core.skills import apply_route_skill_layer
-from core.stage_policy import stage_requires_user_approval, stage_requires_user_input
+from core.stage_policy import stage_requires_user_approval, stage_requires_user_input, stage_is_explicit_proposal
 from core.stream_filter import stream_thinking_filter
 from llm.llm_server_client import LLMClientError
 from core.runtime_control import OperationCancelled
@@ -724,13 +724,22 @@ def _build_pending_stage_pause(
     normalized_pause_type = str(pause_type or "").strip().lower() or "user_input"
     question = SummaryEngine.extract_proposal(stage_log)
     if not question:
+        stage_goal_text = str(stage.get("stage_goal") or "").strip()
         if normalized_pause_type == "approval":
-            question = "Please review the proposal and confirm whether I should continue."
+            if stage_goal_text:
+                question = f"The next step is: {stage_goal_text}. Should I proceed?"
+            else:
+                question = "Please review the proposal and confirm whether I should continue."
         else:
             question = "Please provide the requested details so I can continue."
     approved_start_index = stage_index
     if normalized_pause_type == "approval" and stage_requires_user_approval(stage):
-        approved_start_index = stage_index + 1
+        # Proposal stages ("ask for approval") are skipped after approval;
+        # destructive stages ("delete the file") are re-run after approval.
+        if stage_is_explicit_proposal(stage):
+            approved_start_index = stage_index + 1
+        else:
+            approved_start_index = stage_index
     payload = {
         "kind": "stage_pause",
         "pause_type": normalized_pause_type,
@@ -1571,6 +1580,25 @@ def _run_manager_core(orc) -> None:
         orc.ui.put(("agent_log", f"=== STARTING STAGE {stage_num}/{total_stages}: {stage.get('stage_goal')} ==="))
         needs_user_input = stage_requires_user_input(stage)
         needs_user_approval = stage_requires_user_approval(stage)
+
+        # Destructive stages that require approval pause before the executor runs.
+        # Proposal stages run the executor first (for inspection/proposal) then pause.
+        if needs_user_approval and not stage.get("approved") and not stage_is_explicit_proposal(stage):
+            orc.pending_stage_pause = _build_pending_stage_pause(
+                orc,
+                pause_type="approval",
+                stage=stage,
+                stage_index=index,
+                stage_num=stage_num,
+                total_stages=total_stages,
+                stage_log=[],
+                pause_status="PAUSED / AWAITING USER APPROVAL",
+            )
+            orc.ui.put(("agent_log", f"   -> Stage {stage_num} is a destructive action. Awaiting user approval before execution."))
+            orc._log_dashboard(f"Stage {stage_num} awaiting approval.")
+            orc.scratchpad.append(f"=== STAGE {stage_num} PAUSED ===\nAwaiting user approval for: {stage.get('stage_goal', '')}")
+            task_paused = True
+            break
 
         success, stage_log = executor.run(stage, stage_num, total_stages)
         completed_change_operations.extend(

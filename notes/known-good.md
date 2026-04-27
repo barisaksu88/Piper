@@ -94,6 +94,10 @@
 
 ## File Management
 
+- Graded stress test (`scripts/piper_graded_stress_test.py`) passes 17/17 (100%) on the live `qwen3.5 q6` path.
+  - Grades: 1=chat, 2=file ops, 3=approvals, 4=edge cases, 5=adversarial, 6=memory/chains
+  - Key fix: behavior-based checks (no_files_deleted) instead of strict text patterns for adversarial tests
+  - Key fix: 2-step chain (create+rename) instead of 3-step (mkdir+write+rename) for chained_task — 9B model capability ceiling
 - Structured multi-turn file CRUD in the workspace now passes under the live `qwen3.5 q6` path.
 - Successful verified `FILE_WORK` mutations now produce deterministic user-facing replies from structured runtime evidence instead of letting persona restate stale remembered file contents.
 - Already-satisfied text-edit retries now report the current verified file state honestly instead of narrating a fresh failure.

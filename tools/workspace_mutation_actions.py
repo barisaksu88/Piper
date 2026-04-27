@@ -39,7 +39,8 @@ def handle_ensure_dirs(runtime: Any, payload: dict[str, Any], action: str, *, ca
 
 def handle_write_text(runtime: Any, payload: dict[str, Any], action: str) -> dict[str, Any]:
     full_path, rel_path = resolve_workspace_path(runtime.workspace, payload.get("path"))
-    content = runtime._normalize_text_content(payload.get("content", ""))
+    raw_content = payload["content"] if "content" in payload else payload.get("text", "")
+    content = runtime._normalize_text_content(raw_content)
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(content, encoding="utf-8")
     return {

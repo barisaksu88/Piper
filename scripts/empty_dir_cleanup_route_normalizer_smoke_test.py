@@ -15,11 +15,8 @@ from core.routing.route_normalizer import normalize_route_decision  # noqa: E402
 @dataclass(frozen=True)
 class EmptyDirCleanupRouteNormalizerReport:
     success: bool
-    decision: str
-    goal: str
-    stage_goal: str
-    success_condition: str
-    file_match_fallback_avoided: bool
+    checked_phrases: list[str]
+    failed_phrases: list[str]
 
 
 def _bad_file_delete_seed() -> dict:
@@ -43,12 +40,29 @@ def _bad_file_delete_seed() -> dict:
     }
 
 
-def run_smoke() -> EmptyDirCleanupRouteNormalizerReport:
-    normalized = normalize_route_decision(
-        _bad_file_delete_seed(),
-        "delete the empty folders",
-        [],
-    )
+def _bad_memory_delete_seed() -> dict:
+    return {
+        "decision": "TASK",
+        "card": {
+            "goal": "Remove the user fact 'all empty folders' from memory",
+            "context": [
+                "The user explicitly asked to remove a durable fact from memory.",
+                "Use durable knowledge memory, not tasks or events.",
+            ],
+            "stages": [
+                {
+                    "stage_goal": "Remove the durable user fact 'all empty folders' from memory",
+                    "stage_type": "MEMORY_WORK",
+                    "success_condition": "Knowledge store no longer contains the fact all empty folders",
+                    "allowed_tools": ["REMOVE_KNOWLEDGE", "LIST_KNOWLEDGE"],
+                }
+            ],
+        },
+    }
+
+
+def _routes_to_empty_dir_cleanup(phrase: str, seed: dict) -> tuple[bool, str]:
+    normalized = normalize_route_decision(seed, phrase, [])
     card = dict(normalized.get("card") or {})
     stage = dict(((card.get("stages") or [{}])[0]) or {})
 
@@ -58,20 +72,36 @@ def run_smoke() -> EmptyDirCleanupRouteNormalizerReport:
     success_condition = str(stage.get("success_condition") or "")
     file_match_fallback_avoided = "best matches" not in stage_goal.lower() and "plausible file match" not in success_condition.lower()
 
-    success = (
+    success = bool(
         decision == "TASK"
         and "empty folders" in goal.lower()
         and "currently empty" in stage_goal.lower()
         and "no empty folders remain" in success_condition.lower()
         and file_match_fallback_avoided
     )
+    reason = f"decision={decision!r} goal={goal!r} stage_goal={stage_goal!r}"
+    return success, reason
+
+
+def run_smoke() -> EmptyDirCleanupRouteNormalizerReport:
+    cases = [
+        ("delete the empty folders", _bad_file_delete_seed()),
+        ("delete all empty folders", _bad_file_delete_seed()),
+        ("delete all empty folders", _bad_memory_delete_seed()),
+    ]
+    checked_phrases: list[str] = []
+    failed_phrases: list[str] = []
+
+    for phrase, seed in cases:
+        checked_phrases.append(phrase)
+        success, reason = _routes_to_empty_dir_cleanup(phrase, seed)
+        if not success:
+            failed_phrases.append(f"{phrase}: {reason}")
+
     return EmptyDirCleanupRouteNormalizerReport(
-        success=bool(success),
-        decision=decision,
-        goal=goal,
-        stage_goal=stage_goal,
-        success_condition=success_condition,
-        file_match_fallback_avoided=bool(file_match_fallback_avoided),
+        success=not failed_phrases,
+        checked_phrases=checked_phrases,
+        failed_phrases=failed_phrases,
     )
 
 

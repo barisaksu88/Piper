@@ -90,7 +90,7 @@ FILE_TYPE_GROUPING_RE = re.compile(
     r"(?i)\b(file types?|png|jpg|jpeg|gif|webp|txt|json|py|photos?|images?|text files?|duplicate folders?|stray files?)\b"
 )
 EMPTY_DIR_CLEANUP_RE = re.compile(
-    r"(?i)\b(delete|remove|clean up|clear)\s+empty\s+(?:folders|directories)\b|\bduplicate folders?\b"
+    r"(?i)\b(delete|remove|clean up|clear)\s+(?:(?:the|all)\s+)?empty\s+(?:folders|directories)\b|\bduplicate folders?\b"
 )
 _REL_PATH_TOKEN = r"[A-Za-z0-9_./\\-]+"
 _FILE_PATH_TOKEN = rf"{_REL_PATH_TOKEN}\.[A-Za-z0-9]{{1,8}}"

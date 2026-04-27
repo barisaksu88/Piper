@@ -64,7 +64,7 @@ _DELETE_REQUEST_RE = re.compile(
 )
 _DIRECT_EMPTY_DIR_DELETE_RE = re.compile(
     r"(?is)^(?:in the workspace,\s*)?(?:please\s+)?(?:delete|remove|clean up|clear)\s+"
-    r"(?:the\s+)?empty\s+(?:folders|directories)"
+    r"(?:(?:the|all)\s+)?empty\s+(?:folders|directories)"
     r"(?:\s+(?:under|in)\s+(?:the\s+)?workspace)?[.?!]*$"
 )
 _GENERIC_LOOKUP_SUBJECTS = {

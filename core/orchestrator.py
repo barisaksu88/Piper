@@ -289,7 +289,10 @@ class Orchestrator:
         )
         from core.graph_nodes import PiperState
 
-        thread_id = str(getattr(getattr(self, "turn_stats", None), "turn_id", "") or "default")
+        resume_thread_id = str(getattr(self._cfg, "langgraph_resume_thread_id", "") or "").strip()
+        thread_id = resume_thread_id or str(getattr(getattr(self, "turn_stats", None), "turn_id", "") or "default")
+        if resume_thread_id and getattr(self, "turn_stats", None) is not None:
+            self.turn_stats.turn_id = thread_id
         handle = _open_checkpoint_handle(
             with_checkpointer=True,
             checkpoint_mode=getattr(CFG, "LANGGRAPH_CHECKPOINT_MODE", "sqlite"),
@@ -327,20 +330,28 @@ class Orchestrator:
                 "orchestrator": self,
             }
         }
+        resume_checkpoint_id = str(getattr(self._cfg, "langgraph_resume_checkpoint_id", "") or "").strip()
+        if resume_checkpoint_id:
+            config["configurable"]["checkpoint_id"] = resume_checkpoint_id
 
         # Phase 5 — resume support
         interrupt_record = load_langgraph_interrupt_record()
         resume_value = None
         if interrupt_record and str(interrupt_record.get("thread_id") or "").strip() == thread_id:
             resume_value = interrupt_record.get("langgraph_resume_value")
-            if resume_value is not None:
-                try:
-                    from langgraph.types import Command
-                except ImportError as exc:
-                    handle.close()
-                    raise RuntimeError("LangGraph resume command support is unavailable.") from exc
-                initial_state = Command(resume=resume_value)
-                self.ui.put(("agent_log", f"[LANGGRAPH] Resuming checkpoint thread {thread_id}."))
+        # Fallback: caller may pass resume_value directly via OrchestratorConfig
+        # (e.g. controller_actions do_resume_langgraph_interrupt).
+        cfg_resume_value = getattr(self._cfg, "langgraph_resume_value", None)
+        if resume_value is None and cfg_resume_value is not None:
+            resume_value = cfg_resume_value
+        if resume_value is not None:
+            try:
+                from langgraph.types import Command
+            except ImportError as exc:
+                handle.close()
+                raise RuntimeError("LangGraph resume command support is unavailable.") from exc
+            initial_state = Command(resume=resume_value)
+            self.ui.put(("agent_log", f"[LANGGRAPH] Resuming checkpoint thread {thread_id}."))
 
         try:
             self.ui.put(("agent_log", "[LANGGRAPH] Starting graph invocation."))
@@ -458,7 +469,8 @@ class Orchestrator:
 
 
 def run_agent_loop(orc_cfg: OrchestratorConfig) -> None:
-    if CFG.LANGGRAPH_RUNTIME_ENABLED or str(getattr(orc_cfg, "langgraph_resume_thread_id", "") or "").strip():
+    resume_thread_id = str(getattr(orc_cfg, "langgraph_resume_thread_id", "") or "").strip()
+    if CFG.LANGGRAPH_RUNTIME_ENABLED or (resume_thread_id and not CFG.USE_LANGGRAPH_ORCHESTRATOR):
         from core.orchestrator_graph import run_agent_loop_with_langgraph
 
         run_agent_loop_with_langgraph(orc_cfg)

@@ -57,13 +57,24 @@ def stage_text_with_context(stage: StageCard | dict) -> str:
 
 
 def stage_requires_user_approval(stage: StageCard | dict) -> bool:
+    # Already approved on resume — do not pause again.
+    if stage.get("approved"):
+        return False
     goal_success = stage_goal_success_text(stage)
     if _APPROVAL_RE.search(goal_success):
+        return True
+    # Destructive actions (deletion, removal) require explicit approval.
+    if re.search(r"\b(delete|remove)\b", goal_success):
         return True
     context_text = " ".join(str(item) for item in ((stage or {}).get("context") or [])).strip().lower()
     if not context_text or not _APPROVAL_RE.search(context_text):
         return False
     return bool(_CONTEXT_APPROVAL_STAGE_RE.search(goal_success))
+
+
+def stage_is_explicit_proposal(stage: StageCard | dict) -> bool:
+    """Return True if the stage text explicitly frames itself as a proposal/approval request."""
+    return bool(_APPROVAL_RE.search(stage_goal_success_text(stage)))
 
 
 def stage_requires_user_input(stage: StageCard | dict) -> bool:

@@ -268,8 +268,8 @@ class WorkspaceToolRuntime:
         for item in value:
             if not isinstance(item, dict):
                 raise FileOpError(f"Each item in FILE_OP field '{field_name}' must be a JSON object.")
-            src = str(item.get("src") or "").strip()
-            dst = str(item.get("dst") or "").strip()
+            src = str(item.get("src") or item.get("source") or "").strip()
+            dst = str(item.get("dst") or item.get("destination") or "").strip()
             if not src or not dst:
                 raise FileOpError(f"Each item in FILE_OP field '{field_name}' must include 'src' and 'dst'.")
             items.append({"src": src, "dst": dst})

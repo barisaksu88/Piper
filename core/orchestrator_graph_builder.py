@@ -113,10 +113,31 @@ def build_piper_graph(*, checkpointer: Any | None = None) -> Any:
     builder.add_edge("AWAIT_INTERRUPT", "VERIFY")
 
     # ------------------------------------------------------------------
-    # PERSONA → END
+    # PERSONA routing
     # ------------------------------------------------------------------
+    # Legacy while-loop behaviour: after PERSONA, next_stage may be ROUTE
+    # (auto-reroute / loopback) or FINISHED (normal termination).  Mirror
+    # that logic so the graph does not silently drop retry markers.
 
-    builder.add_edge("PERSONA", END)
+    def _persona_routing(state: PiperState, config=None) -> str:
+        runtime = (config or {}).get("configurable", {}) if config else {}
+        orc = runtime.get("orchestrator")
+        next_stage = str(getattr(orc, "next_stage", "") or "").strip().upper()
+        if next_stage == "ROUTE":
+            return "ROUTE"
+        if next_stage == "MANAGER":
+            return "MANAGER"
+        return "END"
+
+    builder.add_conditional_edges(
+        "PERSONA",
+        _persona_routing,
+        {
+            "ROUTE": "ROUTE",
+            "MANAGER": "MANAGER",
+            "END": END,
+        },
+    )
 
     return builder.compile(checkpointer=checkpointer)
 

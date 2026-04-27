@@ -1,5 +1,16 @@
 # Coder Log
 
+- 2026-04-27: Fixed the sticky `Thinking...` assistant placeholder in chat/UI history.
+  - Root cause: `show_thinking_placeholder()` appended a real assistant bubble, but `ChatState.upsert_streaming_assistant()` always created a fresh streaming assistant entry on the first delta instead of reusing that placeholder. The placeholder could then linger in the UI and occasionally leak into raw history/debug surfaces.
+  - Fix: `memory/chat_state.py` now detects a trailing assistant placeholder (`Thinking...` / `Thinking…`) and claims it as the active streaming slot, replacing it in place on the first real delta. Model-facing history from `ChatState.for_model()` also drops those placeholders as a safety net.
+  - Validation: Windows `.venv` `compileall`, `scripts/streaming_orphan_assistant_smoke_test.py`, and `scripts/persona_system_event_role_smoke_test.py` passed.
+
+- 2026-04-27: Fixed a split LangGraph resume path that could raise `LangGraph thread '<id>' has no pending node to resume.` when users followed the Phase 8 checklist docs.
+  - Root cause: the normal `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true` turn path still entered `Orchestrator._run_langgraph()` (builder/inline runtime), but controller-driven resume requests were routed through `run_agent_loop_with_langgraph()` whenever `langgraph_resume_thread_id` was present. That mixed two checkpoint/state schemas in one approval flow.
+  - Fix: `core/orchestrator.py` now keeps docs-mode interrupt resumes on the same inline graph runtime by honoring `langgraph_resume_thread_id` / `langgraph_resume_checkpoint_id` inside `_run_langgraph()` and only sending resume-only turns to `core/orchestrator_graph.run_agent_loop_with_langgraph()` when the dedicated `PIPER_LANGGRAPH_RUNTIME_ENABLED` runtime is actually the active path.
+  - Coverage: `scripts/phase8_checklist_test.py` now mirrors the public checklist docs by enabling only `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true` instead of silently forcing `PIPER_LANGGRAPH_RUNTIME_ENABLED=true`.
+  - Validation: Windows `.venv` `compileall app.py config.py core ui memory tools llm AGENTS/harness scripts`, `scripts/langgraph_interrupt_smoke_test.py`, and `scripts/phase8_checklist_test.py --json` all passed.
+
 - 2026-04-26: Phase 5 — Interrupt integration into LangGraph orchestrator.
   - Scope:
     - `core/graph_nodes.py`: added interrupt support
@@ -246,6 +257,12 @@
     - `./.venv/Scripts/python.exe -u - <<'PY' ... build_ui(...) ... print(dpg.is_dearpygui_running()) ... PY` — reports `True`
 
 - 2026-04-08: Fixed FILE_WORK routing for direct empty-folder cleanup requests.
+  - 2026-04-27 follow-up:
+    - live log showed `delete all empty folders` routed to `MEMORY_WORK` as "Remove the durable user fact 'all empty folders' from memory."
+    - root cause was the direct empty-directory regex accepting `the empty folders` but not `all empty folders`; the memory deletion path could then outrank the intended FILE_WORK cleanup.
+    - `core/routing/route_normalizer.py` and `core/routing/route_patterns.py` now treat optional `all` the same as optional `the`.
+    - `scripts/empty_dir_cleanup_route_normalizer_smoke_test.py` now covers `delete all empty folders`, including a seeded bad `MEMORY_WORK` route.
+    - Validation: `python3 scripts/empty_dir_cleanup_route_normalizer_smoke_test.py`, `python3 scripts/file_delete_absence_confirmation_smoke_test.py`, `python3 scripts/route_boundary_smoke_test.py`, and `python3 -m compileall core/routing scripts/empty_dir_cleanup_route_normalizer_smoke_test.py` passed.
   - Symptom:
     - user says `delete the empty folders`
     - Piper routes it as a targeted file delete and may answer `No plausible file match was found for 'empty folders'...`

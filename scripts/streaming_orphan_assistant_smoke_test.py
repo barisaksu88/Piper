@@ -46,8 +46,21 @@ def main() -> int:
         )
 
         chat_state.append("user", "Delete old note")
+        chat_state.append("assistant", "Thinking...")
         pipeline.handle_event("start", "")
         pipeline.handle_event("delta", "Removed")
+
+        after_first_delta_messages = renderable_chat_messages(chat_state.get_messages_snapshot())
+        if after_first_delta_messages != [("user", "Delete old note"), ("assistant", "Removed")]:
+            raise AssertionError(
+                f"Thinking placeholder was not replaced in-place: {after_first_delta_messages}"
+            )
+        if any(
+            str(message.get("role") or "") == "assistant"
+            and str(message.get("content") or "").strip() == "Thinking..."
+            for message in chat_state.for_model()
+        ):
+            raise AssertionError("Thinking placeholder leaked into model-facing history.")
 
         chat_state.append("user", "Delete test_notes")
         after_retry_messages = renderable_chat_messages(chat_state.get_messages_snapshot())

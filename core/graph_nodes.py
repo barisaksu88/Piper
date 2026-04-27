@@ -324,6 +324,8 @@ def _apply_stage_approval_resume(orc, payload: dict[str, Any], resume_value: Any
             orc.scratchpad.append("LANGGRAPH_INTERRUPT_RESUME: approval received but no remaining execution stage was recorded.")
         return
 
+    for s in approved_stages:
+        s["approved"] = True
     approved_card["stages"] = approved_stages
     approved_route["card"] = approved_card
     orc.route_decision = approved_route
