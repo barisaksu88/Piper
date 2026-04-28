@@ -213,6 +213,46 @@ Use local static fixture pages or a tightly controlled local test app first. Avo
 
 ---
 
+**Autonomous Tool Creation — Piper writes scripts for herself**
+
+Piper should be able to recognize when a task is too large, too slow, or too precise to handle with her existing hand tools (file ops, search, individual edits), and choose to write a small throwaway script to solve it instead — without the user asking or even knowing code is involved.
+
+The script is a means, not an end. The user never sees the code unless they ask. Piper writes it, runs it in a sandbox, validates the output, reports the result conversationally, and can save the script for similar future tasks.
+
+**Examples:**
+
+- "I have a folder with 500 photos. Keep only the ones from 2023, rename them by date."
+  - Current: Piper opens each photo one by one, checks manually, renames slowly
+  - Target: Piper writes a script that reads EXIF metadata from all 500 photos at once, filters for 2023, renames them in 3 seconds
+
+- "Summarize all my meeting notes from last month"
+  - Current: Piper reads each note file sequentially, tries to hold everything in context
+  - Target: Piper writes a script that reads all notes, extracts key points, builds a structured summary without missing anything
+
+**Why this is different from current RUN_CODE:**
+
+Current RUN_CODE only fires when the planner explicitly decides to run code as part of a user-requested task. The user must be aware code is running. What's missing is autonomous recognition — Piper deciding on her own that code would help, without user prompting.
+
+**Safety model (v1):**
+
+- Sandbox execution (workspace-jailed, no system access, no network)
+- Script output validated before being used or reported
+- Piper discloses what she did conversationally ("I wrote a small script to sort those files for you — want to see it?")
+- Fallback to manual methods on script failure
+
+**Why deferred:**
+
+- Requires autonomous inefficiency recognition (when is the current approach too slow?)
+- Context window pressure — write + debug + validate uses significant context
+- Safety story needs careful design before autonomous execution is trusted
+- Collect concrete user pain points first (tasks that felt too slow with current Piper)
+
+**Trigger condition for prioritization:** When 3+ concrete user tasks are reported as "took too long" or "Piper should have been able to do this automatically."
+
+**Files (tentative):** `core/autonomous_scripts.py` (script writer + sandbox runner + validator); `core/engines/script_library.py` (saved reusable scripts); executor integration for self-written scripts
+
+---
+
 **Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
 
 ---
