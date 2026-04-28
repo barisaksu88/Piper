@@ -164,6 +164,9 @@ class STTEngine:
             else:
                 audio_downsampled = audio_mono.astype(np.float32)
             
+            # Store for voice recognition hook
+            self._last_audio_samples = audio_downsampled
+            
             segments, info = self.model.transcribe(
                 audio_downsampled, 
                 beam_size=5,
@@ -171,7 +174,36 @@ class STTEngine:
                 condition_on_previous_text=False
             )
             
-            return "".join([seg.text for seg in segments]).strip()
+            text = "".join([seg.text for seg in segments]).strip()
+            
+            # Voice recognition hook
+            try:
+                from core.voice_recognition import get_voice_engine
+                from config import CFG
+                
+                if CFG.VOICE_RECOGNITION_ENABLED:
+                    engine = get_voice_engine()
+                    if engine.available() and hasattr(self, '_last_audio_samples'):
+                        embedding = engine.extract_embedding(self._last_audio_samples)
+                        if embedding is not None:
+                            # Check if any user is being enrolled
+                            from memory.user_runtime import get_user_runtime
+                            runtime = get_user_runtime()
+                            current_profile = runtime.active_profile()
+                            
+                            if not current_profile.is_unknown and not current_profile.is_admin:
+                                # User is known — add to enrollment if in progress
+                                if engine.is_enrolling(current_profile.user_id):
+                                    engine.add_enrollment_sample(current_profile.user_id, embedding)
+                                else:
+                                    # Already enrolled — verify match
+                                    matched_user, similarity = engine.match(embedding)
+                                    # Result handled by caller / UI layer
+                                    self._last_voice_match = (matched_user, similarity)
+            except Exception:
+                pass  # Never block STT for voice recognition failure
+            
+            return text
             
         except Exception as e:
             _LOG.warning("[STT] Error: %s", e)

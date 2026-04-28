@@ -687,6 +687,11 @@ class Config:
     LANGGRAPH_CHECKPOINT_MODE: str = (
         os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_MODE", "sqlite").strip().lower() or "sqlite"
     )
+    VOICE_RECOGNITION_ENABLED: bool = _env_flag("PIPER_VOICE_RECOGNITION_ENABLED", True)
+    VOICE_SIMILARITY_THRESHOLD_HIGH: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_HIGH", "0.85"))
+    VOICE_SIMILARITY_THRESHOLD_LOW: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_LOW", "0.60"))
+    VOICE_ENROLLMENT_TURNS: int = int(os.environ.get("PIPER_VOICE_ENROLLMENT_TURNS", "5"))
+    VOICE_LOW_CONFIDENCE_ASK_AFTER: int = int(os.environ.get("PIPER_VOICE_LOW_CONFIDENCE_ASK_AFTER", "3"))
     COMPUTER_USE_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_ENABLED", True)
     COMPUTER_USE_HTTP_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_HTTP_ENABLED", True)
     COMPUTER_USE_ALLOWED_HTTP_DOMAINS: list[str] = field(

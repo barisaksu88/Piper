@@ -46,6 +46,9 @@ langgraph-checkpoint-sqlite
 langgraph-checkpoint-postgres
 psycopg[binary,pool]  # Required when enabling PostgresSaver in production
 
+# ── Voice recognition (passive user identification) ──────────────────────────
+resemblyzer          # Voice fingerprinting (CPU-only, optional)
+
 # ── Computer use (browser automation) ───────────────────────────────────────
 playwright           # Browser control (ComputerUseEngine WIP)
 

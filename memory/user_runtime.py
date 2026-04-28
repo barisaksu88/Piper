@@ -967,6 +967,16 @@ class ActiveUserRuntime:
         self._pending_admin_password_user_id = ""
         if not result.profile.is_admin and not result.profile.is_unknown:
             self._mirror_profile_graph_to_admin(result.profile.user_id)
+            # Start voice enrollment for newly identified user
+            try:
+                from core.voice_recognition import get_voice_engine
+                from config import CFG
+                if CFG.VOICE_RECOGNITION_ENABLED:
+                    engine = get_voice_engine()
+                    if engine.available() and not engine._embeddings.get(result.profile.user_id):
+                        engine.start_enrollment(result.profile.user_id)
+            except Exception:
+                pass
         return result
 
     def request_typed_user_switch(self, token: str) -> UserActivationResult:
@@ -1038,6 +1048,7 @@ class ActiveUserRuntime:
             )
         if result.switched and relation_hint and not result.profile.is_admin and not result.profile.is_unknown:
             self._upsert_admin_relationship_hint(result.profile.user_id, relation_hint)
+        # Voice enrollment is triggered inside _activate_target_profile; no extra work needed here.
         return result
 
     def is_waiting_for_admin_password(self) -> bool:
