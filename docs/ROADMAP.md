@@ -338,6 +338,46 @@ Files (tentative): `tools/wake_word.py`; `core/pipeline.py` barge-in support; `t
 
 ---
 
+**User Identity & World Model Restoration**
+
+Piper has regressed on two identity behaviors that used to work:
+1. Proactive greeting/identity query when user is unknown
+2. Proactive relationship-building ("connect the dots" in world model)
+
+**What's broken:**
+- Piper boots as `user:unknown` by design (security), but no longer asks "who am I talking to?"
+- World model relationship merging code is intact but throttled; missing prompt-level directive to ask follow-up questions about new people
+- Voice recognition infrastructure exists (`voice_embedding_path` field) but never implemented
+
+**Planned fixes:**
+
+Phase 1 — Prompt restoration (~0.5 day)
+- Add proactive identity query directive to persona prompt when `user:unknown`
+- Add world model seeding directive: when user mentions unknown people, ask relation to connect graph nodes
+- Both behind existing persona prompt framework, no code changes
+
+Phase 2 — Passive voice recognition (~2–3 days)
+- Integrate Resemblyzer for CPU-only voice fingerprinting
+- Record samples passively during normal STT operation (no explicit "say something" prompt)
+- Background comparison against stored embeddings
+- Auto-label user in UI after confidence threshold
+- Graceful fallback to unknown + manual identity entry
+- Lightweight: no GPU, no llama.cpp pause needed
+
+Phase 3 — Relationship graph visualization (optional, ~1 day)
+- Render world model relationship graph to UI
+- Show who knows whom, how they're connected to admin (Baris)
+- Makes "connect the dots" behavior visible and delightful
+
+**Files (tentative):**
+- `data/prompts/instructions.txt` (Phase 1)
+- `core/voice_recognition.py` (Phase 2, Resemblyzer wrapper)
+- `memory/user_runtime.py` (voice embedding storage + matching)
+- `ui/controller.py` (passive recording trigger)
+- `core/engines/world_model_prompts.py` (relationship seeding prompt enhancement)
+
+---
+
 **Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
 
 ---
