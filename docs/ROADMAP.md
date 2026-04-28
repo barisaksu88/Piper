@@ -253,6 +253,32 @@ Current RUN_CODE only fires when the planner explicitly decides to run code as p
 
 ---
 
+**Workspace Code Indexing — structural understanding of files**
+
+When Piper searches your workspace, she currently finds files by text similarity ("files that mention password"). She doesn't understand code structure — where a function is defined, what calls it, what arguments it takes.
+
+Indexing adds a structural map of your workspace: every function, class, variable, import, and call relationship. This lets Piper answer precise questions about code without reading every file.
+
+**Examples:**
+
+- "Where is the login function defined and what calls it?"
+  - Without indexing: Piper searches for "login", finds 8 files, reads them all, guesses
+  - With indexing: Piper answers immediately — `login()` is defined in `auth.py:23`, called by `routes.py:45` and `test_auth.py:12`
+
+- "Rename get_user to fetch_user everywhere"
+  - Without indexing: Piper does text search, misses indirect references
+  - With indexing: Piper finds every exact call site, every import, every reference
+
+**Why browser-first computer use comes first:**
+
+Indexing is useful only if you keep code in Piper's workspace. Computer use (browser automation) benefits every user regardless of whether they write code.
+
+**Trigger condition for prioritization:** When the user actively writes or maintains code in Piper's workspace and reports that text search isn't precise enough.
+
+**Files (tentative):** `core/indexing.py` (scanner + parser + index builder); workspace file watcher for incremental updates; query interface for Piper's planner
+
+---
+
 **Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
 
 ---
