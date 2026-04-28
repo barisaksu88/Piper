@@ -284,7 +284,7 @@ def _clean_identity_name(text: str) -> str:
     candidate = " ".join(str(text or "").strip().split())
     if not candidate:
         return ""
-    candidate = re.sub(r"(?i)\b(?:speaking|here|again|today)\b", "", candidate)
+    candidate = re.sub(r"(?i)\b(?:speaking|here|again|today|fine|sorry|good|okay|ok|great|tired|busy|done|ready|back|confused|lost|sure)\b", "", candidate)
     candidate = " ".join(candidate.split()).strip(" ,.!?")
     if not candidate:
         return ""
@@ -306,8 +306,25 @@ def _extract_self_identified_name(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
+    # First pass: match at start of string (clean inputs)
     for pattern in _SELF_IDENTIFY_PATTERNS:
         match = pattern.match(raw)
+        if not match:
+            continue
+        candidate = _clean_identity_name(match.group("name") or "")
+        if candidate:
+            return candidate
+    # Second pass: search anywhere in text for reliable patterns.
+    # "i'm/i am" is included because _clean_identity_name filters non-names.
+    _NAME_STOP_BOUNDARY = r"(?:\s*[,.!?]|\s+and\s|\s+from\s|\s+not\s|\s+but\s|\s+or\s|$)"
+    _SEARCH_FALLBACK_PATTERNS = (
+        re.compile(rf"(?i)\bmy name is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bthis is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:it'?s me|it is me)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:i'm|i am|im)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+    )
+    for pattern in _SEARCH_FALLBACK_PATTERNS:
+        match = pattern.search(raw)
         if not match:
             continue
         candidate = _clean_identity_name(match.group("name") or "")
