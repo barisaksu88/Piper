@@ -279,6 +279,65 @@ Indexing is useful only if you keep code in Piper's workspace. Computer use (bro
 
 ---
 
+**Morning Brief — proactive daily summary**
+
+Piper gives the user a daily summary when they first open her. No prompting needed. Uses existing proactive monitor infrastructure to trigger on session start.
+
+Content:
+- Tasks due today / overdue
+- Upcoming events from reminders
+- Reminders that fired overnight
+- New files in workspace since last session
+- Quick suggestion based on priority
+
+Example: "You have 3 overdue tasks and a meeting in 2 hours. Want me to prioritize?"
+
+Why: Shifts Piper from reactive tool to proactive assistant.
+
+Effort: ~1 day. Uses existing task/event/reminder + file infrastructure.
+
+Files (tentative): `core/engines/morning_brief.py`; `core/orchestrator_phases.py` hook on session start; `core/engines/context_pack.py` brief block injection
+
+---
+
+**Workspace Tidy Suggestions — proactive housekeeping**
+
+Piper periodically scans the workspace and offers to help with digital clutter.
+
+Patterns:
+- Downloads folder has N unorganized files → "Sort by type?"
+- Files with 'backup' in name older than 30 days → "Delete old backups?"
+- Duplicate filenames in multiple folders → "Consolidate?"
+- Empty directories or temp files left behind → "Clean up?"
+
+Piper asks permission before acting. All operations are undoable via change journal.
+
+Why: Housekeeping users never get around to. Piper notices what you'd miss.
+
+Effort: ~1–2 days. Uses existing file tools + undo system.
+
+Files (tentative): `core/engines/workspace_tidy.py` (scanner + suggestion builder); `core/engines/proactive_monitor.py` integration for periodic scans
+
+---
+
+**Natural Voice Mode — hands-free improvement**
+
+Improve the hands-free voice experience beyond current TTS/STT.
+
+Features:
+- Wake word ("Hey Piper") instead of button press
+- Piper can interrupt herself if user speaks over her (barge-in)
+- Better noise filtering / understanding in non-ideal environments
+- Voice-only mode for simple tasks (no screen interaction needed)
+
+Why: True hands-free operation while cooking, driving, walking.
+
+Effort: ~2–3 days. Uses existing TTS/STT pipeline + event loop changes.
+
+Files (tentative): `tools/wake_word.py`; `core/pipeline.py` barge-in support; `tools/stt.py` noise profile improvement
+
+---
+
 **Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
 
 ---
