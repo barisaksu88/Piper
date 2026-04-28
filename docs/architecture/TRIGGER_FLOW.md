@@ -4,7 +4,7 @@ Status: Active · Prescriptive
 Authoritative doctrine: `AGENTS.md`
 This document is the **optimized target spec** for Piper's runtime flow. Code must conform to this document. If the code and this document diverge, file a bug against the code.
 
-> **Dual runtime:** Piper has two orchestrator implementations. The legacy `while`-loop runtime (`core/orchestrator_phases.py`) is the default. The LangGraph runtime (`core/orchestrator_graph_builder.py`) is enabled via `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true`. Both runtimes execute the same phase logic and produce identical outcomes — the LangGraph path adds checkpoint persistence, interrupt/resume, and visual debugging. This document describes both paths; graph-specific behaviour is called out explicitly.
+> **Dual runtime:** Piper has two orchestrator implementations. The LangGraph runtime (`core/orchestrator_graph_builder.py`) is the default. The legacy `while`-loop runtime (`core/orchestrator_phases.py`) remains available via `PIPER_USE_LANGGRAPH_ORCHESTRATOR=false`. Both runtimes execute the same phase logic and produce identical outcomes — the LangGraph path adds checkpoint persistence, interrupt/resume, and visual debugging. This document describes both paths; graph-specific behaviour is called out explicitly.
 
 ---
 
@@ -1282,7 +1282,7 @@ On budget exhaustion the executor appends an explicit scratchpad marker (`STAGE 
 
 ### 13.27 LangGraph Orchestrator Migration ✓ IMPLEMENTED
 
-**Status:** Implemented. All migration spec phases (0–8) are live. The LangGraph runtime is the active path when `PIPER_USE_LANGGRAPH_ORCHESTRATOR=true`.
+**Status:** Implemented. Migration spec phases 0–6 are code-complete and live. Phase 7 (repo indexing) is deferred. Phase 8 (burn-in) is in progress — automated tests pass, real-world edge cases validated. The LangGraph runtime is the default; legacy loop available via `PIPER_USE_LANGGRAPH_ORCHESTRATOR=false`.
 
 **Problem:**
 
