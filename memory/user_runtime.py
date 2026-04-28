@@ -1306,8 +1306,14 @@ class ActiveUserRuntime:
         return self.brain_for(self.active_profile().user_id)
 
     def _active_public_profile_gap_lines(self, profile: UserProfile) -> list[str]:
-        if profile.is_admin or profile.is_unknown:
+        if profile.is_admin:
             return []
+        if profile.is_unknown:
+            return [
+                "Profile Gap: the speaker has not been identified yet.",
+                "If natural, ask one short question to learn their name. Examples: 'I don't think we've been introduced — what's your name?', 'Who am I chatting with?'",
+                "Once you learn their name, ask how they know Baris if that connection isn't clear.",
+            ]
         graph = self.knowledge_manager_for(self.registry.admin_user_id).load_graph()
         nodes = graph.get("nodes") or {}
         root_id = str(graph.get("root_entity_id") or WorldModelStore.ROOT_ENTITY_ID)

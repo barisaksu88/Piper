@@ -6,7 +6,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-PROFILE_REFRESH_EVERY_CALLS = 3
+PROFILE_REFRESH_EVERY_CALLS = 1
 _TRANSIENT_KEY_PREFIXES = ("pending_", "temporary_", "temp_", "current_", "recent_", "latest_")
 _TRANSIENT_STATE_TERMS = ("sentiment", "status", "mood", "issue", "hesitation", "concern", "blocker")
 _TRANSIENT_CONTEXT_TERMS = (
