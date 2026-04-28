@@ -35,6 +35,57 @@ Pattern hints are injected as a `[PATTERN HINTS]` block — soft suggestions, no
 
 ---
 
+**Voice Recognition — Passive User Identification**
+
+Piper identifies who's speaking from voice alone, without asking the user to say anything special. Recording and matching happen in the background during normal STT operation.
+
+**Why now:**
+
+Two regressions were just fixed (proactive identity asking at 5700beb, world model relationship building). Both depend on knowing who is talking. Currently the user must type their name — this removes that friction entirely. When voice recognition is active, Piper only asks "who am I speaking with?" if voice fails to identify after several attempts, or if the input is typed (not spoken).
+
+**How it works:**
+
+1. **Enrollment** — When a user is first identified (typed name or manual profile creation), Piper records their voice embedding from the next 3–5 turns of normal speech. Stores as `voice_embedding` attribute on the user's world model root node. No explicit "say something" step.
+
+2. **Passive recognition** — On every STT session, Piper extracts a voice embedding from the incoming audio and compares it against all enrolled embeddings using cosine similarity.
+
+3. **Confidence-based labeling:**
+   - >0.85 similarity → auto-switch to that user, show label in UI
+   - 0.60–0.85 → "Probably X" shown in UI, but stay as unknown; ask "Is that you, X?" on next turn
+   - <0.60 → stay unknown, ask identity question normally
+
+4. **CPU-only** — Uses Resemblyzer (lightweight, ~50MB model, no GPU). Runs in parallel with STT decoding so no added latency. If CPU is too loaded, skip extraction for that turn.
+
+5. **Privacy** — Voice embeddings are irreversible (cannot reconstruct audio). Stored per-user in their own data directory. No cloud transmission. User can delete their embedding with `/voice forget`.
+
+6. **Fallback** — If voice recognition is disabled or no embeddings exist, Piper falls back to typed identity asking (the behavior just fixed in 5700beb).
+
+**Tool: Resemblyzer**
+
+- pip install resemblyzer
+- CPU inference, ~50MB model download on first run
+- Produces 256-dim embedding from 3+ seconds of speech
+- Cosine similarity comparison
+
+**Integration points:**
+
+- `tools/stt.py` — trigger voice extraction after successful STT decode
+- `memory/user_runtime.py` — store/load embeddings on world model nodes
+- `ui/controller.py` — show recognized user label in UI
+- `core/orchestrator.py` — skip identity question if voice already identified
+- `core/voice_recognition.py` (new) — Resemblyzer wrapper + matching engine
+
+**Trigger condition for prioritization:** After world model identity fix (5700beb) has been validated in daily use.
+
+**Files (tentative):**
+- `core/voice_recognition.py` — VoiceFingerprintEngine (enroll, match, threshold logic)
+- `memory/user_runtime.py` — embedding storage/retrieval on world model
+- `tools/stt.py` — hook voice extraction post-decode
+- `config.py` — `VOICE_RECOGNITION_ENABLED`, `VOICE_SIMILARITY_THRESHOLD`
+- `data/prompts/instructions.txt` — "If voice input and user identified, don't ask who they are"
+
+---
+
 **Computer use v0 (browser-first)** *(WIP — implementation in progress, not yet complete)*
 
 Piper can already see. This adds the action side for browser work first: click, type, scroll, navigate, extract, submit, and download in a controlled browser session.
