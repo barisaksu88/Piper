@@ -284,7 +284,17 @@ def _clean_identity_name(text: str) -> str:
     candidate = " ".join(str(text or "").strip().split())
     if not candidate:
         return ""
-    candidate = re.sub(r"(?i)\b(?:speaking|here|again|today|fine|sorry|good|okay|ok|great|tired|busy|done|ready|back|confused|lost|sure)\b", "", candidate)
+    # Strip trailing junk words that often follow a name in casual speech.
+    candidate = re.sub(
+        r"(?i)\b(?:"
+        r"speaking|here|again|today|fine|sorry|good|okay|ok|great|"
+        r"tired|busy|done|ready|back|confused|lost|sure|"
+        r"cold|hot|nice|bad|sad|mad|later|maybe|tomorrow|tonight|yesterday|"
+        r"now|then|there|home|away|out|up|down|early|soon"
+        r")\b",
+        "",
+        candidate,
+    )
     candidate = " ".join(candidate.split()).strip(" ,.!?")
     if not candidate:
         return ""
@@ -314,14 +324,21 @@ def _extract_self_identified_name(text: str) -> str:
         candidate = _clean_identity_name(match.group("name") or "")
         if candidate:
             return candidate
-    # Second pass: search anywhere in text for reliable patterns.
-    # "i'm/i am" is included because _clean_identity_name filters non-names.
+    # Second pass: search anywhere in text for natural name introductions.
+    # _clean_identity_name filters out common non-name words to keep false
+    # positives low on risky patterns like "it's <name>" and "call me <name>".
     _NAME_STOP_BOUNDARY = r"(?:\s*[,.!?]|\s+and\s|\s+from\s|\s+not\s|\s+but\s|\s+or\s|$)"
     _SEARCH_FALLBACK_PATTERNS = (
-        re.compile(rf"(?i)\bmy name is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bmy name(?:'?s| is)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
         re.compile(rf"(?i)\bthis is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
         re.compile(rf"(?i)\b(?:it'?s me|it is me)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
         re.compile(rf"(?i)\b(?:i'm|i am|im)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        # Natural variants that need the non-name filter in _clean_identity_name
+        re.compile(rf"(?i)\b(?:it'?s|its)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bcall me\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:you can call me|people call me|everyone calls me|my friends call me)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:i go by|goes by)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bname is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
     )
     for pattern in _SEARCH_FALLBACK_PATTERNS:
         match = pattern.search(raw)
@@ -1031,12 +1048,41 @@ class ActiveUserRuntime:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
 
+    def _extract_name_via_llm(self, text: str) -> str:
+        """Lightweight LLM fallback for natural name introductions that regex misses."""
+        if self.llm_client is None:
+            return ""
+        try:
+            result = self.llm_client.generate(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You extract personal names from messages. "
+                            "If the speaker introduces themselves with a name, "
+                            "reply with ONLY the name. If no name is introduced, reply with NONE."
+                        ),
+                    },
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.0,
+                max_tokens=10,
+            )
+            result = re.sub(r"(?is)</?think>", "", str(result or "")).strip()
+            if not result or result.upper() == "NONE":
+                return ""
+            return _clean_identity_name(result)
+        except Exception:
+            return ""
+
     def observe_typed_identity_hint(self, text: str) -> UserActivationResult | None:
         candidate = _extract_self_identified_name(text)
         relation_hint = _extract_relation_to_admin(text)
         current = self.active_profile()
         if not candidate and current.is_unknown:
             candidate = self._extract_bare_known_identity_name(text)
+            if not candidate:
+                candidate = self._extract_name_via_llm(text)
         if not candidate:
             if relation_hint and not current.is_admin and not current.is_unknown:
                 self._upsert_admin_relationship_hint(current.user_id, relation_hint)
