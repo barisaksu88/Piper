@@ -10,7 +10,7 @@
 
 This document defines how Baris, GPT, Kimi Web, Kimi Code, and Codex coordinate Piper development.
 
-New GPT sessions should read this file first.
+New GPT sessions should read this file first, but must verify live repo state from Git, not from docs.
 
 The goal is controlled progress without model-driven scope creep, while still allowing agents to discover useful adjacent issues. Agents are encouraged to look broadly, but they must edit narrowly and report discoveries rather than silently implement them.
 
@@ -21,7 +21,7 @@ The goal is controlled progress without model-driven scope creep, while still al
 | Agent | Primary Role | Use For | Do Not Use For |
 |-------|-------------|---------|----------------|
 | **Baris** | Product owner and final human authority | Choosing goals, running Piper locally, approving risky changes, deciding when to merge | Manually patching code that an agent should handle |
-| **GPT** | Release captain, final reviewer, doctrine guardrail | Sequencing work, reviewing pushed diffs/PRs, checking doctrine alignment, writing strict prompts for Kimi Code or Codex, deciding whether work is SHIP / FIX / SPLIT / REVERT / NEEDS EVIDENCE / SCOUT | Uncontrolled direct implementation when Kimi Code/Codex are already assigned, or replacing test evidence with opinion |
+| **GPT** | Release captain, final reviewer, doctrine guardrail | Sequencing work, reviewing pushed diffs/PRs, checking doctrine alignment, writing strict prompts for Kimi Code or Codex, deciding whether work is SHIP / FIX / ESCALATE / SPLIT / REVERT / NEEDS EVIDENCE / SCOUT | Uncontrolled direct implementation when Kimi Code/Codex are already assigned, or replacing test evidence with opinion |
 | **Kimi Web** | Scout, broad repo analyst, alternate architect, second-opinion reviewer | Fast repo-wide scouting, cross-file discovery, alternative architecture proposals, checking whether GPT/Kimi Code missed likely files, project-management style analysis before implementation | Final merge authority, declaring work "done" without tests/diffs, or overriding GPT review/test evidence |
 | **Kimi Code** | High-limit local implementer | Large coding tasks, refactors, local file edits, running tests, iterative implementation | Unsupervised architecture decisions, skipping phases, merging without review |
 | **Codex** | Corrective debugger and final wiring specialist | Fixing what Kimi Code missed, high-risk flow/state/orchestrator bugs, subtle integration failures, final pass on fragile behavior | Routine bulk coding when Kimi Code can handle it |
@@ -232,6 +232,7 @@ GPT should label reviews as one of:
 
 - **SHIP** — safe to merge
 - **FIX** — targeted corrections needed
+- **ESCALATE** — hand the issue to Codex because the failure is subtle, high-risk, or local implementation has stalled
 - **SPLIT** — change is too broad and must be broken up
 - **REVERT** — unsafe or wrong direction
 - **NEEDS EVIDENCE** — tests/logs/diff insufficient
