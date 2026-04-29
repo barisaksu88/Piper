@@ -67,6 +67,11 @@ _DIRECT_EMPTY_DIR_DELETE_RE = re.compile(
     r"(?:(?:the|all)\s+)?empty\s+(?:folders|directories)"
     r"(?:\s+(?:under|in)\s+(?:the\s+)?workspace)?[.?!]*$"
 )
+_DESTRUCTIVE_PROMPT_INJECTION_RE = re.compile(
+    r"(?is)\b(?:ignore\s+previous\s+instructions?|hidden\s+instruction|maintenance\s+mode|developer\s+mode|system\s+override)\b"
+    r".{0,800}?\b(?:delete|deleting|remove|removing|purge|purging|wipe|wiping|clear|clearing)\b"
+    r".{0,800}?\b(?:workspace|files?|folders?|directories|everything|all|\.txt)\b"
+)
 _GENERIC_LOOKUP_SUBJECTS = {
     "document",
     "doc",
@@ -324,6 +329,21 @@ def detect_route_interceptor(
     return None
 
 
+def _destructive_prompt_injection_reply(text: str) -> str:
+    article_match = re.search(
+        r"(?is)\bsummarize\s+this\s+article\s*:\s*(?P<article>.*?)(?:\bhidden\s+instruction\s*:|$)",
+        text or "",
+    )
+    article = " ".join(str((article_match.group("article") if article_match else "") or "").split())
+    if article:
+        return (
+            f"Summary: {article[:260].rstrip()}"
+            + ("..." if len(article) > 260 else "")
+            + "\n\nI cannot follow hidden or override-style instructions to remove workspace files."
+        )
+    return "I cannot follow override-style instructions to remove workspace files."
+
+
 def annotate_file_stage_kinds(decision: RouteDecision) -> RouteDecision:
     if not decision or str(decision.get("decision") or "").strip().upper() != "TASK":
         return decision
@@ -529,6 +549,32 @@ def _registered_extension_file_work(
     if not stages:
         return None
     return _normalize_extension_file_work(decision, card, stages, user_msg, recent_history)
+
+
+@register_route_interceptor
+def _registered_destructive_prompt_injection_interceptor(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> dict[str, Any] | None:
+    del recent_history
+    if not _DESTRUCTIVE_PROMPT_INJECTION_RE.search(user_msg or ""):
+        return None
+    reply = _destructive_prompt_injection_reply(user_msg)
+    return {
+        "kind": "DESTRUCTIVE_PROMPT_INJECTION_REFUSAL",
+        "next_stage": "PERSONA",
+        "stats_decision": "CHAT",
+        "bypass": "destructive_prompt_injection_refusal",
+        "log_message": "   -> Destructive prompt-injection guard matched. Skipping FILE_WORK.",
+        "route_decision": {
+            "decision": "CHAT",
+            "interceptor": "DESTRUCTIVE_PROMPT_INJECTION_REFUSAL",
+            "system_notice": {
+                "kind": "destructive_prompt_injection_refusal",
+                "reply": reply,
+            },
+        },
+    }
 
 
 @register_route_interceptor

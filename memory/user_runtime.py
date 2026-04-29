@@ -1048,41 +1048,12 @@ class ActiveUserRuntime:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
 
-    def _extract_name_via_llm(self, text: str) -> str:
-        """Lightweight LLM fallback for natural name introductions that regex misses."""
-        if self.llm_client is None:
-            return ""
-        try:
-            result = self.llm_client.generate(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You extract personal names from messages. "
-                            "If the speaker introduces themselves with a name, "
-                            "reply with ONLY the name. If no name is introduced, reply with NONE."
-                        ),
-                    },
-                    {"role": "user", "content": text},
-                ],
-                temperature=0.0,
-                max_tokens=10,
-            )
-            result = re.sub(r"(?is)</?think>", "", str(result or "")).strip()
-            if not result or result.upper() == "NONE":
-                return ""
-            return _clean_identity_name(result)
-        except Exception:
-            return ""
-
     def observe_typed_identity_hint(self, text: str) -> UserActivationResult | None:
         candidate = _extract_self_identified_name(text)
         relation_hint = _extract_relation_to_admin(text)
         current = self.active_profile()
         if not candidate and current.is_unknown:
             candidate = self._extract_bare_known_identity_name(text)
-            if not candidate:
-                candidate = self._extract_name_via_llm(text)
         if not candidate:
             if relation_hint and not current.is_admin and not current.is_unknown:
                 self._upsert_admin_relationship_hint(current.user_id, relation_hint)
@@ -1592,6 +1563,12 @@ class ActiveUserBrainProxy:
         return self.user_runtime.current_brain().recall(query, n_results=n_results)
 
     def remember(self, text: str, metadata: dict[str, Any] | None = None, doc_id: str | None = None) -> None:
+        # Privacy model: unknown users do not write to long-term vector memory.
+        try:
+            if self.user_runtime.active_profile().is_unknown:
+                return
+        except Exception:
+            pass
         self.user_runtime.current_brain().remember(text=text, metadata=metadata or {}, doc_id=doc_id)
 
 

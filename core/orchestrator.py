@@ -65,6 +65,9 @@ class OrchestratorConfig:
     release_search_in_flight: Any | None = None
     current_search_query: Any | None = None
 
+    # -- User runtime (for identity extraction in router) --
+    user_runtime: Any | None = None
+
     # -- Paths --
     conversation_summary_path: Path | None = None
 

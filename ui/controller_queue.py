@@ -71,6 +71,11 @@ def pump_ui_queue(controller) -> None:
         if kind == "ui_controls_refresh":
             controller.refresh_interaction_state()
             continue
+        if kind == "active_user_changed":
+            controller.refresh_active_user_meta()
+            controller._refresh_chat_ui()
+            controller.refresh_interaction_state()
+            continue
         if kind == "clear_thinking":
             controller.clear_thinking_placeholder()
             continue

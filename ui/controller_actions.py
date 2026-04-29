@@ -112,7 +112,7 @@ def _render_active_user_message(controller) -> str:
     return f"[UI] Active user: {profile.name} [{profile.user_id}; {role}]"
 
 
-def _apply_active_user_switch(controller) -> None:
+def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False) -> None:
     try:
         controller.tts.stop()
     except Exception:
@@ -121,8 +121,26 @@ def _apply_active_user_switch(controller) -> None:
         controller.agent_brain.suspend_runtime_sessions()
     except Exception:
         pass
+    # Privacy model: when switching from unknown to identified, preserve the
+    # unknown-phase conversation in the new user's persistent memory.
+    _captured_messages: list[dict[str, str]] = []
+    if previous_was_unknown:
+        try:
+            _captured_messages = [
+                dict(m)
+                for m in controller.chat_state.get_messages_snapshot()
+                if str(m.get("role") or "").lower() in ("user", "assistant")
+            ]
+        except Exception:
+            pass
     controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
     controller.chat_state.begin_fresh_session(wipe_persistent=False)
+    if _captured_messages:
+        try:
+            for msg in _captured_messages:
+                controller.chat_state.persist_turn(msg["role"], msg["content"])
+        except Exception:
+            pass
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
     controller.runtime_mode = "IDLE"
@@ -134,9 +152,11 @@ def _apply_active_user_switch(controller) -> None:
 
 
 def _switch_active_user(controller, target: str) -> str:
+    old_profile = controller.user_runtime.active_profile()
+    previous_was_unknown = getattr(old_profile, "is_unknown", False)
     result = controller.user_runtime.request_typed_user_switch(target)
     if getattr(result, "switched", False):
-        _apply_active_user_switch(controller)
+        _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
     return str(getattr(result, "message", "") or "[UI] User switch failed.")
 
 
@@ -152,6 +172,8 @@ def _submit_admin_password(controller, raw_text: str) -> str:
 
 
 def _observe_typed_speaker_identity(controller, raw_text: str) -> tuple[bool, str]:
+    old_profile = controller.user_runtime.active_profile()
+    previous_was_unknown = getattr(old_profile, "is_unknown", False)
     result = controller.user_runtime.observe_typed_identity_hint(raw_text)
     if result is None:
         return False, ""
@@ -160,7 +182,7 @@ def _observe_typed_speaker_identity(controller, raw_text: str) -> tuple[bool, st
     if getattr(result, "requires_identity_clarification", False):
         return True, str(getattr(result, "message", "") or "[UI] I need one more detail to identify who is speaking.")
     if getattr(result, "switched", False):
-        _apply_active_user_switch(controller)
+        _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
     return False, ""
 
 

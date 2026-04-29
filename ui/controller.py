@@ -736,7 +736,29 @@ class PiperController:
         print(f"[STREAM DEBUG] _try_update_streaming_chat_ui FAILED — falling back to full refresh (text len={len(text)})")
         self._refresh_chat_ui()
 
+    def _should_persist_turn(self) -> bool:
+        """Return False when persistence must be skipped per the privacy model.
+
+        - Unknown users: session-only, no persistent history.
+        - Incognito mode (knowledge=false style): no persistent history.
+        """
+        try:
+            profile = self.user_runtime.active_profile()
+        except Exception:
+            return True
+        if getattr(profile, "is_unknown", False):
+            return False
+        try:
+            style_state = self.load_style_state()
+            if not getattr(style_state, "knowledge", True):
+                return False
+        except Exception:
+            pass
+        return True
+
     def persist_turn(self, role: str, content: str) -> None:
+        if not self._should_persist_turn():
+            return
         self.chat_state.persist_turn(role, content)
 
     def show_thinking_placeholder(self) -> None:
@@ -785,6 +807,7 @@ class PiperController:
             release_search_in_flight=self.release_search_in_flight,
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
+            user_runtime=self.user_runtime,
             langgraph_resume_thread_id=str(langgraph_resume_thread_id or ""),
             langgraph_resume_checkpoint_id=str(langgraph_resume_checkpoint_id or ""),
             langgraph_resume_value=langgraph_resume_value,

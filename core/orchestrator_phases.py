@@ -170,6 +170,57 @@ def _is_live_environment_chat_query(text: str) -> bool:
     return bool(looks_like_live_environment_query(str(text or "").strip()))
 
 
+# --- Privacy model: stage types that require admin privilege ---
+_ADMIN_ONLY_STAGE_TYPES: set[str] = {"FILE_WORK"}
+
+
+def _route_requires_admin_privilege(route_decision: dict[str, Any] | None) -> bool:
+    """Return True if the route decision contains any admin-only stage types."""
+    if not route_decision:
+        return False
+    card = dict(route_decision.get("card") or {})
+    for stage in card.get("stages") or []:
+        if str(stage.get("stage_type") or "").strip().upper() in _ADMIN_ONLY_STAGE_TYPES:
+            return True
+    return False
+
+
+def _apply_non_admin_route_guard(orc) -> None:
+    """Override admin-only routes to CHAT when the active user is not admin.
+
+    Implements the route-level guard from the Piper Memory & Privacy Model:
+    non-admin users must never be routed to FILE_WORK, RUN_CODE, or desktop
+    computer-use domains.  If the Secretary suggests such a route, it is
+    overridden to CHAT with a friendly explanation.
+    """
+    user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    if user_runtime is None:
+        return
+    try:
+        profile = user_runtime.active_profile()
+    except Exception:
+        return
+    if getattr(profile, "is_admin", False):
+        return
+    if not _route_requires_admin_privilege(orc.route_decision):
+        return
+    orc.ui.put((
+        "agent_log",
+        "   -> Non-admin route guard: overriding admin-only route to CHAT.",
+    ))
+    orc.route_decision = {
+        "decision": "CHAT",
+        "interceptor": "NON_ADMIN_ROUTE_GUARD",
+        "system_notice": {
+            "kind": "non_admin_route_guard",
+            "reply": (
+                "I cannot access files or run code — only Baris can do that on this system. "
+                "I can help you with chat, search the web, or answer questions though!"
+            ),
+        },
+    }
+
+
 def _is_pending_search_payload(message: dict) -> bool:
     return (
         message.get("role") == "system"
@@ -635,6 +686,13 @@ def _build_stage_approval_no_remaining_work_reply(system_notice: dict[str, Any])
     )
 
 
+def _build_destructive_prompt_injection_refusal_reply(system_notice: dict[str, Any]) -> str:
+    reply = str(system_notice.get("reply") or "").strip()
+    if reply:
+        return reply
+    return "I cannot follow override-style instructions to remove workspace files."
+
+
 def _build_remaining_route_decision(orc, *, start_stage_index: int) -> dict[str, Any]:
     route = json.loads(json.dumps(dict(getattr(orc, "route_decision", {}) or {}), ensure_ascii=False))
     if not isinstance(route, dict):
@@ -1003,6 +1061,15 @@ def _run_route_core(orc) -> None:
     prompt_path = CFG.PROMPTS_DIR / "secretary.txt"
     sys_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else FALLBACK_SECRETARY
     sys_prompt = _merge_secretary_system_prompt(sys_prompt, latest_runtime_context)
+    # Inject identity extraction instruction when active user is unknown
+    user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    if user_runtime is not None and getattr(user_runtime.active_profile(), "is_unknown", False):
+        sys_prompt += (
+            "\n\n## SPEAKER IDENTITY\n"
+            "The active user is currently UNKNOWN. "
+            "If the user's message contains a personal name introduction, "
+            'include "extracted_identity_name": "Name" in your JSON response.'
+        )
     messages = [{"role": "system", "content": sys_prompt}]
     messages.append(
         {
@@ -1033,6 +1100,20 @@ def _run_route_core(orc) -> None:
                 cancel_token=orc.cancel_token,
             )
         orc.ui.put(("agent_log", f"   -> Secretary Raw: {raw}"))
+        # Parse identity extraction from raw JSON before validation strips it
+        try:
+            raw_payload = json.loads(raw)
+            extracted_name = str(raw_payload.get("extracted_identity_name") or "").strip()
+        except Exception:
+            extracted_name = ""
+        if extracted_name and user_runtime is not None and getattr(user_runtime.active_profile(), "is_unknown", False):
+            try:
+                result = user_runtime.observe_typed_identity_hint(extracted_name)
+                if getattr(result, "switched", False):
+                    orc.ui.put(("agent_log", f"   -> Router extracted identity: {extracted_name}. Switched user."))
+                    orc.ui.put(("active_user_changed", ""))
+            except Exception as exc:
+                orc.ui.put(("agent_log", f"   -> Identity switch from router failed: {exc}"))
         try:
             parsed: RouteDecision = RouterBoundary.validate(raw)
         except BoundaryValidationError as exc:
@@ -1125,6 +1206,9 @@ def _run_route_core(orc) -> None:
         latest_route_error=getattr(orc, "latest_route_error", ""),
     )
     orc.stats_collector.end_phase(orc.turn_stats, "route")
+    decision = orc.route_decision.get("decision")
+    # --- Privacy model: non-admin route guard ---
+    _apply_non_admin_route_guard(orc)
     decision = orc.route_decision.get("decision")
     # If Secretary produced a bare CHAT with no stage instructions for a very
     # short/vague message, wrap it so the Planner/Persona asks for clarification
@@ -1530,6 +1614,20 @@ def _run_manager_core(orc) -> None:
     orc.stats_collector.start_phase(orc.turn_stats, "manager")
 
     stages = orc.context_card.get("stages", [])
+    # Privacy model: filter admin-only tools for non-admin users (defense-in-depth).
+    _user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    _is_non_admin = (
+        _user_runtime is not None
+        and not getattr(_user_runtime.active_profile(), "is_admin", False)
+    )
+    if _is_non_admin:
+        _ADMIN_ONLY_TOOLS = {"FILE_OP", "RUN_CODE"}
+        for _stage in stages:
+            _orig = list(_stage.get("allowed_tools", []) or [])
+            _filtered = [t for t in _orig if t not in _ADMIN_ONLY_TOOLS]
+            if _filtered != _orig:
+                _stage["allowed_tools"] = _filtered
+                orc.ui.put(("agent_log", f"   -> Privacy guard removed admin-only tools from stage: {_orig} -> {_filtered}"))
     if not stages:
         orc.emit_runtime_signal(
             {
@@ -2168,6 +2266,18 @@ def _run_persona_core(orc) -> None:
         orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
         _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
         return
+    if str(system_notice.get("kind") or "").strip().lower() == "non_admin_route_guard":
+        _finish_persona_fast_path(
+            orc,
+            str(system_notice.get("reply") or "")
+            or "I cannot access files or run code on this system. I can help you with chat or search though!",
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
     if str(system_notice.get("kind") or "").strip().lower() == "file_state_correction_ack":
         _finish_persona_fast_path(
             orc,
@@ -2205,6 +2315,17 @@ def _run_persona_core(orc) -> None:
         _finish_persona_fast_path(
             orc,
             _build_stage_approval_no_remaining_work_reply(system_notice),
+            reporter_just_ran=reporter_just_ran,
+            emit_start=True,
+        )
+        orc.stats_collector.end_phase(orc.turn_stats, "persona")
+        orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+        _finalize_persona_turn(orc, reporter_just_ran=reporter_just_ran)
+        return
+    if str(system_notice.get("kind") or "").strip().lower() == "destructive_prompt_injection_refusal":
+        _finish_persona_fast_path(
+            orc,
+            _build_destructive_prompt_injection_refusal_reply(system_notice),
             reporter_just_ran=reporter_just_ran,
             emit_start=True,
         )
