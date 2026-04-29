@@ -29,6 +29,18 @@ DEFAULT_GUEST_NAME = "Unknown"
 DEFAULT_STANDARD_ROLE = "standard"
 DEFAULT_ADMIN_ROLE = "admin"
 DEFAULT_PASSWORD_ITERATIONS = 240000
+_RESERVED_IDENTITY_IDS = {
+    "guest",
+    DEFAULT_GUEST_USER_ID,
+    "still_calibrating",
+}
+_RESERVED_IDENTITY_NAMES = {
+    "calibrating",
+    "still calibrating",
+    "still_calibrating",
+    "voice calibrating",
+    "voice still calibrating",
+}
 _IDENTITY_STOPWORDS = {
     "a",
     "an",
@@ -49,6 +61,7 @@ _IDENTITY_STOPWORDS = {
     "my",
     "sleepy",
     "stressed",
+    "still",
     "testing",
     "tired",
     "trying",
@@ -147,6 +160,14 @@ def _slugify(value: str) -> str:
 
 def _normalize_token(value: str) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _is_reserved_identity_token(value: str) -> bool:
+    normalized = _normalize_token(value)
+    if not normalized:
+        return False
+    slug = _slugify(normalized)
+    return slug in _RESERVED_IDENTITY_IDS or normalized in _RESERVED_IDENTITY_NAMES
 
 
 def _active_edge(entry: dict[str, Any]) -> bool:
@@ -284,6 +305,7 @@ def _clean_identity_name(text: str) -> str:
     candidate = " ".join(str(text or "").strip().split())
     if not candidate:
         return ""
+    original_tokens = re.findall(r"[a-z]+", candidate.lower())
     # Strip trailing junk words that often follow a name in casual speech.
     candidate = re.sub(
         r"(?i)\b(?:"
@@ -298,8 +320,12 @@ def _clean_identity_name(text: str) -> str:
     candidate = " ".join(candidate.split()).strip(" ,.!?")
     if not candidate:
         return ""
+    if _is_reserved_identity_token(candidate):
+        return ""
     tokens = re.findall(r"[a-z]+", candidate.lower())
     if not tokens or len(tokens) > 3:
+        return ""
+    if len(tokens) == 1 and len(original_tokens) > 1:
         return ""
     if tokens[0] in _IDENTITY_LEADING_STOPWORDS:
         return ""
@@ -316,6 +342,15 @@ def _extract_self_identified_name(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
+    correction_match = re.search(
+        r"(?is)\b(?:i\s+am|i'm|im)\s+not\b[^.?!,;]{0,80}[,;]\s*"
+        r"(?:but\s+)?(?:i\s+am|i'm|im)\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*[,.!?]|\s+and\s|\s+but\s|\s+or\s|$)",
+        raw,
+    )
+    if correction_match:
+        candidate = _clean_identity_name(correction_match.group("name") or "")
+        if candidate:
+            return candidate
     # First pass: match at start of string (clean inputs)
     for pattern in _SELF_IDENTIFY_PATTERNS:
         match = pattern.match(raw)
@@ -499,7 +534,7 @@ class UserRegistry:
                 if not isinstance(raw_profile, dict):
                     continue
                 profile = self._coerce_profile(raw_profile, fallback_id=str(raw_key))
-                if profile.is_unknown:
+                if profile.is_unknown or _is_reserved_identity_token(profile.user_id) or _is_reserved_identity_token(profile.name):
                     continue
                 users[profile.user_id] = {
                     "user_id": profile.user_id,
@@ -528,7 +563,7 @@ class UserRegistry:
             if not isinstance(raw_profile, dict):
                 continue
             profile = self._coerce_profile(raw_profile, fallback_id=str(raw_key))
-            if profile.is_unknown:
+            if profile.is_unknown or _is_reserved_identity_token(profile.user_id) or _is_reserved_identity_token(profile.name):
                 continue
             normalized_id = profile.user_id
             normalized_users[normalized_id] = {
@@ -559,6 +594,12 @@ class UserRegistry:
             stored_users = stored.get("users") if isinstance(stored, dict) else {}
             if isinstance(stored_users, dict) and (
                 "guest" in stored_users or DEFAULT_GUEST_USER_ID in stored_users
+            ):
+                changed = True
+            if isinstance(stored_users, dict) and any(
+                _is_reserved_identity_token(str(key))
+                or (isinstance(raw, dict) and _is_reserved_identity_token(str(raw.get("name") or "")))
+                for key, raw in stored_users.items()
             ):
                 changed = True
             try:
@@ -616,6 +657,8 @@ class UserRegistry:
             _normalize_token(DEFAULT_GUEST_NAME),
         }:
             return [self._coerce_profile(self._default_guest_payload(), fallback_id=DEFAULT_GUEST_USER_ID)]
+        if _is_reserved_identity_token(normalized):
+            return []
         exact_id_matches: list[UserProfile] = []
         name_matches: list[UserProfile] = []
         for profile in self.list_profiles():
@@ -711,6 +754,10 @@ class UserRegistry:
     def switch_active_user(self, token: str) -> UserSwitchResult:
         normalized = " ".join(str(token or "").strip().split())
         if not normalized:
+            return UserSwitchResult(profile=self.active_profile(), created=False)
+        if _slugify(normalized) == DEFAULT_GUEST_USER_ID:
+            return self.activate_profile(self._coerce_profile(self._default_guest_payload(), fallback_id=DEFAULT_GUEST_USER_ID))
+        if _is_reserved_identity_token(normalized):
             return UserSwitchResult(profile=self.active_profile(), created=False)
         existing = self.resolve_profile(normalized)
         profile = existing
@@ -1018,6 +1065,9 @@ class ActiveUserRuntime:
         if not normalized:
             profile = self.active_profile()
             return UserActivationResult(status="noop", profile=profile, message=self.active_user_label())
+        if _is_reserved_identity_token(normalized):
+            profile = self.active_profile()
+            return UserActivationResult(status="noop", profile=profile, message=self.active_user_label())
         target_profile, created, clarification_message = self._resolve_identity_target_profile(normalized)
         if target_profile is None:
             profile = self.active_profile()
@@ -1047,6 +1097,71 @@ class ActiveUserRuntime:
         else:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
+
+    def activate_voice_match(self, matched_user_id: str, similarity: float = 0.0) -> UserActivationResult | None:
+        """Activate a profile from a verified voice-recognition match.
+
+        The mic path supplies this only from voice-engine evidence. It can be a
+        relaxed first-turn inference while the active speaker is unknown, but it
+        still keeps identity decisions out of Persona narration.
+        """
+        token = _slugify(str(matched_user_id or ""))
+        if not token or _is_reserved_identity_token(token):
+            return None
+
+        target_profile = self.registry.profile_for_id(token)
+        if target_profile is None and token == _slugify(self.registry.admin_name):
+            target_profile = self.registry.profile_for_id(self.registry.admin_user_id)
+        if target_profile is None:
+            target_profile = self.registry.resolve_profile(token)
+        if target_profile is None or target_profile.is_unknown:
+            return None
+
+        current = self.active_profile()
+        if current.user_id == target_profile.user_id:
+            if target_profile.is_admin:
+                self._admin_unlocked = True
+            return UserActivationResult(status="noop", profile=current, created=False, message="")
+
+        result = self._activate_target_profile(target_profile)
+        if result.profile.is_admin:
+            self._admin_unlocked = True
+        role = "admin" if result.profile.is_admin else "user"
+        return UserActivationResult(
+            status="switched",
+            profile=result.profile,
+            created=result.created,
+            message=(
+                f"[UI] Voice identified {result.profile.name} "
+                f"[{result.profile.user_id}; {role}] ({float(similarity):.2f})."
+            ),
+        )
+
+    def apply_router_identity_intent(self, name: str, *, relation_hint: str = "") -> UserActivationResult | None:
+        candidate = _clean_identity_name(name)
+        current = self.active_profile()
+        if not candidate:
+            return None
+        relation = str(relation_hint or "").strip().lower()
+        target_profile, created, clarification_message = self._resolve_identity_target_profile(candidate, relation)
+        if target_profile is None:
+            return UserActivationResult(
+                status="identity_clarification_required",
+                profile=current,
+                created=False,
+                message=clarification_message or "[UI] I need one more detail to identify who is speaking.",
+            )
+        if current.user_id == target_profile.user_id and not current.is_unknown:
+            return UserActivationResult(status="noop", profile=current, created=False, message="")
+        if target_profile.is_admin:
+            return self.request_typed_user_switch(target_profile.user_id)
+        switch_result = self._activate_target_profile(target_profile)
+        return UserActivationResult(
+            status="switched",
+            profile=switch_result.profile,
+            created=created or switch_result.created,
+            message="",
+        )
 
     def observe_typed_identity_hint(self, text: str) -> UserActivationResult | None:
         candidate = _extract_self_identified_name(text)
@@ -1560,6 +1675,11 @@ class ActiveUserBrainProxy:
         self.user_runtime = user_runtime
 
     def recall(self, query: str, n_results: int = 10) -> list[dict[str, Any]]:
+        try:
+            if self.user_runtime.active_profile().is_unknown:
+                return []
+        except Exception:
+            pass
         return self.user_runtime.current_brain().recall(query, n_results=n_results)
 
     def remember(self, text: str, metadata: dict[str, Any] | None = None, doc_id: str | None = None) -> None:

@@ -122,6 +122,7 @@ class TagScrubber:
     def __init__(self):
         self._buf = ""
         self._known_tags = tuple(get_registered_tool_names(include_legacy=True))
+        self._think_tags = ("<think>", "</think>")
 
     def reset(self):
         self._buf = ""
@@ -137,6 +138,15 @@ class TagScrubber:
         
         i = 0
         while i < len(self._buf):
+            if self._buf[i] == '<':
+                tag = self._matching_think_tag(self._buf[i:])
+                if tag:
+                    i += len(tag)
+                    continue
+                if self._is_partial_think_tag(self._buf[i:]):
+                    self._buf = self._buf[i:]
+                    return out
+
             if self._buf[i] == '[':
                 # Check for block tags (RUN_CODE)
                 is_block = False
@@ -180,9 +190,20 @@ class TagScrubber:
             if text_u.startswith(f"[{tag}"):
                 return True
         return False
+
+    def _matching_think_tag(self, text: str) -> str:
+        lowered = str(text or "").lower()
+        for tag in self._think_tags:
+            if lowered.startswith(tag):
+                return tag
+        return ""
+
+    def _is_partial_think_tag(self, text: str) -> bool:
+        lowered = str(text or "").lower()
+        return any(tag.startswith(lowered) for tag in self._think_tags if lowered)
     
     def _scrub(self, text: str) -> str:
-        # Only scrub RUN_CODE now
+        text = re.sub(r'</?think>', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\[RUN_CODE\].*?\[\/RUN_CODE\]', '', text, flags=re.DOTALL|re.IGNORECASE)
         return text.strip()
 

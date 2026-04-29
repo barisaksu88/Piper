@@ -433,6 +433,27 @@ Phase 3 — Relationship graph visualization (optional, ~1 day)
 
 ---
 
+**Engine directory audit and lifecycle cleanup**
+
+`core/engines/` currently mixes true self-registering engines with direct-call service/utility modules. Per `docs/architecture/TRIGGER_FLOW.md §13`, new feature engines should register hooks, route interceptors, or context blocks instead of requiring direct edits in orchestration files. In practice, only a few modules follow that pattern today (`change_journal.py`, `proactive_monitor.py`, `stats_collector.py`), while many others are useful direct-call services that happen to live under `core/engines/`.
+
+This is not a runtime bug. Treat it as post-migration architecture hygiene after LangGraph/default-runtime stabilization and higher-value user-facing work.
+
+**Cleanup goals:**
+- Document the distinction between lifecycle engines and direct-call services.
+- Rename or relocate non-engine utilities if that improves clarity without churn.
+- Convert only modules that genuinely benefit from hook/interceptor/block registration; do not force every service into the engine pattern.
+- Keep `orchestrator_phases.py`, `route_normalizer.py`, and context-pack integration thinner over time, but avoid a large mechanical reshuffle with no behavioral gain.
+- Update `core/engines/__init__.py` exports so the package surface matches the final naming.
+
+**Candidate classification:**
+- Lifecycle engines: `change_journal.py`, `proactive_monitor.py`, `stats_collector.py`
+- Direct-call services/utilities to review: `summary.py`, `conversation_compressor.py`, `context_pack.py`, `verification.py`, `file_work.py`, `followup_resolution.py`, `route_clarity.py`, `state_mutation.py`, `computer_use_engine.py`, `computer_use_verifier.py`, `rollback_engine.py`
+
+**Files (when specced):** `core/engines/`; possible `core/services/` or `core/runtime_services/`; `core/orchestrator_phases.py`; `core/routing/route_normalizer.py`; `core/engines/__init__.py`; `docs/architecture/TRIGGER_FLOW.md`
+
+---
+
 **Tiered smoke-suite audit (after computer use v0 stabilizes)**
 
 The current unified smoke runner is useful, but the suite still mixes fast deterministic checks with heavier harness-backed and llama-backed tests. After browser computer use is stable and boring, add a real tier system so default runs stay high-signal without hiding the broader integration surface.

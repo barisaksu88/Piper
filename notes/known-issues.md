@@ -42,7 +42,7 @@
 
 ## FILE_WORK
 
-- **9B model capability ceiling on multi-step chains:** A 3-step file chain (mkdir → write → rename) in a single prompt often causes the model to plan correctly but fail to emit all FILE_OP actions within one turn, or get stuck in routing. A 2-step chain (create → rename) works reliably.
+- **9B model edge on multi-step chains:** A 3-step file chain (mkdir -> write -> rename) is not a hard limit, but it is less reliable and slower than a 2-step chain. The graded stress probe has passed with artifact verification after a failed intermediate rename stage rerouted/recovered, so treat 3-step chains as a capability probe rather than a core regression gate.
 - Open-ended file reorganization is much safer now, but proposal-first flows are still shallow.
 - In approval-gated organization turns, Piper can inspect safely and pause without mutation, but the spoken proposal can still be too thin or generic.
 - qwen3.5 q6 still tends to add low-value social follow-ups after successful file work, which can bury important artifact details.
@@ -53,5 +53,4 @@
 
 
 ## Engineering Support
-
 

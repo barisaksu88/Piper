@@ -200,6 +200,15 @@ _STATEISH_LOOKUP_SUBJECT_RE = re.compile(
 _WEB_SOURCE_CHOICE_RE = re.compile(
     r"(?is)^\s*(?:the\s+)?(?:web|internet|online|web search|search the web|online search)\s*[.!?]*\s*$"
 )
+_AFFIRMATIVE_WEB_SEARCH_FOLLOWUP_RE = re.compile(
+    r"(?is)^\s*(?:yes(?:\s*,?\s*please)?|yeah|yep|yup|sure(?:\s*,?\s*(?:go ahead|please))?|"
+    r"go ahead|please do|do it|sounds good|absolutely|definitely)\s*[.!?]*\s*$"
+)
+_WEB_SEARCH_OFFER_RE = re.compile(
+    r"(?is)\b(?:search|check|look(?:\s+it)?\s+up|initiate)\b.{0,140}\b(?:web|internet|online|current|latest|real[- ]time|ephemeris)\b"
+    r"|\b(?:web|internet|online|current|latest|real[- ]time|ephemeris)\b.{0,140}\b(?:search|check|look(?:\s+it)?\s+up|query)\b"
+    r"|\b(?:perform|initiate)\s+(?:a\s+)?search\b"
+)
 _WORKSPACE_SOURCE_CHOICE_RE = re.compile(
     r"(?is)^\s*(?:the\s+)?(?:workspace|workspace files?|workspace file lookup|workspace lookup|file|files|document|documents|docs?)\s*[.!?]*\s*$"
 )
@@ -411,6 +420,16 @@ def _registered_lookup_source_choice_followup(
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     return _normalize_lookup_source_choice_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_web_search_offer_affirmative_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision
+    return _normalize_web_search_offer_affirmative_followup(user_msg, recent_history)
 
 
 @register_normalizer
@@ -1056,6 +1075,110 @@ def _normalize_lookup_source_choice_followup(
     if _subject_looks_like_workspace_document(subject):
         return _build_workspace_document_search_card(subject)
     return None
+
+
+def _normalize_web_search_offer_affirmative_followup(
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text or not _AFFIRMATIVE_WEB_SEARCH_FOLLOWUP_RE.match(text):
+        return None
+
+    assistant_offer = _latest_assistant_web_search_offer(recent_history)
+    if not assistant_offer:
+        return None
+
+    query = _derive_query_from_web_search_offer(assistant_offer, recent_history)
+    if not query:
+        return None
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": query,
+        },
+    }
+
+
+def _latest_assistant_web_search_offer(recent_history: Sequence[dict[str, Any]]) -> str:
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").strip().lower() != "assistant":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content or content.lower() == "thinking...":
+            continue
+        if _WEB_SEARCH_OFFER_RE.search(content):
+            return content
+        return ""
+    return ""
+
+
+def _derive_query_from_web_search_offer(
+    assistant_offer: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> str:
+    offer = re.sub(r"(?is)</?think>", " ", str(assistant_offer or ""))
+    quoted = re.findall(r"['\"]([^'\"]{3,160})['\"]", offer)
+    for item in reversed(quoted):
+        cleaned = _clean_web_offer_query(item)
+        if cleaned:
+            return cleaned
+
+    phrase_patterns = [
+        r"(?is)\b(?:current|latest|precise|real[- ]time)\s+(?P<subject>[^.?!]{3,120})",
+        r"(?is)\bsearch\s+(?:for|about)?\s*(?P<subject>[^.?!]{3,120})",
+        r"(?is)\bcheck\s+(?:for|about)?\s*(?P<subject>[^.?!]{3,120})",
+    ]
+    for pattern in phrase_patterns:
+        match = re.search(pattern, offer)
+        if not match:
+            continue
+        cleaned = _clean_web_offer_query(match.group("subject"))
+        if cleaned:
+            return cleaned
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    runtime_query = _clean_web_offer_query(str(runtime.get("search_query") or ""))
+    if runtime_query:
+        return runtime_query
+
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").strip().lower() != "user":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content or _AFFIRMATIVE_WEB_SEARCH_FOLLOWUP_RE.match(content):
+            continue
+        if re.search(r"(?i)\bdid you check\b|\bhow do you know\b", content):
+            continue
+        cleaned = _clean_web_offer_query(content)
+        if cleaned:
+            return cleaned
+
+    previous_request = str(runtime.get("previous_user_request") or "").strip()
+    if not re.search(r"(?i)\bdid you check\b|\bhow do you know\b", previous_request):
+        return _clean_web_offer_query(previous_request)
+    return ""
+
+
+def _clean_web_offer_query(text: str) -> str:
+    cleaned = " ".join(str(text or "").split()).strip(" \"'`.,;:!?")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(
+        r"(?is)\b(?:for this exact moment|for the exact moment|if you (?:wish|require).*)$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"(?is)\bor any other real[- ]time data\b.*$", "", cleaned)
+    cleaned = re.sub(r"(?is)\bi can\b.*$", "", cleaned)
+    cleaned = cleaned.strip(" \"'`.,;:!?")
+    if len(cleaned) < 3:
+        return ""
+    return cleaned[:180]
 
 
 def _extract_lookup_source_followup_subject(

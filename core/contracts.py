@@ -114,10 +114,18 @@ class SkillDecision(TypedDict, total=False):
     persona_hint: str
 
 
+class IdentityIntent(TypedDict, total=False):
+    is_introduction: bool
+    name: str
+    relation_to_admin: str
+    confidence: Literal["low", "medium", "high"]
+
+
 class RouteDecision(TypedDict, total=False):
     decision: Literal["CHAT", "SEARCH", "TASK"]
     card: RouteCard
     skill: SkillDecision
+    identity_intent: IdentityIntent
     source_scope: Literal["web", "workspace", "unknown"]
     confidence: Literal["low", "medium", "high"]
     question_if_uncertain: str

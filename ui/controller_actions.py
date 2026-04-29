@@ -50,6 +50,15 @@ _ACTIVE_TURN_CANCEL_RE = re.compile(
 )
 
 
+def _log_voice_identity_ui(message: str) -> None:
+    try:
+        CFG.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CFG.DEBUG_DIR / "voice_identity_debug.txt", "a", encoding="utf-8") as f:
+            f.write("[ui] " + str(message).rstrip() + "\n")
+    except Exception:
+        pass
+
+
 def _clear_conversation_summary_file() -> None:
     _clear_conversation_summary_file_at()
 
@@ -186,6 +195,49 @@ def _observe_typed_speaker_identity(controller, raw_text: str) -> tuple[bool, st
     return False, ""
 
 
+def _apply_voice_identity_match(controller, engine) -> None:
+    try:
+        if hasattr(engine, "consume_last_voice_match"):
+            match = engine.consume_last_voice_match()
+        else:
+            match = getattr(engine, "_last_voice_match", None)
+            setattr(engine, "_last_voice_match", None)
+    except Exception:
+        _log_voice_identity_ui("consume_match failed")
+        return
+    if not match:
+        _log_voice_identity_ui("consume_match empty")
+        return
+    try:
+        matched_user, similarity = match
+    except Exception:
+        _log_voice_identity_ui(f"bad_match_payload match={match!r}")
+        return
+    if not matched_user:
+        _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
+        return
+    try:
+        old_profile = controller.user_runtime.active_profile()
+        previous_was_unknown = getattr(old_profile, "is_unknown", False)
+        result = controller.user_runtime.activate_voice_match(str(matched_user), float(similarity or 0.0))
+    except Exception as exc:
+        _log_voice_identity_ui(f"activate_failed user={matched_user} score={float(similarity or 0.0):.3f} error={type(exc).__name__}: {exc}")
+        return
+    if getattr(result, "switched", False):
+        _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        _log_voice_identity_ui(
+            f"activated user={getattr(result.profile, 'user_id', matched_user)} score={float(similarity or 0.0):.3f}"
+        )
+    else:
+        _log_voice_identity_ui(
+            f"match_no_switch user={matched_user} score={float(similarity or 0.0):.3f} status={getattr(result, 'status', 'none')}"
+        )
+    try:
+        controller.safe_log(f"Voice identity match: {matched_user} score={float(similarity or 0.0):.3f}")
+    except Exception:
+        pass
+
+
 def reset_mic_ui(controller) -> None:
     controller.mic_state = "idle"
     if dpg.does_item_exist(controller.tags.mic_button):
@@ -209,6 +261,12 @@ def on_mic_toggle(controller) -> None:
         controller.set_status("Listening...")
         try:
             engine = get_stt_engine()
+            try:
+                profile = controller.user_runtime.active_profile()
+                if hasattr(engine, "set_active_voice_profile"):
+                    engine.set_active_voice_profile(profile.user_id, is_unknown=getattr(profile, "is_unknown", False))
+            except Exception:
+                pass
             engine.start_recording()
         except Exception as exc:
             reset_mic_ui(controller)
@@ -223,10 +281,13 @@ def on_mic_toggle(controller) -> None:
         text = engine.stop_recording()
         controller.set_status("IDLE")
         if text:
+            _apply_voice_identity_match(controller, engine)
+            controller._pending_input_modality = "voice"
             if dpg.does_item_exist(controller.tags.input_box):
                 dpg.set_value(controller.tags.input_box, text)
             controller.on_send()
         else:
+            _apply_voice_identity_match(controller, engine)
             controller.chat_append("system", "[No speech detected]")
     except Exception as exc:
         controller.set_status("Error")
@@ -823,12 +884,6 @@ def on_send(controller) -> None:
         return
 
     if _try_resume_langgraph_interrupt(controller, user_text):
-        return
-
-    handled_identity, identity_message = _observe_typed_speaker_identity(controller, user_text)
-    if handled_identity:
-        controller.chat_append("system", identity_message)
-        dpg.set_value(controller.tags.input_box, "")
         return
 
     controller.submit_user_text(user_text)

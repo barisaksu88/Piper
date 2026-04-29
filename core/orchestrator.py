@@ -67,6 +67,7 @@ class OrchestratorConfig:
 
     # -- User runtime (for identity extraction in router) --
     user_runtime: Any | None = None
+    input_modality: str = "typed"
 
     # -- Paths --
     conversation_summary_path: Path | None = None

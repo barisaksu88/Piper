@@ -265,6 +265,7 @@ class PiperController:
         self._chat_rendered_tags: List[int | str] = []
         self._chat_render_wrap_columns: int | None = None
         self._last_tts_busy = False
+        self._pending_input_modality = "typed"
         self._event_speech_recent: Dict[str, float] = {}
         self._vision_note_lock = threading.Lock()
         self._vision_note_active = False
@@ -786,6 +787,8 @@ class PiperController:
     ) -> "OrchestratorConfig":
         from core.orchestrator import OrchestratorConfig
 
+        input_modality = str(getattr(self, "_pending_input_modality", "typed") or "typed")
+        self._pending_input_modality = "typed"
         return OrchestratorConfig(
             llm=self.llm,
             brain=self.agent_brain,
@@ -808,6 +811,7 @@ class PiperController:
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
             user_runtime=self.user_runtime,
+            input_modality=input_modality,
             langgraph_resume_thread_id=str(langgraph_resume_thread_id or ""),
             langgraph_resume_checkpoint_id=str(langgraph_resume_checkpoint_id or ""),
             langgraph_resume_value=langgraph_resume_value,

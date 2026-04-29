@@ -81,6 +81,14 @@ class RouterBoundary:
                 fallback=cls.fallback(),
             )
 
+        identity_intent = payload.get("identity_intent")
+        if identity_intent is not None and not isinstance(identity_intent, dict):
+            raise BoundaryValidationError(
+                boundary="RouterBoundary",
+                message="identity_intent must be an object when present",
+                fallback=cls.fallback(),
+            )
+
         confidence = str(payload.get("confidence") or "").strip().lower()
         if confidence and confidence not in cls._VALID_CONFIDENCE:
             raise BoundaryValidationError(
@@ -104,6 +112,19 @@ class RouterBoundary:
             validated["card"] = dict(card)
         if isinstance(skill, dict) and skill:
             validated["skill"] = dict(skill)
+        if isinstance(identity_intent, dict) and identity_intent:
+            is_introduction = bool(identity_intent.get("is_introduction"))
+            name = " ".join(str(identity_intent.get("name") or "").split()).strip()
+            relation_to_admin = " ".join(str(identity_intent.get("relation_to_admin") or "").split()).strip().lower()
+            identity_confidence = str(identity_intent.get("confidence") or "").strip().lower()
+            clean_identity: dict[str, Any] = {"is_introduction": is_introduction}
+            if name:
+                clean_identity["name"] = name
+            if relation_to_admin:
+                clean_identity["relation_to_admin"] = relation_to_admin
+            if identity_confidence in cls._VALID_CONFIDENCE:
+                clean_identity["confidence"] = identity_confidence
+            validated["identity_intent"] = clean_identity
         if confidence:
             validated["confidence"] = confidence
         if source_scope:

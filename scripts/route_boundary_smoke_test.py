@@ -56,6 +56,7 @@ class RouteBoundaryReport:
     file_target_confirmation_cancel_result: dict | None
     lookup_source_followup_result: dict
     lookup_source_web_followup_result: dict
+    web_offer_affirmative_followup_result: dict
     contextual_lookup_route_result: dict
     task_event_verification_followup_result: dict | None
     memory_recall_affirmative_followup_result: dict | None
@@ -389,6 +390,22 @@ def run_smoke() -> RouteBoundaryReport:
                 "content": 'Did you want me to search the web for "MLPerf Inference v5.0 benchmark results", or look for it in your workspace files?',
             },
             {"role": "user", "content": "web pls"},
+        ],
+    )
+
+    web_offer_affirmative_followup_result = normalize_route_decision(
+        {"decision": "CHAT"},
+        "Sure, go ahead",
+        [
+            {
+                "role": "assistant",
+                "content": (
+                    "The moon phase I mentioned came from the environment date, not a live web query. "
+                    "If you require the precise, real-time ephemeris data for this exact moment, "
+                    "I can initiate a search. Shall I check?"
+                ),
+            },
+            {"role": "user", "content": "Sure, go ahead"},
         ],
     )
 
@@ -776,6 +793,8 @@ def run_smoke() -> RouteBoundaryReport:
         and str((((lookup_source_followup_result.get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "")) == "FILE_WORK"
         and dict(lookup_source_web_followup_result).get("decision") == "SEARCH"
         and "mlperf inference v5.0 benchmark results" in str(((lookup_source_web_followup_result.get("card") or {}).get("query") or "")).lower()
+        and dict(web_offer_affirmative_followup_result).get("decision") == "SEARCH"
+        and "ephemeris" in str(((web_offer_affirmative_followup_result.get("card") or {}).get("query") or "")).lower()
         and dict(contextual_lookup_route_result).get("decision") == "TASK"
         and str((((contextual_lookup_route_result.get("card") or {}).get("stages") or [{}])[0].get("stage_type") or "")) == "FILE_WORK"
         and "clarify lookup source" not in str(((contextual_lookup_route_result.get("card") or {}).get("goal") or "")).lower()
@@ -818,6 +837,7 @@ def run_smoke() -> RouteBoundaryReport:
         file_target_confirmation_cancel_result=dict(file_target_confirmation_cancel_result or {}),
         lookup_source_followup_result=dict(lookup_source_followup_result),
         lookup_source_web_followup_result=dict(lookup_source_web_followup_result),
+        web_offer_affirmative_followup_result=dict(web_offer_affirmative_followup_result),
         contextual_lookup_route_result=dict(contextual_lookup_route_result),
         task_event_verification_followup_result=dict(task_event_verification_followup_result or {}),
         memory_recall_affirmative_followup_result=dict(memory_recall_affirmative_followup_result or {}),

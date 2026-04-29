@@ -16,6 +16,17 @@ _whisper_import_error: Exception | None = None
 _LOG = logging.getLogger(__name__)
 
 
+def _log_voice_debug(message: str) -> None:
+    try:
+        from config import CFG
+
+        CFG.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CFG.DEBUG_DIR / "voice_identity_debug.txt", "a", encoding="utf-8") as f:
+            f.write(str(message).rstrip() + "\n")
+    except Exception:
+        pass
+
+
 def _load_sounddevice():
     global _sd, _sounddevice_error
     if _sd is not None:
@@ -56,6 +67,9 @@ class STTEngine:
         self._stream = None
         self._min_rms = float(os.environ.get("PIPER_STT_MIN_RMS", "50"))
         self._sample_rate = 16000
+        self._last_voice_match = None
+        self._active_voice_user_id = ""
+        self._active_voice_user_unknown = True
         
     def _load_model(self):
         if self.model:
@@ -107,6 +121,7 @@ class STTEngine:
 
         self._audio_data = []
         self._recording = True
+        self._last_voice_match = None
 
         def _callback(indata, frames, time, status):
             if self._recording:
@@ -187,27 +202,59 @@ class STTEngine:
                         embedding = engine.extract_embedding(self._last_audio_samples)
                         if embedding is not None:
                             # Check if any user is being enrolled
-                            from memory.user_runtime import get_user_runtime
-                            runtime = get_user_runtime()
-                            current_profile = runtime.active_profile()
+                            current_user_id = str(getattr(self, "_active_voice_user_id", "") or "").strip()
+                            current_is_unknown = bool(getattr(self, "_active_voice_user_unknown", True))
                             
-                            if not current_profile.is_unknown and not current_profile.is_admin:
-                                # User is known — add to enrollment if in progress
-                                if engine.is_enrolling(current_profile.user_id):
-                                    engine.add_enrollment_sample(current_profile.user_id, embedding)
+                            if current_user_id and not current_is_unknown and engine.is_enrolling(current_user_id):
+                                completed = engine.add_enrollment_sample(current_user_id, embedding)
+                                _log_voice_debug(
+                                    f"enrollment_sample user={current_user_id} completed={completed}"
+                                )
+                            else:
+                                matched_user, similarity = engine.match(embedding)
+                                strict_user = matched_user
+                                strict_similarity = similarity
+                                if matched_user is None and current_is_unknown and hasattr(engine, "best_match"):
+                                    candidate_user, candidate_similarity = engine.best_match(embedding)
+                                    if (
+                                        candidate_user
+                                        and float(candidate_similarity or 0.0) >= float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD)
+                                    ):
+                                        matched_user = candidate_user
+                                        similarity = candidate_similarity
+                                    _log_voice_debug(
+                                        "match "
+                                        f"mode=first_turn_infer active={current_user_id or 'unknown'} "
+                                        f"strict_user={strict_user or 'none'} strict_score={float(strict_similarity or 0.0):.3f} "
+                                        f"best_user={candidate_user or 'none'} best_score={float(candidate_similarity or 0.0):.3f} "
+                                        f"threshold={float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD):.3f} "
+                                        f"selected={matched_user or 'none'}"
+                                    )
                                 else:
-                                    # Already enrolled — verify match
-                                    matched_user, similarity = engine.match(embedding)
-                                    # Result handled by caller / UI layer
-                                    self._last_voice_match = (matched_user, similarity)
-            except Exception:
-                pass  # Never block STT for voice recognition failure
+                                    _log_voice_debug(
+                                        "match "
+                                        f"mode=strict active={current_user_id or 'unknown'} "
+                                        f"selected={matched_user or 'none'} score={float(similarity or 0.0):.3f}"
+                                    )
+                                # Result handled by caller / UI layer.
+                                self._last_voice_match = (matched_user, similarity)
+            except Exception as exc:
+                _log_voice_debug(f"error {type(exc).__name__}: {exc}")
             
             return text
             
         except Exception as e:
             _LOG.warning("[STT] Error: %s", e)
             return ""
+
+    def set_active_voice_profile(self, user_id: str, *, is_unknown: bool = False) -> None:
+        self._active_voice_user_id = str(user_id or "").strip()
+        self._active_voice_user_unknown = bool(is_unknown)
+
+    def consume_last_voice_match(self):
+        result = self._last_voice_match
+        self._last_voice_match = None
+        return result
 
 _engine = None
 

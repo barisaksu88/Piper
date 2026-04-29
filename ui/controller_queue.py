@@ -72,6 +72,10 @@ def pump_ui_queue(controller) -> None:
             controller.refresh_interaction_state()
             continue
         if kind == "active_user_changed":
+            try:
+                controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
+            except Exception:
+                pass
             controller.refresh_active_user_meta()
             controller._refresh_chat_ui()
             controller.refresh_interaction_state()

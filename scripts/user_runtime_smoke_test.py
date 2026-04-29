@@ -78,6 +78,12 @@ def _runtime_checks() -> dict[str, object]:
         relation_phrase_result = runtime.observe_typed_identity_hint("i am his friend, do you know baris?")
         profile_after_relation_phrase = runtime.active_profile()
         fake_profile_after_relation_phrase = runtime.registry.profile_for_id("his_friend")
+        reserved_phrase_result = runtime.observe_typed_identity_hint("I'm still calibrating")
+        profile_after_reserved_phrase = runtime.active_profile()
+        reserved_profile = runtime.registry.profile_for_id("still_calibrating")
+        mood_phrase_result = runtime.observe_typed_identity_hint("not bad")
+        profile_after_mood_phrase = runtime.active_profile()
+        mood_profile = runtime.registry.profile_for_id("not")
 
         switch_result = runtime.observe_typed_identity_hint("I'm Max")
         standard_profile = runtime.active_profile()
@@ -176,6 +182,9 @@ def _runtime_checks() -> dict[str, object]:
         restart_active_after_corrective = restarted.active_profile().user_id
         restart_unknown_memory_path = restarted.current_memory_path()
         restart_unknown_summary_path = restarted.current_conversation_summary_path()
+        voice_result = restarted.activate_voice_match("baris", 0.94)
+        voice_active_profile = restarted.active_profile()
+        voice_admin_unlocked = restarted.is_admin_unlocked()
 
         return {
             "startup_profile": startup_profile,
@@ -205,6 +214,10 @@ def _runtime_checks() -> dict[str, object]:
                 "unknown_not_persisted_in_registry": "unknown" not in (users_payload.get("users") or {}),
                 "relation_phrase_stays_unknown": relation_phrase_result is None and profile_after_relation_phrase.user_id == "unknown",
                 "relation_phrase_does_not_create_fake_user": fake_profile_after_relation_phrase is None,
+                "reserved_voice_status_phrase_stays_unknown": reserved_phrase_result is None and profile_after_reserved_phrase.user_id == "unknown",
+                "reserved_voice_status_phrase_not_persisted": reserved_profile is None,
+                "mood_phrase_stays_unknown": mood_phrase_result is None and profile_after_mood_phrase.user_id == "unknown",
+                "mood_phrase_not_persisted_as_user": mood_profile is None,
                 "statement_switches_to_max": bool(getattr(switch_result, "switched", False)) and standard_profile.user_id == "max",
                 "max_created": bool(getattr(switch_result, "created", False)),
                 "generic_relation_attaches_to_identified_max": generic_relation_result is None and standard_profile.user_id == "max",
@@ -232,6 +245,9 @@ def _runtime_checks() -> dict[str, object]:
                 "corrective_baris_statement_keeps_unknown_active": restart_active_after_corrective == "unknown",
                 "restart_clears_unknown_memory": not restart_unknown_memory_path.exists(),
                 "restart_clears_unknown_summary": not restart_unknown_summary_path.exists(),
+                "voice_match_baris_unlocks_admin": bool(getattr(voice_result, "switched", False))
+                and voice_active_profile.user_id == "admin_baris"
+                and bool(voice_admin_unlocked),
             },
             "auth_checks": {
                 "set_password": bool(set_password.success),

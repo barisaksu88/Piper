@@ -1061,14 +1061,23 @@ def _run_route_core(orc) -> None:
     prompt_path = CFG.PROMPTS_DIR / "secretary.txt"
     sys_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else FALLBACK_SECRETARY
     sys_prompt = _merge_secretary_system_prompt(sys_prompt, latest_runtime_context)
-    # Inject identity extraction instruction when active user is unknown
+    # Keep speaker identity extraction in the Router, not Persona. This must
+    # run even after a voice guess because explicit speech/text can correct a
+    # low-confidence active profile.
     user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
-    if user_runtime is not None and getattr(user_runtime.active_profile(), "is_unknown", False):
+    if user_runtime is not None:
+        active_profile = user_runtime.active_profile()
+        active_label = "UNKNOWN" if getattr(active_profile, "is_unknown", False) else f"{active_profile.name} [{active_profile.user_id}]"
         sys_prompt += (
             "\n\n## SPEAKER IDENTITY\n"
-            "The active user is currently UNKNOWN. "
-            "If the user's message contains a personal name introduction, "
-            'include "extracted_identity_name": "Name" in your JSON response.'
+            f"The active user is currently {active_label}. "
+            "If and only if the latest user message is clearly introducing who is speaking, "
+            "include an identity_intent object in your JSON response, for example: "
+            '{"identity_intent":{"is_introduction":true,"name":"Max","relation_to_admin":"friend","confidence":"high"}}. '
+            "Also emit identity_intent when the latest user message explicitly corrects the active speaker, "
+            "such as \"I'm not Baris, I'm Max\" or \"I'm Jim\" while another user is active. "
+            "For correction phrases like \"I'm not British, I'm Jim\", use the asserted speaker name after the correction, not the negated description. "
+            "Do not emit identity_intent for ordinary replies or status phrases like 'not bad', 'fine', 'okay', 'sure', or 'I am tired'."
         )
     messages = [{"role": "system", "content": sys_prompt}]
     messages.append(
@@ -1100,25 +1109,28 @@ def _run_route_core(orc) -> None:
                 cancel_token=orc.cancel_token,
             )
         orc.ui.put(("agent_log", f"   -> Secretary Raw: {raw}"))
-        # Parse identity extraction from raw JSON before validation strips it
-        try:
-            raw_payload = json.loads(raw)
-            extracted_name = str(raw_payload.get("extracted_identity_name") or "").strip()
-        except Exception:
-            extracted_name = ""
-        if extracted_name and user_runtime is not None and getattr(user_runtime.active_profile(), "is_unknown", False):
-            try:
-                result = user_runtime.observe_typed_identity_hint(extracted_name)
-                if getattr(result, "switched", False):
-                    orc.ui.put(("agent_log", f"   -> Router extracted identity: {extracted_name}. Switched user."))
-                    orc.ui.put(("active_user_changed", ""))
-            except Exception as exc:
-                orc.ui.put(("agent_log", f"   -> Identity switch from router failed: {exc}"))
         try:
             parsed: RouteDecision = RouterBoundary.validate(raw)
         except BoundaryValidationError as exc:
             parsed = exc.fallback or RouterBoundary.fallback()
             orc.ui.put(("agent_log", f"   -> Router validation failed: {exc}. Applying CHAT fallback."))
+        identity_intent = dict((parsed or {}).get("identity_intent") or {})
+        if (
+            bool(identity_intent.get("is_introduction"))
+            and user_runtime is not None
+        ):
+            identity_name = str(identity_intent.get("name") or "").strip()
+            relation_hint = str(identity_intent.get("relation_to_admin") or "").strip()
+            if identity_name:
+                try:
+                    result = user_runtime.apply_router_identity_intent(identity_name, relation_hint=relation_hint)
+                    if getattr(result, "switched", False):
+                        orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Switched user."))
+                        orc.ui.put(("active_user_changed", ""))
+                    elif getattr(result, "requires_password", False) or getattr(result, "requires_identity_clarification", False):
+                        orc.ui.put(("chat_append", {"role": "system", "content": str(getattr(result, "message", "") or "")}))
+                except Exception as exc:
+                    orc.ui.put(("agent_log", f"   -> Identity switch from router failed: {exc}"))
         normalized = normalize_route_decision(parsed, orc.user_msg, router_history)
         followup_resolved = _resolve_followup_route_with_llm(orc, normalized, followup_history)
         if followup_resolved is not None and followup_resolved != normalized:
@@ -2095,6 +2107,13 @@ def _persona_recall_allowed(
     decision = str((getattr(orc, "route_decision", {}) or {}).get("decision") or "").strip().upper()
     if decision != "CHAT":
         return False
+    user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    if user_runtime is not None:
+        try:
+            if getattr(user_runtime.active_profile(), "is_unknown", False):
+                return False
+        except Exception:
+            pass
     return True
 
 
@@ -2437,6 +2456,14 @@ def _run_persona_core(orc) -> None:
 
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
     tail_system_parts = list(persona_directives.tail_system_blocks)
+    if str(getattr(getattr(orc, "_cfg", None), "input_modality", "") or "").strip().lower() == "voice":
+        tail_system_parts.append(
+            "[INPUT MODALITY]\n"
+            "The current user turn came from microphone speech recognition.\n"
+            "If [ACTIVE USER] is still unknown, do not ask who is speaking just because identity is unknown; "
+            "voice recognition is handled by the runtime before Persona.\n"
+            "Answer the user's actual message normally, using only public/session context and no persistent personal memory."
+        )
     if not allow_persona_recall:
         tail_system_parts.append(
             "[MEMORY RECALL RULE]\n"
