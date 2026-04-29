@@ -123,6 +123,25 @@ Out-of-scope findings:
 - Never rewrite or delete legacy fallback code during migrations until burn-in is complete.
 - Before asking GPT for review, push the branch or provide the exact commit SHA.
 
+### High-Risk WIP Branch Rule
+
+High-risk runtime work must not continue directly on `main` while it is known buggy or manually unverified.
+
+High-risk includes:
+- identity, authentication, permissions, privacy, or memory isolation
+- voice recognition / speaker verification
+- file mutation safety
+- routing, orchestrator, LangGraph, executor, or verification flow
+- UI/controller state that can affect user identity or tool execution
+
+If such work is pushed before it is stable:
+1. stop treating `main` as shippable
+2. immediately create a stabilization branch from that commit
+3. continue fixes only on that branch
+4. merge back only after GPT review and local test/manual evidence
+
+`main` should represent the latest reviewed baseline, not a parking lot for half-working runtime surgery.
+
 ---
 
 ## 6. Scope Control Rules
