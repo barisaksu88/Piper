@@ -35,6 +35,98 @@ Pattern hints are injected as a `[PATTERN HINTS]` block — soft suggestions, no
 
 ---
 
+**Release gate script**
+
+Add a local release gate command that summarizes whether a branch is reviewable or blocked.
+
+Candidate file: `scripts/release_gate.py`
+
+Checks:
+- current branch and whether high-risk WIP is on `main`
+- dirty working tree status
+- staged/private/runtime files
+- required smoke/evidence commands for touched domains
+- docs changed when behavior changed
+- summary verdict: `SHIP`, `NEEDS EVIDENCE`, or `BLOCKED`
+
+Why: prevents broad, weakly verified work from landing quietly.
+
+---
+
+**Repo hygiene checker**
+
+Add a focused checker for accidental runtime/private/local files before commit.
+
+Candidate file: `scripts/check_repo_hygiene.py`
+
+Should flag:
+- `data/debug/`
+- runtime JSON/state files
+- voice embeddings
+- `.claude` or other agent-local state
+- local scratch scripts
+- model/cache artifacts
+- unexpectedly large files
+
+Why: keeps the repo clean as Piper grows more stateful.
+
+---
+
+**Evidence ledger convention**
+
+Add `notes/evidence/` as the place to record what risky branches actually proved.
+
+Example:
+- `notes/evidence/voice-identity.md`
+
+Each ledger should include:
+- branch
+- goal
+- test command
+- result
+- manual test performed
+- observed behavior
+- unresolved risk
+- reviewer verdict
+
+Known issues say what is broken. Evidence ledgers say what has been proven.
+
+---
+
+**Config reference**
+
+Create `docs/CONFIG_REFERENCE.md` to document environment flags, defaults, and risk notes.
+
+Suggested groups:
+- identity / privacy
+- LangGraph
+- executor limits
+- voice / STT / TTS
+- debug flags
+- search / browser / computer-use
+- memory / retrieval
+
+Why: prevents bugs caused by forgotten flags, stale defaults, or mystery switches.
+
+---
+
+**Startup self-check**
+
+Add a startup health check so Piper reports environment problems at boot.
+
+Checks:
+- Windows runtime `.venv` sanity
+- required directories
+- model paths
+- llama server config
+- voice dependencies available or cleanly disabled
+- LangGraph checkpoint DB accessible
+- unsafe runtime leftovers detected
+
+Why: catches broken environment state before the user hits weird runtime behavior.
+
+---
+
 **Voice Recognition — Passive User Identification**
 
 Piper identifies who's speaking from voice alone, without asking the user to say anything special. Recording and matching happen in the background during normal STT operation.
