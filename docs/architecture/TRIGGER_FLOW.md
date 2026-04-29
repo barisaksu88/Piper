@@ -1347,6 +1347,76 @@ Appends structured trace lines to `data/debug/langgraph_trace.jsonl` with stage 
 
 ---
 
+## Appendix: Engine vs. Utility
+
+### What Is an Engine
+
+An **engine** self-registers behavior via the hook or interceptor registry (`@register_hook`, `@register_tail_block`, `@register_route_interceptor`) so that orchestrator/executor/prompt layers invoke it indirectly through the registry, not by direct import and explicit call. Adding or removing an engine does not require editing `orchestrator_phases.py`, `route_normalizer.py`, or `prompt_context.py`.
+
+A **utility** is imported and called directly by the orchestrator, executor, or prompt layer. It is tightly coupled to its caller.
+
+**Important nuance:** Self-registering engines still need their module imported somewhere so decorators execute (usually in `core/engines/__init__.py` or via lazy import). The key distinction is **no feature-specific call sites** in orchestrator/route/prompt layers.
+
+**Hybrid components:** A component may act as both an engine and a utility. In such cases, only the registry-driven behavior is considered "engine behavior"; direct calls remain utility behavior.
+
+### Components Using the Registry (Live)
+
+These files register hooks, tail blocks, or route interceptors at module load time:
+
+| Component | Registration Type | File |
+|-----------|----------------|------|
+| ChangeJournal | `@register_hook("on_task_verified")` | `core/engines/change_journal.py` |
+| ConversationCompressor | `@register_hook` | `core/engines/conversation_compressor.py` |
+| ContextPackEngine | `@register_tail_block` | `core/engines/context_pack.py` |
+| ProactiveMonitor | `@register_hook`, `@register_tail_block`, `@register_route_interceptor` | `core/engines/proactive_monitor.py` |
+| StatsCollector | `@register_hook("on_pre_route")` | `core/engines/stats_collector.py` |
+| File target confirmation | `@register_hook` | `core/engines/file_target_confirmation.py` |
+| Turn explanation | `@register_hook` | `core/engines/turn_explanation.py` |
+| Prompt context hooks | `@register_hook` | `core/prompt_context.py` |
+
+**Note:** Some of these components also expose direct-call functionality; classification is based on how behavior is integrated, not file location.
+
+### Directly-Called Utilities (Live)
+
+These are imported and called explicitly by orchestrator/executor/prompt layers:
+
+| Utility | Called From | File |
+|---------|-------------|------|
+| SummaryEngine | `orchestrator_phases.py` | `core/engines/summary.py` |
+| VerificationEngine | `orchestrator_phases.py` | `core/engines/verification.py` |
+| FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/engines/file_work.py` |
+| FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
+| RouteClarifier | `route_normalizer.py` | `core/engines/route_clarity.py` |
+| StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
+| ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
+| ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
+| RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/engines/rollback_engine.py` |
+
+**Note:** Some of these live in `core/engines/` for historical reasons but function as utilities. Cleanup target: Phase 8+.
+
+### Future Features: Use the Registry
+
+New features that trigger on lifecycle events should self-register from day one. This requires:
+
+1. A hook or interceptor exists in `core/feature_hooks.py` or `core/engines/context_pack.py`
+2. The new component registers against it
+3. No feature-specific call sites are added to orchestrator/executor/prompt code
+
+If the needed hook does not exist, it must be added at the **hook system boundary** (central registry + fire point), not as a feature-specific call site. This prevents drift:
+
+```python
+# WRONG — do not do this
+if feature_x:
+    do_thing()
+
+# RIGHT — add to registry, fire from existing hook point
+@register_hook("on_turn_end")
+def _feature_x_behavior(orc):
+    do_thing()
+```
+
+---
+
 ## 14. TTS Pipeline
 
 Documents the current text-to-speech flow from persona output to audio playback. This is not a staged change — it describes the live system as built.

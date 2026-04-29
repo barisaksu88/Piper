@@ -1,161 +1,269 @@
 # Piper Development Workflow
 
-**Version:** 1.0  
-**Date:** 2026-04-27  
-**Status:** Active — reflects current tooling reality
+**Version:** 2.0  
+**Status:** Active — multi-agent assisted development doctrine  
+**Primary rule:** Local tests, harnesses, logs, and Git diffs outrank every model opinion.
 
 ---
 
-## Toolchain
+## 1. Purpose
 
-| Agent | Role | Access | When to Use |
-|-------|------|--------|-------------|
-| **Kimi (Web)** | Architect, reviewer, spec writer | GitHub, web search, file analysis | Any task requiring cross-file reasoning, repo-wide analysis, or planning |
-| **Kimi Code (VS)** | Local implementation, daily driver | Local filesystem, terminal, IDE | Applying patches, running tests, refactoring, inline edits |
-| **Codex** | Overflow specialist | Cloud API, metered | When Kimi Code is stuck, or for complex algorithm generation |
+This document defines how Baris, GPT, Kimi Web, Kimi Code, and Codex coordinate Piper development.
 
-**Dropped:** GLM (redundant with Kimi web), Kimi Claw (unreliable).
+New GPT sessions should read this file first.
+
+The goal is controlled progress without model-driven scope creep, while still allowing agents to discover useful adjacent issues. Agents are encouraged to look broadly, but they must edit narrowly and report discoveries rather than silently implement them.
 
 ---
 
-## The 3-Phase Loop
+## 2. Agent Roles
 
-### Phase 1: Intent → Spec (Kimi Web)
-
-**You:** State your intention in plain language.  
-*Example: "I want to remove the Codex engineering support module and harden FILE_WORK truthfulness."*
-
-**Kimi Web does:**
-1. Inspects the relevant files on GitHub (or you upload them)
-2. Writes a surgical spec containing:
-   - **Files to touch** (with paths)
-   - **Current code → Desired code** (with exact context strings or line-number ranges)
-   - **Files to delete** (if any)
-   - **Guardrails:** what NOT to touch (scope boundaries)
-   - **Test verification commands**
-
-**Output:** A single copy-pasteable prompt block for Kimi Code.
+| Agent | Primary Role | Use For | Do Not Use For |
+|-------|-------------|---------|----------------|
+| **Baris** | Product owner and final human authority | Choosing goals, running Piper locally, approving risky changes, deciding when to merge | Manually patching code that an agent should handle |
+| **GPT** | Release captain, final reviewer, doctrine guardrail | Sequencing work, reviewing pushed diffs/PRs, checking doctrine alignment, writing strict prompts for Kimi Code or Codex, deciding whether work is SHIP / FIX / SPLIT / REVERT / NEEDS EVIDENCE / SCOUT | Uncontrolled direct implementation when Kimi Code/Codex are already assigned, or replacing test evidence with opinion |
+| **Kimi Web** | Scout, broad repo analyst, alternate architect, second-opinion reviewer | Fast repo-wide scouting, cross-file discovery, alternative architecture proposals, checking whether GPT/Kimi Code missed likely files, project-management style analysis before implementation | Final merge authority, declaring work "done" without tests/diffs, or overriding GPT review/test evidence |
+| **Kimi Code** | High-limit local implementer | Large coding tasks, refactors, local file edits, running tests, iterative implementation | Unsupervised architecture decisions, skipping phases, merging without review |
+| **Codex** | Corrective debugger and final wiring specialist | Fixing what Kimi Code missed, high-risk flow/state/orchestrator bugs, subtle integration failures, final pass on fragile behavior | Routine bulk coding when Kimi Code can handle it |
+| **Local Harnesses / Tests** | Truth source | Proving behavior, catching regressions, validating migration phases | Being ignored because a model says "looks good" |
 
 ---
 
-### Phase 2: Local Implementation (Kimi Code)
+## 3. Default Development Loop
 
-**You:** Paste the prompt block into Kimi Code (VS) verbatim. Do not paraphrase.
-
-**Kimi Code does:**
-1. Reads the specified local files
-2. Applies the exact changes from the spec
-3. Runs the specified tests
-4. Reports back: pass/fail per test, plus the final diff or commit SHA
-
-**You:** Copy-paste Kimi Code's output (test results + diff summary) back to Kimi Web.
-
----
-
-### Phase 3: Review & Ship (Kimi Web)
-
-**Kimi Web does:**
-1. Reviews the diff for correctness, completeness, and scope creep
-2. Flags any issues (e.g., "This hunk adds behavior not in the spec")
-3. If clean: says **"ship it"**
-4. If issues: writes a correction prompt for Kimi Code (back to Phase 2)
-
-**You:** Commit and push when Kimi Web approves.
-
----
-
-## Communication Rules
-
-### Between You and Kimi Web
-- **Intent only.** Do not describe implementation details unless you have a specific preference.
-- **Share results, not interpretations.** Paste raw test output and diffs. Kimi Web will interpret.
-- **Upload files if GitHub is behind.** If your local branch has un-pushed changes, zip and upload the relevant files.
-
-### Between You and Kimi Code
-- **Copy-paste only.** Kimi Code receives prompts written by Kimi Web. Do not rephrase.
-- **Report back verbatim.** When Kimi Code finishes, copy its full output (diff + test results) back to Kimi Web.
-
-### Codex Overflow Rule
-Use Codex only when:
-1. Kimi Code gives 3 consecutive unsatisfactory answers on the same bug
-2. You need a complex algorithm written from scratch (e.g., "implement a streaming JSON parser")
-3. You have spare API credits and want a second opinion
-
-**Default:** Kimi Code handles everything. Codex is the exception.
-
----
-
-## Prompt Format (What Kimi Web Produces)
-
-Every prompt for Kimi Code follows this template:
+1. Baris chooses a goal.
+2. GPT converts it into a scoped task or prompt.
+3. Optional: Kimi Web scouts the repo or critiques the approach when broad analysis is useful.
+4. Kimi Code implements locally.
+5. Baris runs tests/harnesses and inspects obvious behavior.
+6. If Kimi Code misses wiring or creates subtle breakage, Codex performs corrective debugging.
+7. Baris pushes branch/commit to GitHub.
+8. GPT reviews the diff, docs, tests, scope, and any Kimi Web findings.
+9. GPT decides one of:
+   - **SHIP**
+   - **FIX** with Kimi Code
+   - **ESCALATE** to Codex
+   - **SPLIT**
+   - **REVERT**
+   - **NEEDS EVIDENCE**
+   - **SCOUT** with Kimi Web
+10. Only after review does Baris merge or continue.
 
 ```
-TASK: [One-line summary]
-
-FILE: [path/to/file.py]
-EDIT 1 (~line N, in function_name):
-Change:
-    [exact old code block]
-To:
-    [exact new code block]
-
-EDIT 2 (~line N, in function_name):
-Change:
-    [exact old code block]
-To:
-    [exact new code block]
-
-GUARDRAIL: [What not to touch]
-
-COMMIT:
-git add [files]
-git commit -m "[conventional commit message]"
-git push origin [branch]
-
-TESTS TO RUN:
-[exact commands]
+Baris goal
+    │
+    ▼
+GPT → scoped task / prompt
+    │
+    ├─→ Kimi Web (optional scout / critique)
+    │
+    ▼
+Kimi Code → local implementation
+    │
+    ▼
+Baris → tests / harnesses / local check
+    │
+    ├─→ breakage? → Codex → corrective debug
+    │
+    ▼
+Baris → push to GitHub
+    │
+    ▼
+GPT → review diff + docs + tests + scope
+    │
+    ▼
+SHIP / FIX / ESCALATE / SPLIT / REVERT / NEEDS EVIDENCE / SCOUT
+    │
+    ▼
+Baris → merge or continue
 ```
 
 ---
 
-## Scope Discipline
+## 4. Controlled Exploration Policy
 
-| Violation | Example |
-|-----------|---------|
-| **Scope creep** | Adding a new chat-behavior feature inside a commit titled "fix error handling" |
-| **Doc drift** | Implementing a feature but not updating TRIGGER_FLOW.md or AGENTS.md |
-| **Test gap** | Shipping code without running the smoke tests listed in the spec |
+**Explore broadly. Edit narrowly. Report discoveries.**
 
-**Prevention:** Kimi Web's guardrails block scope creep. If Kimi Code adds unrequested behavior, Kimi Web flags it during Phase 3 review.
+Piper development does not forbid agents from looking beyond the immediate task. Good agents often find adjacent failures, missing tests, stale docs, or better implementation paths. The rule is not "never go out of scope"; the rule is "never silently implement out-of-scope changes."
+
+**Allowed:**
+- Reading related files
+- Tracing call chains
+- Identifying adjacent bugs
+- Proposing follow-up tasks
+- Reporting better approaches
+- Recommending additional tests/docs
+
+**Not allowed without approval:**
+- Editing unrelated files
+- Changing behavior outside the task
+- Deleting fallback paths
+- Mixing cleanup with feature work
+- Silently expanding the commit
+- Auto-advancing to the next phase
+
+**Required report section:**
+
+```
+Out-of-scope findings:
+- finding
+- evidence
+- recommended follow-up
+- whether it blocks current task
+```
 
 ---
 
-## Onboarding a New Session
+## 5. Branch and Commit Discipline
 
-If you (or a future collaborator) start a new session with Kimi Web:
-
-1. **State the current branch:** *"Working on `langgraph-runtime` branch, Piper repo at github.com/barisaksu88/Piper"*
-2. **State the current tooling:** *"Using Kimi Code for local implementation, Codex for overflow only."*
-3. **Share the relevant commit:** *"Latest commit is `b2bd9a2` — Codex removal + truthfulness hardening."*
-
-Kimi Web will read this document (if you link it) and immediately understand the workflow.
-
----
-
-## Doc Alignment Checklist
-
-After any significant feature ships, Kimi Web updates:
-- [ ] `docs/architecture/TRIGGER_FLOW.md` — add §13 entry for new runtime behavior
-- [ ] `AGENTS.md` — if behavior doctrine changes
-- [ ] `docs/ROADMAP.md` — mark item as shipped, move to §13 in TRIGGER_FLOW
-- [ ] This document (`DEVELOPMENT_WORKFLOW.md`) — if the workflow itself changes
+- Prefer feature branches for non-trivial work.
+- One conceptual change per commit.
+- Do not mix architecture migration, feature work, and cleanup in one commit.
+- Commit messages should be conventional and boring.
+- Never rewrite or delete legacy fallback code during migrations until burn-in is complete.
+- Before asking GPT for review, push the branch or provide the exact commit SHA.
 
 ---
 
-## Current Known State (Auto-updated per session)
+## 6. Scope Control Rules
 
-**Branch:** `main`  
-**Latest commit:** `c96337c` — Archive superseded Three-Agent Flow document  
-**Previous:** `ad10070` — Remove stale Codex references; prune ENGINEERING_SUPPORT_RULE  
-**Rollback tag:** `v1.0-stable-pre-langgraph` on origin  
-**Status:** Post-hygiene complete. Agentic spine rebuilt. Ready for new feature work.
+- Broad inspection is allowed.
+- Narrow implementation is required.
+- No opportunistic refactors without approval.
+- No "while I'm here" edits.
+- No phase skipping.
+- No deleting old paths until feature-flag fallback and burn-in prove safety.
+- If an agent changes files outside the task scope, it must justify why they were required.
+- If tests were not run, the work is not done.
+- If behavior changed but docs did not, the work is incomplete.
+
+---
+
+## 7. Evidence Required After Each Task
+
+**Kimi Code or Codex must report:**
+- Files changed
+- Summary of changes
+- Tests run
+- Exact pass/fail output
+- Known failures or skipped tests
+- Commit SHA if committed
+- Any behavior that could not be verified
+- Out-of-scope findings, if any
+
+**GPT review must check:**
+- Diff scope
+- Doctrine alignment
+- Test evidence
+- User-facing behavior risk
+- Rollback path
+- Whether docs need updates
+- Whether Kimi Web scouting is needed before deciding
+
+---
+
+## 8. When to Use Codex
+
+**Use Codex when:**
+- Kimi Code gives repeated bad fixes on the same bug
+- A change touches orchestration, routing, LangGraph, executor state, permissions, file safety, or verification
+- Tests fail but the cause is not obvious
+- The system works locally but behavior is subtly wrong
+- Final wiring is needed after a broad Kimi Code implementation
+
+**Do not use Codex for:**
+- Routine docs
+- Simple renames
+- Bulk mechanical edits
+- First-pass implementation when Kimi Code is available
+
+---
+
+## 9. When to Use Kimi Web
+
+**Use Kimi Web when:**
+- Broad repo scouting is useful
+- GPT or Baris wants an independent second opinion
+- You want alternative architecture proposals
+- You want fast cross-file discovery before implementation
+- You want project-manager-style analysis, risk assessment, or roadmap suggestions before GPT's final review
+
+Kimi Web may suggest plans, identify missing files, or critique work. GPT remains the final reviewer/release captain before merge.
+
+---
+
+## 10. LangGraph / Orchestrator Migration Rules
+
+- Phase-based only.
+- Phase 0 golden harness must exist before risky migration.
+- Golden corpus and semantic comparisons protect behavior.
+- Legacy orchestrator fallback must remain until burn-in is complete.
+- LangGraph and legacy runtimes must produce equivalent outcomes.
+- Do not delete `orchestrator_phases.py` until explicit burn-in criteria are met.
+- Migration changes must not be mixed with unrelated feature work.
+
+Key files:
+- `core/orchestrator.py`
+- `core/orchestrator_phases.py`
+- `core/orchestrator_graph_builder.py`
+- `core/graph_nodes.py`
+- `docs/architecture/TRIGGER_FLOW.md`
+
+---
+
+## 11. Doctrine Alignment
+
+After significant changes, check:
+- `AGENTS.md`
+- `docs/architecture/TRIGGER_FLOW.md`
+- `docs/ROADMAP.md`
+- `docs/DEVELOPMENT_WORKFLOW.md`
+
+- **TRIGGER_FLOW.md** describes runtime behavior.
+- **AGENTS.md** describes doctrine/operating rules.
+- **ROADMAP.md** tracks planned and shipped work.
+- **DEVELOPMENT_WORKFLOW.md** describes how the human + model toolchain works.
+
+---
+
+## 12. Review Outcomes
+
+GPT should label reviews as one of:
+
+- **SHIP** — safe to merge
+- **FIX** — targeted corrections needed
+- **SPLIT** — change is too broad and must be broken up
+- **REVERT** — unsafe or wrong direction
+- **NEEDS EVIDENCE** — tests/logs/diff insufficient
+- **SCOUT** — ask Kimi Web for broad analysis before deciding
+
+---
+
+## 13. New Session Onboarding
+
+A new GPT session should be started with:
+- Link to this file
+- Current branch
+- Latest commit SHA
+- What changed since last review
+- Test results if any
+- Current goal
+
+**Starter template:**
+
+> "Read docs/DEVELOPMENT_WORKFLOW.md first. You are acting as Piper release captain, final reviewer, and doctrine guardrail. Current branch: `<branch>`. Latest commit: `<sha>`. Goal: `<goal>`. Review against AGENTS.md and docs/architecture/TRIGGER_FLOW.md where relevant. Use Kimi Web as scout/second-opinion analyst when broad repo analysis is useful."
+
+---
+
+## 14. Anti-Patterns
+
+- **Model soup:** asking multiple agents to decide at once without a clear final reviewer
+- **Implementation without tests**
+- **Architecture rewrite hidden inside bugfix**
+- **Docs updated without code reality**
+- **Code changed without docs when behavior changes**
+- **Trusting summaries over diffs**
+- **Treating a green test as proof of full behavior if the test is too narrow**
+- **Letting autonomous agents continue to the next phase without human/GPT review**
+- **Silently implementing out-of-scope discoveries instead of reporting them**
+
