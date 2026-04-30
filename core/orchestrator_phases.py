@@ -1125,8 +1125,26 @@ def _run_route_core(orc) -> None:
                 try:
                     result = user_runtime.apply_router_identity_intent(identity_name, relation_hint=relation_hint)
                     if getattr(result, "switched", False):
+                        switched_profile = getattr(result, "profile", None)
+                        switched_name = str(getattr(switched_profile, "name", "") or identity_name).strip() or identity_name
+                        switched_user_id = str(getattr(switched_profile, "user_id", "") or "").strip()
+                        role_label = ""
+                        try:
+                            role_label = str(user_runtime.profile_role_label(switched_profile) or "").strip()
+                        except Exception:
+                            role_label = ""
+                        notice_parts = [
+                            "[SPEAKER IDENTITY UPDATED]",
+                            f"The runtime just identified the current speaker as {switched_name}"
+                            + (f" [{switched_user_id}]" if switched_user_id else "")
+                            + (f" ({role_label})" if role_label else "")
+                            + ".",
+                            "Acknowledge this naturally and continue answering the user's current message.",
+                            "Do not say a new session started; the existing transcript is being carried forward under the identified user.",
+                        ]
+                        orc.identity_switch_notice = "\n".join(notice_parts)
                         orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Switched user."))
-                        orc.ui.put(("active_user_changed", ""))
+                        orc.ui.put(("active_user_changed", {"preserve_transcript": True}))
                     elif getattr(result, "requires_password", False) or getattr(result, "requires_identity_clarification", False):
                         orc.ui.put(("chat_append", {"role": "system", "content": str(getattr(result, "message", "") or "")}))
                 except Exception as exc:
@@ -2456,6 +2474,9 @@ def _run_persona_core(orc) -> None:
 
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
     tail_system_parts = list(persona_directives.tail_system_blocks)
+    identity_switch_notice = str(getattr(orc, "identity_switch_notice", "") or "").strip()
+    if identity_switch_notice:
+        tail_system_parts.append(identity_switch_notice)
     if str(getattr(getattr(orc, "_cfg", None), "input_modality", "") or "").strip().lower() == "voice":
         tail_system_parts.append(
             "[INPUT MODALITY]\n"
@@ -2713,9 +2734,15 @@ def _run_persona_core(orc) -> None:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored after successful task outcome."))
             orc.next_stage = "FINISHED"
         else:
-            orc.ui.put(("agent_log", "   -> LOOPBACK DETECTED."))
-            orc.stats_collector.note_router_reroute(orc.turn_stats)
-            orc.next_stage = "ROUTE"
+            loopback_count = int(getattr(orc, "persona_router_loopback_retries", 0) or 0)
+            if loopback_count >= 1:
+                orc.ui.put(("agent_log", f"   -> LOOPBACK ignored after cap ({loopback_count})."))
+                orc.next_stage = "FINISHED"
+            else:
+                orc.persona_router_loopback_retries = loopback_count + 1
+                orc.ui.put(("agent_log", "   -> LOOPBACK DETECTED."))
+                orc.stats_collector.note_router_reroute(orc.turn_stats)
+                orc.next_stage = "ROUTE"
     else:
         orc.next_stage = "FINISHED"
 
