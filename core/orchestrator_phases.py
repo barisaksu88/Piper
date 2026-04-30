@@ -1134,12 +1134,12 @@ def _run_route_core(orc) -> None:
                         except Exception:
                             role_label = ""
                         notice_parts = [
-                            "[SPEAKER IDENTITY UPDATED]",
+                            "[VOICE IDENTITY EVENT]",
                             f"The runtime just identified the current speaker as {switched_name}"
                             + (f" [{switched_user_id}]" if switched_user_id else "")
                             + (f" ({role_label})" if role_label else "")
                             + ".",
-                            "Acknowledge this naturally and continue answering the user's current message.",
+                            "You may acknowledge this naturally if relevant.",
                             "Do not say a new session started; the existing transcript is being carried forward under the identified user.",
                         ]
                         orc.identity_switch_notice = "\n".join(notice_parts)
@@ -2135,6 +2135,44 @@ def _persona_recall_allowed(
     return True
 
 
+def _build_voice_identity_state_block(orc) -> str:
+    state = getattr(orc, "voice_identity_state", None)
+    if not isinstance(state, dict):
+        state = {}
+    current_speaker = str(state.get("current_speaker") or "").strip() or "unknown"
+    recognition_status = str(state.get("recognition_status") or "").strip().lower()
+    access_tier = str(state.get("access_tier") or "").strip().lower()
+    user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    if user_runtime is not None:
+        try:
+            profile = user_runtime.active_profile()
+            if getattr(profile, "is_unknown", False):
+                current_speaker = "unknown"
+                recognition_status = "unknown"
+                access_tier = "unknown"
+            else:
+                current_speaker = str(getattr(profile, "name", "") or getattr(profile, "user_id", "") or current_speaker)
+                access_tier = "admin" if user_runtime.is_admin_unlocked() else "public"
+                if recognition_status == "unknown":
+                    recognition_status = "confirmed"
+        except Exception:
+            pass
+    if recognition_status not in {"confirmed", "tentative", "unknown"}:
+        recognition_status = "unknown" if current_speaker.lower() == "unknown" else "confirmed"
+    if access_tier not in {"admin", "public", "unknown"}:
+        access_tier = "unknown"
+    return "\n".join(
+        [
+            "[VOICE IDENTITY STATE]",
+            f"Current speaker: {current_speaker}.",
+            f"Recognition status: {recognition_status}.",
+            f"Access tier: {access_tier}.",
+            "Use only this runtime-provided voice identity signal; do not invent identity changes.",
+            "If access tier is not admin, do not reveal admin/private memory.",
+        ]
+    )
+
+
 def _debug_log_stream(tokens, label: str):
     """Yield every token from *tokens* while emitting a debug log per token."""
     for token in tokens:
@@ -2474,6 +2512,7 @@ def _run_persona_core(orc) -> None:
 
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
     tail_system_parts = list(persona_directives.tail_system_blocks)
+    tail_system_parts.append(_build_voice_identity_state_block(orc))
     identity_switch_notice = str(getattr(orc, "identity_switch_notice", "") or "").strip()
     if identity_switch_notice:
         tail_system_parts.append(identity_switch_notice)

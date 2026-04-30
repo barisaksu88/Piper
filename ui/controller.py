@@ -789,6 +789,9 @@ class PiperController:
 
         input_modality = str(getattr(self, "_pending_input_modality", "typed") or "typed")
         self._pending_input_modality = "typed"
+        voice_identity_notice = str(getattr(self, "_pending_voice_identity_notice", "") or "").strip()
+        self._pending_voice_identity_notice = ""
+        voice_identity_state = self._build_voice_identity_state()
         return OrchestratorConfig(
             llm=self.llm,
             brain=self.agent_brain,
@@ -812,10 +815,38 @@ class PiperController:
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
             user_runtime=self.user_runtime,
             input_modality=input_modality,
+            voice_identity_notice=voice_identity_notice,
+            voice_identity_state=voice_identity_state,
             langgraph_resume_thread_id=str(langgraph_resume_thread_id or ""),
             langgraph_resume_checkpoint_id=str(langgraph_resume_checkpoint_id or ""),
             langgraph_resume_value=langgraph_resume_value,
         )
+
+    def _build_voice_identity_state(self) -> dict[str, str]:
+        try:
+            profile = self.user_runtime.active_profile()
+        except Exception:
+            return {"current_speaker": "unknown", "recognition_status": "unknown", "access_tier": "unknown"}
+        is_unknown = bool(getattr(profile, "is_unknown", False))
+        current_speaker = "unknown" if is_unknown else str(getattr(profile, "name", "") or getattr(profile, "user_id", "") or "unknown")
+        tracker = getattr(self, "_voice_drift_tracker", None)
+        drift_pending = bool(
+            isinstance(tracker, dict)
+            and (
+                int(tracker.get("candidate_count") or 0) > 0
+                or int(tracker.get("unknown_count") or 0) > 0
+            )
+        )
+        recognition_status = "unknown" if is_unknown else "tentative" if drift_pending else "confirmed"
+        try:
+            access_tier = "admin" if self.user_runtime.is_admin_unlocked() else "unknown" if is_unknown else "public"
+        except Exception:
+            access_tier = "unknown" if is_unknown else "public"
+        return {
+            "current_speaker": current_speaker,
+            "recognition_status": recognition_status,
+            "access_tier": access_tier,
+        }
 
     def _on_config_changed(self, changed_keys: list[str]) -> None:
         """Handle live config updates."""

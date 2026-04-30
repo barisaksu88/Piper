@@ -59,6 +59,74 @@ def _log_voice_identity_ui(message: str) -> None:
         pass
 
 
+def _voice_drift_confirmation_turns() -> int:
+    try:
+        return max(1, int(getattr(CFG, "VOICE_DRIFT_CONFIRMATION_TURNS", 3) or 3))
+    except Exception:
+        return 3
+
+
+def _reset_voice_drift_tracker(controller) -> None:
+    setattr(
+        controller,
+        "_voice_drift_tracker",
+        {
+            "from_user_id": "",
+            "candidate_user_id": "",
+            "candidate_count": 0,
+            "unknown_count": 0,
+            "admin_revoked": False,
+        },
+    )
+
+
+def _voice_drift_tracker(controller) -> dict:
+    tracker = getattr(controller, "_voice_drift_tracker", None)
+    if not isinstance(tracker, dict):
+        _reset_voice_drift_tracker(controller)
+        tracker = getattr(controller, "_voice_drift_tracker", {})
+    return tracker
+
+
+def _voice_target_profile(controller, user_id: str):
+    token = str(user_id or "").strip()
+    if not token:
+        return None
+    try:
+        registry = controller.user_runtime.registry
+        return registry.profile_for_id(token) or registry.resolve_profile(token)
+    except Exception:
+        return None
+
+
+def _set_voice_identity_notice(controller, text: str) -> None:
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    setattr(
+        controller,
+        "_pending_voice_identity_notice",
+        "\n".join(
+            [
+                "[VOICE IDENTITY EVENT]",
+                clean,
+                "Acknowledge this naturally and continue answering the user's current message.",
+            ]
+        ),
+    )
+
+
+def _announce_voice_identity_event(controller, text: str) -> None:
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    _set_voice_identity_notice(controller, clean)
+    try:
+        controller.safe_log(clean)
+    except Exception:
+        pass
+
+
 def _clear_conversation_summary_file() -> None:
     _clear_conversation_summary_file_at()
 
@@ -121,7 +189,12 @@ def _render_active_user_message(controller) -> str:
     return f"[UI] Active user: {profile.name} [{profile.user_id}; {role}]"
 
 
-def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False) -> None:
+def _apply_active_user_switch(
+    controller,
+    *,
+    previous_was_unknown: bool = False,
+    preserve_current_session: bool = False,
+) -> None:
     try:
         controller.tts.stop()
     except Exception:
@@ -133,7 +206,9 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
     # Privacy model: when switching from unknown to identified, preserve the
     # unknown-phase conversation as the new user's current transcript. Do not
     # insert a new-session marker; the conversation did not restart, ownership
-    # of the existing session was just resolved.
+    # of the existing session was just resolved. Admin voice revocation also
+    # keeps the visible transcript in place while moving future persistence out
+    # of admin/private memory.
     _captured_messages: list[dict[str, str]] = []
     if previous_was_unknown:
         try:
@@ -151,11 +226,12 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
                 controller.chat_state.persist_turn(msg["role"], msg["content"])
         except Exception:
             pass
-    elif not previous_was_unknown:
+    elif not previous_was_unknown and not preserve_current_session:
         controller.chat_state.begin_fresh_session(wipe_persistent=False)
-    controller.session_meta = "Session: active" if previous_was_unknown else "Session: fresh"
+    controller.session_meta = "Session: active" if (previous_was_unknown or preserve_current_session) else "Session: fresh"
     controller.stage_meta = ""
     controller.runtime_mode = "IDLE"
+    _reset_voice_drift_tracker(controller)
     controller.refresh_active_user_meta()
     _refresh_active_user_style(controller)
     controller.refresh_documents_view()
@@ -218,26 +294,152 @@ def _apply_voice_identity_match(controller, engine) -> None:
     except Exception:
         _log_voice_identity_ui(f"bad_match_payload match={match!r}")
         return
-    if not matched_user:
-        if decision_detail:
-            _log_voice_identity_ui(
-                "no_switch "
-                f"best_user={decision_detail.get('best_user') or 'none'} "
-                f"best_score={float(decision_detail.get('best_score') or 0.0):.3f} "
-                f"second_score={float(decision_detail.get('second_score') or 0.0):.3f} "
-                f"margin={float(decision_detail.get('margin') or 0.0):.3f} "
-                f"best_is_admin={str(bool(decision_detail.get('best_is_admin'))).lower()} "
-                f"threshold={float(decision_detail.get('threshold') or 0.0):.3f} "
-                f"margin_threshold={float(decision_detail.get('margin_threshold') or 0.0):.3f} "
-                f"final_decision={decision_detail.get('final_decision') or 'unknown'} "
-                f"reason={decision_detail.get('reason') or 'none'}"
-            )
-        else:
-            _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
-        return
+    if not matched_user and decision_detail:
+        _log_voice_identity_ui(
+            "no_switch "
+            f"best_user={decision_detail.get('best_user') or 'none'} "
+            f"best_score={float(decision_detail.get('best_score') or 0.0):.3f} "
+            f"second_score={float(decision_detail.get('second_score') or 0.0):.3f} "
+            f"margin={float(decision_detail.get('margin') or 0.0):.3f} "
+            f"best_is_admin={str(bool(decision_detail.get('best_is_admin'))).lower()} "
+            f"threshold={float(decision_detail.get('threshold') or 0.0):.3f} "
+            f"margin_threshold={float(decision_detail.get('margin_threshold') or 0.0):.3f} "
+            f"final_decision={decision_detail.get('final_decision') or 'unknown'} "
+            f"reason={decision_detail.get('reason') or 'none'}"
+        )
+    elif not matched_user:
+        _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
     try:
         old_profile = controller.user_runtime.active_profile()
         previous_was_unknown = getattr(old_profile, "is_unknown", False)
+        tracker = _voice_drift_tracker(controller)
+        target_profile = _voice_target_profile(controller, str(matched_user or ""))
+        target_user_id = str(getattr(target_profile, "user_id", "") or "").strip()
+
+        if not previous_was_unknown and matched_user:
+            if target_user_id == str(getattr(old_profile, "user_id", "") or ""):
+                _reset_voice_drift_tracker(controller)
+            else:
+                threshold_turns = _voice_drift_confirmation_turns()
+                prior_candidate = str(tracker.get("candidate_user_id") or "")
+                candidate_count = int(tracker.get("candidate_count") or 0)
+                candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
+                tracker.update(
+                    {
+                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                        "candidate_user_id": target_user_id,
+                        "candidate_count": candidate_count,
+                        "unknown_count": 0,
+                    }
+                )
+                if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
+                    controller.user_runtime.switch_active_user("unknown")
+                    _apply_active_user_switch(
+                        controller,
+                        previous_was_unknown=False,
+                        preserve_current_session=True,
+                    )
+                    tracker = _voice_drift_tracker(controller)
+                    tracker.update(
+                        {
+                            "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                            "candidate_user_id": target_user_id,
+                            "candidate_count": candidate_count,
+                            "unknown_count": 0,
+                            "admin_revoked": True,
+                        }
+                    )
+                    _log_voice_identity_ui("admin_revoked_on_voice_drift")
+                if candidate_count < threshold_turns:
+                    _log_voice_identity_ui(
+                        f"drift_pending from={getattr(old_profile, 'user_id', '')} "
+                        f"candidate={target_user_id or matched_user} count={candidate_count}/{threshold_turns}"
+                    )
+                    return
+                previous_was_unknown = False
+                matched_user = target_user_id or matched_user
+
+        elif not previous_was_unknown and not matched_user:
+            threshold_turns = _voice_drift_confirmation_turns()
+            unknown_count = int(tracker.get("unknown_count") or 0) + 1
+            tracker.update(
+                {
+                    "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                    "candidate_user_id": "",
+                    "candidate_count": 0,
+                    "unknown_count": unknown_count,
+                }
+            )
+            if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
+                controller.user_runtime.switch_active_user("unknown")
+                _apply_active_user_switch(
+                    controller,
+                    previous_was_unknown=False,
+                    preserve_current_session=True,
+                )
+                tracker = _voice_drift_tracker(controller)
+                tracker.update(
+                    {
+                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                        "candidate_user_id": "",
+                        "candidate_count": 0,
+                        "unknown_count": unknown_count,
+                        "admin_revoked": True,
+                    }
+                )
+                _log_voice_identity_ui("admin_revoked_on_voice_uncertainty")
+            if unknown_count >= threshold_turns:
+                if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
+                    controller.user_runtime.switch_active_user("unknown")
+                    _apply_active_user_switch(controller, previous_was_unknown=False)
+                _announce_voice_identity_event(
+                    controller,
+                    "I'm no longer confident who is speaking, so I'm treating this as an unknown speaker.",
+                )
+                _reset_voice_drift_tracker(controller)
+            else:
+                _log_voice_identity_ui(
+                    f"unknown_pending from={getattr(old_profile, 'user_id', '')} "
+                    f"count={unknown_count}/{threshold_turns}"
+                )
+            return
+
+        elif previous_was_unknown and tracker.get("from_user_id"):
+            threshold_turns = _voice_drift_confirmation_turns()
+            if matched_user and target_user_id:
+                prior_candidate = str(tracker.get("candidate_user_id") or "")
+                candidate_count = int(tracker.get("candidate_count") or 0)
+                candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
+                tracker.update(
+                    {
+                        "candidate_user_id": target_user_id,
+                        "candidate_count": candidate_count,
+                        "unknown_count": 0,
+                    }
+                )
+                if candidate_count < threshold_turns:
+                    _log_voice_identity_ui(
+                        f"post_revoke_drift_pending candidate={target_user_id} "
+                        f"count={candidate_count}/{threshold_turns}"
+                    )
+                    return
+                previous_was_unknown = False
+                matched_user = target_user_id
+            else:
+                unknown_count = int(tracker.get("unknown_count") or 0) + 1
+                tracker.update({"candidate_user_id": "", "candidate_count": 0, "unknown_count": unknown_count})
+                if unknown_count >= threshold_turns:
+                    _announce_voice_identity_event(
+                        controller,
+                        "I'm no longer confident who is speaking, so I'm treating this as an unknown speaker.",
+                    )
+                    _reset_voice_drift_tracker(controller)
+                else:
+                    _log_voice_identity_ui(f"post_revoke_unknown_pending count={unknown_count}/{threshold_turns}")
+                return
+
+        if not matched_user:
+            return
         margin = decision_detail.get("margin") if decision_detail else None
         result = controller.user_runtime.activate_voice_match(
             str(matched_user),
@@ -249,6 +451,16 @@ def _apply_voice_identity_match(controller, engine) -> None:
         return
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        if previous_was_unknown:
+            _announce_voice_identity_event(
+                controller,
+                f"I identified the current speaker as {result.profile.name}.",
+            )
+        else:
+            _announce_voice_identity_event(
+                controller,
+                f"I think {result.profile.name} is speaking now, so I switched to {result.profile.name}.",
+            )
         _log_voice_identity_ui(
             f"activated user={getattr(result.profile, 'user_id', matched_user)} score={float(similarity or 0.0):.3f}"
         )

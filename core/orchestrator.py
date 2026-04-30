@@ -68,6 +68,8 @@ class OrchestratorConfig:
     # -- User runtime (for identity extraction in router) --
     user_runtime: Any | None = None
     input_modality: str = "typed"
+    voice_identity_notice: str = ""
+    voice_identity_state: dict[str, str] | None = None
 
     # -- Paths --
     conversation_summary_path: Path | None = None
@@ -138,7 +140,8 @@ class Orchestrator:
         self.synthetic_user_turn = False
         self.pending_file_target_confirmation: dict | None = None
         self.pending_stage_pause: dict | None = None
-        self.identity_switch_notice: str = ""
+        self.identity_switch_notice: str = str(cfg.voice_identity_notice or "").strip()
+        self.voice_identity_state: dict[str, str] = dict(cfg.voice_identity_state or {})
         # Tracks which style's bootstrap was last injected into history.
         # Bootstrap is prepended only on session start (empty) or style change.
         self._bootstrap_injected_for_style: str = ""
