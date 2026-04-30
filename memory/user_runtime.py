@@ -1098,7 +1098,13 @@ class ActiveUserRuntime:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
 
-    def activate_voice_match(self, matched_user_id: str, similarity: float = 0.0) -> UserActivationResult | None:
+    def activate_voice_match(
+        self,
+        matched_user_id: str,
+        similarity: float = 0.0,
+        *,
+        margin: float | None = None,
+    ) -> UserActivationResult | None:
         """Activate a profile from a verified voice-recognition match.
 
         The mic path supplies this only from voice-engine evidence. It can be a
@@ -1118,6 +1124,25 @@ class ActiveUserRuntime:
             return None
 
         current = self.active_profile()
+        if target_profile.is_admin:
+            from config import CFG
+
+            score = float(similarity or 0.0)
+            match_margin = float(margin or 0.0)
+            if score < float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD):
+                return UserActivationResult(
+                    status="blocked",
+                    profile=current,
+                    created=False,
+                    message="[UI] Voice best guess was Baris, but the score was below the admin unlock threshold.",
+                )
+            if match_margin < float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD):
+                return UserActivationResult(
+                    status="blocked",
+                    profile=current,
+                    created=False,
+                    message="[UI] Voice best guess was Baris, but the margin was too small for admin unlock.",
+                )
         if current.user_id == target_profile.user_id:
             if target_profile.is_admin:
                 self._admin_unlocked = True

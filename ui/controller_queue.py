@@ -72,10 +72,29 @@ def pump_ui_queue(controller) -> None:
             controller.refresh_interaction_state()
             continue
         if kind == "active_user_changed":
+            preserve_transcript = bool(isinstance(payload, dict) and payload.get("preserve_transcript"))
+            captured_messages: list[dict[str, str]] = []
+            if preserve_transcript:
+                try:
+                    captured_messages = [
+                        dict(message)
+                        for message in controller.chat_state.get_messages_snapshot()
+                        if str(message.get("role") or "").lower() in ("user", "assistant")
+                        and str(message.get("content") or "").strip() not in {"Thinking...", "Thinking…"}
+                    ]
+                except Exception:
+                    captured_messages = []
             try:
                 controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
             except Exception:
                 pass
+            if preserve_transcript and captured_messages:
+                try:
+                    for message in captured_messages:
+                        controller.chat_state.persist_turn(message["role"], message["content"])
+                except Exception:
+                    pass
+                controller.session_meta = "Session: active"
             controller.refresh_active_user_meta()
             controller._refresh_chat_ui()
             controller.refresh_interaction_state()

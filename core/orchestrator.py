@@ -138,6 +138,7 @@ class Orchestrator:
         self.synthetic_user_turn = False
         self.pending_file_target_confirmation: dict | None = None
         self.pending_stage_pause: dict | None = None
+        self.identity_switch_notice: str = ""
         # Tracks which style's bootstrap was last injected into history.
         # Bootstrap is prepended only on session start (empty) or style change.
         self._bootstrap_injected_for_style: str = ""

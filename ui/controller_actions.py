@@ -131,7 +131,9 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
     except Exception:
         pass
     # Privacy model: when switching from unknown to identified, preserve the
-    # unknown-phase conversation in the new user's persistent memory.
+    # unknown-phase conversation as the new user's current transcript. Do not
+    # insert a new-session marker; the conversation did not restart, ownership
+    # of the existing session was just resolved.
     _captured_messages: list[dict[str, str]] = []
     if previous_was_unknown:
         try:
@@ -143,14 +145,15 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
         except Exception:
             pass
     controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
-    controller.chat_state.begin_fresh_session(wipe_persistent=False)
     if _captured_messages:
         try:
             for msg in _captured_messages:
                 controller.chat_state.persist_turn(msg["role"], msg["content"])
         except Exception:
             pass
-    controller.session_meta = "Session: fresh"
+    elif not previous_was_unknown:
+        controller.chat_state.begin_fresh_session(wipe_persistent=False)
+    controller.session_meta = "Session: active" if previous_was_unknown else "Session: fresh"
     controller.stage_meta = ""
     controller.runtime_mode = "IDLE"
     controller.refresh_active_user_meta()
@@ -209,17 +212,38 @@ def _apply_voice_identity_match(controller, engine) -> None:
         _log_voice_identity_ui("consume_match empty")
         return
     try:
-        matched_user, similarity = match
+        matched_user = match[0]
+        similarity = match[1]
+        decision_detail = dict(match[2] or {}) if len(match) >= 3 and isinstance(match[2], dict) else {}
     except Exception:
         _log_voice_identity_ui(f"bad_match_payload match={match!r}")
         return
     if not matched_user:
-        _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
+        if decision_detail:
+            _log_voice_identity_ui(
+                "no_switch "
+                f"best_user={decision_detail.get('best_user') or 'none'} "
+                f"best_score={float(decision_detail.get('best_score') or 0.0):.3f} "
+                f"second_score={float(decision_detail.get('second_score') or 0.0):.3f} "
+                f"margin={float(decision_detail.get('margin') or 0.0):.3f} "
+                f"best_is_admin={str(bool(decision_detail.get('best_is_admin'))).lower()} "
+                f"threshold={float(decision_detail.get('threshold') or 0.0):.3f} "
+                f"margin_threshold={float(decision_detail.get('margin_threshold') or 0.0):.3f} "
+                f"final_decision={decision_detail.get('final_decision') or 'unknown'} "
+                f"reason={decision_detail.get('reason') or 'none'}"
+            )
+        else:
+            _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
         return
     try:
         old_profile = controller.user_runtime.active_profile()
         previous_was_unknown = getattr(old_profile, "is_unknown", False)
-        result = controller.user_runtime.activate_voice_match(str(matched_user), float(similarity or 0.0))
+        margin = decision_detail.get("margin") if decision_detail else None
+        result = controller.user_runtime.activate_voice_match(
+            str(matched_user),
+            float(similarity or 0.0),
+            margin=float(margin) if margin is not None else None,
+        )
     except Exception as exc:
         _log_voice_identity_ui(f"activate_failed user={matched_user} score={float(similarity or 0.0):.3f} error={type(exc).__name__}: {exc}")
         return

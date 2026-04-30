@@ -182,7 +182,7 @@ def _runtime_checks() -> dict[str, object]:
         restart_active_after_corrective = restarted.active_profile().user_id
         restart_unknown_memory_path = restarted.current_memory_path()
         restart_unknown_summary_path = restarted.current_conversation_summary_path()
-        voice_result = restarted.activate_voice_match("baris", 0.94)
+        voice_result = restarted.activate_voice_match("baris", 0.94, margin=0.20)
         voice_active_profile = restarted.active_profile()
         voice_admin_unlocked = restarted.is_admin_unlocked()
 

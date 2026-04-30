@@ -27,6 +27,28 @@ def _log_voice_debug(message: str) -> None:
         pass
 
 
+def _voice_decision_debug_line(*, mode: str, active_user: str, decision) -> str:
+    best_user = str(getattr(decision, "best_user", "") or "none")
+    best_score = float(getattr(decision, "best_score", 0.0) or 0.0)
+    second_score = float(getattr(decision, "second_score", 0.0) or 0.0)
+    margin = float(getattr(decision, "margin", 0.0) or 0.0)
+    best_is_admin = bool(getattr(decision, "best_is_admin", False))
+    threshold = float(getattr(decision, "threshold", 0.0) or 0.0)
+    margin_threshold = float(getattr(decision, "margin_threshold", 0.0) or 0.0)
+    final_decision = str(getattr(decision, "decision", "") or "unknown")
+    reason = str(getattr(decision, "reason", "") or "none")
+    final_user = str(getattr(decision, "final_user", "") or "none")
+    return (
+        "match "
+        f"mode={mode} active={active_user or 'unknown'} "
+        f"best_user={best_user} best_score={best_score:.3f} "
+        f"second_score={second_score:.3f} margin={margin:.3f} "
+        f"best_is_admin={str(best_is_admin).lower()} "
+        f"threshold={threshold:.3f} margin_threshold={margin_threshold:.3f} "
+        f"final_decision={final_decision} final_user={final_user} reason={reason}"
+    )
+
+
 def _load_sounddevice():
     global _sd, _sounddevice_error
     if _sd is not None:
@@ -211,33 +233,46 @@ class STTEngine:
                                     f"enrollment_sample user={current_user_id} completed={completed}"
                                 )
                             else:
-                                matched_user, similarity = engine.match(embedding)
-                                strict_user = matched_user
-                                strict_similarity = similarity
-                                if matched_user is None and current_is_unknown and hasattr(engine, "best_match"):
-                                    candidate_user, candidate_similarity = engine.best_match(embedding)
-                                    if (
-                                        candidate_user
-                                        and float(candidate_similarity or 0.0) >= float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD)
-                                    ):
-                                        matched_user = candidate_user
-                                        similarity = candidate_similarity
+                                if hasattr(engine, "evaluate_match"):
+                                    try:
+                                        decision = engine.evaluate_match(embedding, first_turn=current_is_unknown)
+                                    except TypeError:
+                                        decision = engine.evaluate_match(embedding)
+                                    mode = "unknown_eval" if current_is_unknown else "strict_eval"
                                     _log_voice_debug(
-                                        "match "
-                                        f"mode=first_turn_infer active={current_user_id or 'unknown'} "
-                                        f"strict_user={strict_user or 'none'} strict_score={float(strict_similarity or 0.0):.3f} "
-                                        f"best_user={candidate_user or 'none'} best_score={float(candidate_similarity or 0.0):.3f} "
-                                        f"threshold={float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD):.3f} "
-                                        f"selected={matched_user or 'none'}"
+                                        _voice_decision_debug_line(
+                                            mode=mode,
+                                            active_user=current_user_id or "unknown",
+                                            decision=decision,
+                                        )
+                                    )
+                                    self._last_voice_match = (
+                                        getattr(decision, "final_user", "") or None,
+                                        float(getattr(decision, "best_score", 0.0) or 0.0),
+                                        {
+                                            "best_user": str(getattr(decision, "best_user", "") or ""),
+                                            "best_score": float(getattr(decision, "best_score", 0.0) or 0.0),
+                                            "second_score": float(getattr(decision, "second_score", 0.0) or 0.0),
+                                            "margin": float(getattr(decision, "margin", 0.0) or 0.0),
+                                            "best_is_admin": bool(getattr(decision, "best_is_admin", False)),
+                                            "threshold": float(getattr(decision, "threshold", 0.0) or 0.0),
+                                            "margin_threshold": float(getattr(decision, "margin_threshold", 0.0) or 0.0),
+                                            "final_decision": str(getattr(decision, "decision", "") or ""),
+                                            "reason": str(getattr(decision, "reason", "") or ""),
+                                        },
                                     )
                                 else:
+                                    matched_user, similarity = engine.match(embedding)
                                     _log_voice_debug(
                                         "match "
-                                        f"mode=strict active={current_user_id or 'unknown'} "
-                                        f"selected={matched_user or 'none'} score={float(similarity or 0.0):.3f}"
+                                        f"mode=legacy active={current_user_id or 'unknown'} "
+                                        f"best_user={matched_user or 'none'} best_score={float(similarity or 0.0):.3f} "
+                                        "second_score=0.000 margin=0.000 best_is_admin=false "
+                                        "threshold=0.000 margin_threshold=0.000 "
+                                        f"final_decision={'accepted_legacy' if matched_user else 'unknown'} "
+                                        f"final_user={matched_user or 'none'} reason=legacy_engine"
                                     )
-                                # Result handled by caller / UI layer.
-                                self._last_voice_match = (matched_user, similarity)
+                                    self._last_voice_match = (matched_user, similarity)
             except Exception as exc:
                 _log_voice_debug(f"error {type(exc).__name__}: {exc}")
             
