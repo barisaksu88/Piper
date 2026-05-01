@@ -66,17 +66,25 @@ def _voice_drift_confirmation_turns() -> int:
         return 3
 
 
+def _new_voice_drift_tracker() -> dict:
+    return {
+        "from_user_id": "",
+        "candidate_user_id": "",
+        "candidate_count": 0,
+        "unknown_count": 0,
+        "admin_revoked": False,
+    }
+
+
 def _reset_voice_drift_tracker(controller) -> None:
+    setattr(controller, "_voice_drift_tracker", _new_voice_drift_tracker())
+
+
+def _set_voice_drift_tracker(controller, tracker: dict) -> None:
     setattr(
         controller,
         "_voice_drift_tracker",
-        {
-            "from_user_id": "",
-            "candidate_user_id": "",
-            "candidate_count": 0,
-            "unknown_count": 0,
-            "admin_revoked": False,
-        },
+        {**_new_voice_drift_tracker(), **dict(tracker or {})},
     )
 
 
@@ -206,9 +214,7 @@ def _apply_active_user_switch(
     # Privacy model: when switching from unknown to identified, preserve the
     # unknown-phase conversation as the new user's current transcript. Do not
     # insert a new-session marker; the conversation did not restart, ownership
-    # of the existing session was just resolved. Admin voice revocation also
-    # keeps the visible transcript in place while moving future persistence out
-    # of admin/private memory.
+    # of the existing session was just resolved.
     _captured_messages: list[dict[str, str]] = []
     if previous_was_unknown:
         try:
@@ -337,18 +343,16 @@ def _apply_voice_identity_match(controller, engine) -> None:
                     _apply_active_user_switch(
                         controller,
                         previous_was_unknown=False,
-                        preserve_current_session=True,
+                        preserve_current_session=False,
                     )
-                    tracker = _voice_drift_tracker(controller)
-                    tracker.update(
-                        {
-                            "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                            "candidate_user_id": target_user_id,
-                            "candidate_count": candidate_count,
-                            "unknown_count": 0,
-                            "admin_revoked": True,
-                        }
-                    )
+                    tracker = {
+                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                        "candidate_user_id": target_user_id,
+                        "candidate_count": candidate_count,
+                        "unknown_count": 0,
+                        "admin_revoked": True,
+                    }
+                    _set_voice_drift_tracker(controller, tracker)
                     _log_voice_identity_ui("admin_revoked_on_voice_drift")
                 if candidate_count < threshold_turns:
                     _log_voice_identity_ui(
@@ -375,18 +379,16 @@ def _apply_voice_identity_match(controller, engine) -> None:
                 _apply_active_user_switch(
                     controller,
                     previous_was_unknown=False,
-                    preserve_current_session=True,
+                    preserve_current_session=False,
                 )
-                tracker = _voice_drift_tracker(controller)
-                tracker.update(
-                    {
-                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                        "candidate_user_id": "",
-                        "candidate_count": 0,
-                        "unknown_count": unknown_count,
-                        "admin_revoked": True,
-                    }
-                )
+                tracker = {
+                    "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                    "candidate_user_id": "",
+                    "candidate_count": 0,
+                    "unknown_count": unknown_count,
+                    "admin_revoked": True,
+                }
+                _set_voice_drift_tracker(controller, tracker)
                 _log_voice_identity_ui("admin_revoked_on_voice_uncertainty")
             if unknown_count >= threshold_turns:
                 if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
@@ -407,24 +409,29 @@ def _apply_voice_identity_match(controller, engine) -> None:
         elif previous_was_unknown and tracker.get("from_user_id"):
             threshold_turns = _voice_drift_confirmation_turns()
             if matched_user and target_user_id:
-                prior_candidate = str(tracker.get("candidate_user_id") or "")
-                candidate_count = int(tracker.get("candidate_count") or 0)
-                candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
-                tracker.update(
-                    {
-                        "candidate_user_id": target_user_id,
-                        "candidate_count": candidate_count,
-                        "unknown_count": 0,
-                    }
-                )
-                if candidate_count < threshold_turns:
-                    _log_voice_identity_ui(
-                        f"post_revoke_drift_pending candidate={target_user_id} "
-                        f"count={candidate_count}/{threshold_turns}"
+                if target_user_id == str(tracker.get("from_user_id") or ""):
+                    _log_voice_identity_ui(f"post_revoke_returning_speaker user={target_user_id}")
+                    previous_was_unknown = True
+                    matched_user = target_user_id
+                else:
+                    prior_candidate = str(tracker.get("candidate_user_id") or "")
+                    candidate_count = int(tracker.get("candidate_count") or 0)
+                    candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
+                    tracker.update(
+                        {
+                            "candidate_user_id": target_user_id,
+                            "candidate_count": candidate_count,
+                            "unknown_count": 0,
+                        }
                     )
-                    return
-                previous_was_unknown = False
-                matched_user = target_user_id
+                    if candidate_count < threshold_turns:
+                        _log_voice_identity_ui(
+                            f"post_revoke_drift_pending candidate={target_user_id} "
+                            f"count={candidate_count}/{threshold_turns}"
+                        )
+                        return
+                    previous_was_unknown = False
+                    matched_user = target_user_id
             else:
                 unknown_count = int(tracker.get("unknown_count") or 0) + 1
                 tracker.update({"candidate_user_id": "", "candidate_count": 0, "unknown_count": unknown_count})
@@ -1404,22 +1411,28 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
     def report_findings() -> None:
         acquired_lock = False
         try:
+            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Acquiring lock..."))
             while not controller.gen_lock.acquire(timeout=0.1):
                 if isinstance(cancel_token, CancellationToken):
                     cancel_token.raise_if_cancelled()
             acquired_lock = True
+            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Lock acquired. Starting report turn..."))
             if isinstance(cancel_token, CancellationToken):
                 cancel_token.raise_if_cancelled()
             run_agent_loop(controller.build_orchestrator_config(cancel_token=cancel_token))
+            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Report turn completed."))
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
+            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Canceled."))
         except Exception as exc:
             controller.ui_queue.put(("error", f"Async Report Error: {exc}"))
+            controller.ui_queue.put(("agent_log", f"[SEARCH REPORT] Error: {exc}"))
         finally:
             if isinstance(cancel_token, CancellationToken):
                 _finalize_operation(controller, cancel_token)
             if acquired_lock:
                 controller.gen_lock.release()
+                controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Lock released."))
 
     worker = threading.Thread(target=report_findings, daemon=True)
     try:

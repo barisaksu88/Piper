@@ -1442,6 +1442,7 @@ def phase_search(orc) -> None:
     def _do_search() -> None:
         queued_result = False
         try:
+            orc._log_dashboard(f"[SEARCH BG] Starting search for: {query}")
             orc.raise_if_cancelled()
             data = perform_search(
                 query,
@@ -1449,14 +1450,17 @@ def phase_search(orc) -> None:
                 log_callback=orc._log_dashboard,
                 cancel_token=orc.cancel_token,
             )
+            orc._log_dashboard(f"[SEARCH BG] perform_search returned. Length={len(str(data))}")
             if is_search_error_result(data):
                 raise RuntimeError(normalize_search_error(data))
             orc.raise_if_cancelled()
             orc.ui.put(("search_result", {"query": query, "data": data, "cancel_token": orc.cancel_token}))
+            orc._log_dashboard("[SEARCH BG] Queued search_result event.")
             queued_result = True
         except OperationCancelled:
-            orc._log_dashboard("Search canceled.")
+            orc._log_dashboard("[SEARCH BG] Search canceled.")
         except Exception as exc:
+            orc._log_dashboard(f"[SEARCH BG] Search failed: {exc}")
             orc.emit_runtime_signal(
                 {
                     "kind": "search_error",
@@ -1486,6 +1490,7 @@ def phase_search(orc) -> None:
                 orc.release_cancel_token(orc.cancel_token)
             if not queued_result:
                 orc.ui.put(("status", "Canceled" if orc.cancel_token and orc.cancel_token.is_cancelled else "IDLE"))
+            orc._log_dashboard(f"[SEARCH BG] Thread exiting. queued_result={queued_result}")
 
     try:
         worker = threading.Thread(target=_do_search, daemon=True)
