@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -1408,31 +1409,43 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
     if isinstance(cancel_token, CancellationToken):
         controller.retain_cancel_token(cancel_token)
 
+    _report_trace_path = Path(CFG.DATA_DIR) / "debug" / "search_trace.log"
+    def _report_trace(msg: str) -> None:
+        ts = datetime.now().isoformat()
+        line = f"{ts} | {msg}\n"
+        try:
+            _report_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(_report_trace_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+        controller.ui_queue.put(("agent_log", msg))
+
     def report_findings() -> None:
         acquired_lock = False
         try:
-            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Acquiring lock..."))
+            _report_trace("[SEARCH REPORT] Acquiring lock...")
             while not controller.gen_lock.acquire(timeout=0.1):
                 if isinstance(cancel_token, CancellationToken):
                     cancel_token.raise_if_cancelled()
             acquired_lock = True
-            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Lock acquired. Starting report turn..."))
+            _report_trace("[SEARCH REPORT] Lock acquired. Starting report turn...")
             if isinstance(cancel_token, CancellationToken):
                 cancel_token.raise_if_cancelled()
             run_agent_loop(controller.build_orchestrator_config(cancel_token=cancel_token))
-            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Report turn completed."))
+            _report_trace("[SEARCH REPORT] Report turn completed.")
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
-            controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Canceled."))
+            _report_trace("[SEARCH REPORT] Canceled.")
         except Exception as exc:
             controller.ui_queue.put(("error", f"Async Report Error: {exc}"))
-            controller.ui_queue.put(("agent_log", f"[SEARCH REPORT] Error: {exc}"))
+            _report_trace(f"[SEARCH REPORT] Error: {exc}")
         finally:
             if isinstance(cancel_token, CancellationToken):
                 _finalize_operation(controller, cancel_token)
             if acquired_lock:
                 controller.gen_lock.release()
-                controller.ui_queue.put(("agent_log", "[SEARCH REPORT] Lock released."))
+                _report_trace("[SEARCH REPORT] Lock released.")
 
     worker = threading.Thread(target=report_findings, daemon=True)
     try:

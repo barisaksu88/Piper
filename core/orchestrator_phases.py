@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -1439,28 +1440,40 @@ def phase_search(orc) -> None:
         orc.retain_cancel_token(orc.cancel_token)
     orc.retain_search_in_flight(query)
 
+    _search_trace_path = Path(CFG.DATA_DIR) / "debug" / "search_trace.log"
+    def _search_trace(msg: str) -> None:
+        ts = datetime.now().isoformat()
+        line = f"{ts} | {msg}\n"
+        try:
+            _search_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(_search_trace_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+        orc._log_dashboard(msg)
+
     def _do_search() -> None:
         queued_result = False
         try:
-            orc._log_dashboard(f"[SEARCH BG] Starting search for: {query}")
+            _search_trace(f"[SEARCH BG] Starting search for: {query}")
             orc.raise_if_cancelled()
             data = perform_search(
                 query,
                 CFG.DATA_DIR,
-                log_callback=orc._log_dashboard,
+                log_callback=_search_trace,
                 cancel_token=orc.cancel_token,
             )
-            orc._log_dashboard(f"[SEARCH BG] perform_search returned. Length={len(str(data))}")
+            _search_trace(f"[SEARCH BG] perform_search returned. Length={len(str(data))}")
             if is_search_error_result(data):
                 raise RuntimeError(normalize_search_error(data))
             orc.raise_if_cancelled()
             orc.ui.put(("search_result", {"query": query, "data": data, "cancel_token": orc.cancel_token}))
-            orc._log_dashboard("[SEARCH BG] Queued search_result event.")
+            _search_trace("[SEARCH BG] Queued search_result event.")
             queued_result = True
         except OperationCancelled:
-            orc._log_dashboard("[SEARCH BG] Search canceled.")
+            _search_trace("[SEARCH BG] Search canceled.")
         except Exception as exc:
-            orc._log_dashboard(f"[SEARCH BG] Search failed: {exc}")
+            _search_trace(f"[SEARCH BG] Search failed: {exc}")
             orc.emit_runtime_signal(
                 {
                     "kind": "search_error",
@@ -1483,14 +1496,14 @@ def phase_search(orc) -> None:
                 )
             )
             queued_result = True
-            orc._log_dashboard(error_data)
+            _search_trace(error_data)
         finally:
             orc.release_search_in_flight()
             if orc.cancel_token is not None:
                 orc.release_cancel_token(orc.cancel_token)
             if not queued_result:
                 orc.ui.put(("status", "Canceled" if orc.cancel_token and orc.cancel_token.is_cancelled else "IDLE"))
-            orc._log_dashboard(f"[SEARCH BG] Thread exiting. queued_result={queued_result}")
+            _search_trace(f"[SEARCH BG] Thread exiting. queued_result={queued_result}")
 
     try:
         worker = threading.Thread(target=_do_search, daemon=True)
