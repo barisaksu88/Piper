@@ -1,66 +1,62 @@
 # Piper Docs Hub
 
-This folder groups all design, planning, and reference material for Piper.
+This folder groups Piper's design, planning, and reference material.
 
-Authoritative doctrine remains in [AGENTS.md](../AGENTS.md).
+`AGENTS.md` is the top-level doctrine.
+[DOCUMENTS_MAP.md](DOCUMENTS_MAP.md) is the fastest navigation guide.
 
-## Read Order
+## Recommended Read Order
 
 1. [AGENTS.md](../AGENTS.md)
    - non-negotiable architecture and behavior doctrine
 
-2. [OVERVIEW.md](OVERVIEW.md)
-   - what Piper does today, in plain language; one page, no implementation detail
+2. [DOCUMENTS_MAP.md](DOCUMENTS_MAP.md)
+   - "what do I read for this specific need?"
 
-3. [VISION.md](VISION.md)
-   - where Piper is going; your control point — update this when something feels wrong or missing
+3. [architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md)
+   - prescriptive runtime spec and ownership map
 
-4. [foundation/BLUEPRINT.md](foundation/BLUEPRINT.md)
-   - philosophy, target stack, anti-drift rules
+4. [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md)
+   - current codebase structure
 
-5. [architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md)
-   - prescriptive runtime spec: full turn lifecycle, route kinds, context blocks, all implemented features
+5. [architecture/CAPABILITIES.md](architecture/CAPABILITIES.md)
+   - current user-facing surface
 
-6. [ROADMAP.md](ROADMAP.md)
-   - planned future work; specs must be written here before Codex touches anything
+6. [WIP.md](WIP.md)
+   - active implementation work
 
-5. [foundation/checklists/V1_GUARDRAILS.md](foundation/checklists/V1_GUARDRAILS.md)
-   - how to execute architecture work without drifting
+7. [ROADMAP.md](ROADMAP.md)
+   - future intended work
 
-6. [foundation/checklists/TRIAGE_MAP.md](foundation/checklists/TRIAGE_MAP.md)
-   - where to look first when something breaks
+## Structure
 
-7. [foundation/checklists/RELEASE_READINESS.md](foundation/checklists/RELEASE_READINESS.md)
-   - what must be true before Piper is considered ready for actual use
+- [DOCUMENTS_MAP.md](DOCUMENTS_MAP.md) — primary navigation layer
+- [architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md) — live runtime flow and logic placement
+- [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) — current structure and owning modules
+- [architecture/CAPABILITIES.md](architecture/CAPABILITIES.md) — current behavior summary
+- [WIP.md](WIP.md) — active in-flight work
+- [ROADMAP.md](ROADMAP.md) — planned future work
+- [specs/](specs/) — focused feature specs and consolidation docs
+- [specs/README.md](specs/README.md) — what belongs in `docs/specs/`
+- [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) — implementation workflow
+- [foundation/](foundation/) — deeper design/context documents and checklists
+- [archive/](archive/) — superseded material
 
-## Current Structure
+## Notes vs Docs
 
-- [AGENTS.md](../AGENTS.md)
-- [docs/ROADMAP.md](ROADMAP.md) — planned work queue; document-first
-- [docs/architecture/TRIGGER_FLOW.md](architecture/TRIGGER_FLOW.md) — authoritative runtime spec
-- [docs/foundation/BLUEPRINT.md](foundation/BLUEPRINT.md)
-- [docs/foundation/EXECUTION_ROADMAP.md](foundation/EXECUTION_ROADMAP.md) — v1 redesign plan (complete, archived)
-- [docs/foundation/GLM_ADVICE.md](foundation/GLM_ADVICE.md) — annotated external architectural review
-- [docs/foundation/FILEWORK_ENGINE.md](foundation/FILEWORK_ENGINE.md)
-- [docs/foundation/SUMMARY_ENGINE.md](foundation/SUMMARY_ENGINE.md)
-- [docs/foundation/VERIFICATION_ENGINE.md](foundation/VERIFICATION_ENGINE.md)
-- [docs/foundation/checklists/V1_GUARDRAILS.md](foundation/checklists/V1_GUARDRAILS.md)
-- [docs/foundation/checklists/TRIAGE_MAP.md](foundation/checklists/TRIAGE_MAP.md)
-- [docs/foundation/checklists/RELEASE_READINESS.md](foundation/checklists/RELEASE_READINESS.md)
+- Use [notes/](../notes/) for operational memory, debugging lessons, and current validated state.
+- Use [docs/](.) for navigation, architecture references, repeatable workflow, and future direction.
 
-Why:
-- doctrine stays at the repo root in `AGENTS.md`
-- `docs/architecture/` holds the live prescriptive runtime spec (`TRIGGER_FLOW.md`)
-- `docs/ROADMAP.md` is the active build queue (document-first doctrine)
-- `docs/foundation/` holds completed v1 foundation docs — read for context, not direction
+## Spec Rule
 
-## Existing Operational Memory
+- Put dense feature concepts and high-risk design notes in `docs/specs/`.
+- Keep `ROADMAP.md` as the planning index and priority surface, not the long-form home for every idea.
 
-Short repo-local continuity notes remain in:
+## Important Rule
 
-- [notes/known-good.md](../notes/known-good.md)
-- [notes/known-issues.md](../notes/known-issues.md)
-- [notes/coder-log.md](../notes/coder-log.md)
+If documents disagree:
 
-Use those for validated state and coding history.
-Use `docs/` for planned direction and repeatable operating checklists.
+1. `AGENTS.md`
+2. `docs/architecture/TRIGGER_FLOW.md`
+3. current code
+4. other docs and notes

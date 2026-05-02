@@ -217,6 +217,27 @@ It maps the full turn lifecycle — what triggers what, which engine is called a
 
 If a fix or feature does not have a clear home in the trigger flow, the architecture needs discussion before implementation.
 
+## 8B. DOCUMENT NAVIGATION SPINE
+
+`AGENTS.md` is the top of the repository document pyramid.
+
+When orienting to the repo:
+
+1. Read `AGENTS.md` for doctrine and non-negotiable rules.
+2. Read `docs/DOCUMENTS_MAP.md` for the shortest path to the right supporting document.
+3. Read `docs/architecture/TRIGGER_FLOW.md` before placing new runtime logic.
+4. Use `docs/WIP.md` to check what is actively in flight.
+5. Use `docs/architecture/ARCHITECTURE.md` to find owning modules.
+6. Use `notes/debug-protocol.md` at the start of fix/debug sessions.
+
+Interpretation:
+
+- `AGENTS.md` = authority
+- `docs/architecture/` = live structural/runtime references
+- `docs/WIP.md` = active implementation state
+- `docs/ROADMAP.md` = intended future work
+- `notes/` = operational memory, never doctrine
+
 ---
 
 # 9. CODE ORGANIZATION GOALS
