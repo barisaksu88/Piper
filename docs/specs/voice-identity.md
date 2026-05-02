@@ -28,17 +28,17 @@ Voice identity exists to support:
 The current repo already has significant voice-identity foundation and follow-up behavior in code.
 
 Runtime components:
-- [core/voice_recognition.py](/mnt/c/Projects/Piper/core/voice_recognition.py:1)
-- [memory/user_runtime.py](/mnt/c/Projects/Piper/memory/user_runtime.py:1)
-- [tools/stt.py](/mnt/c/Projects/Piper/tools/stt.py:1)
-- [ui/controller_actions.py](/mnt/c/Projects/Piper/ui/controller_actions.py:1)
-- [core/orchestrator_phases.py](/mnt/c/Projects/Piper/core/orchestrator_phases.py:1)
-- [core/prompt_context.py](/mnt/c/Projects/Piper/core/prompt_context.py:1)
+- [`core/voice_recognition.py`](../../core/voice_recognition.py)
+- [`memory/user_runtime.py`](../../memory/user_runtime.py)
+- [`tools/stt.py`](../../tools/stt.py)
+- [`ui/controller_actions.py`](../../ui/controller_actions.py)
+- [`core/orchestrator_phases.py`](../../core/orchestrator_phases.py)
+- [`core/prompt_context.py`](../../core/prompt_context.py)
 
 Validation surfaces:
-- [scripts/voice_identity_inference_smoke_test.py](/mnt/c/Projects/Piper/scripts/voice_identity_inference_smoke_test.py:1)
-- [scripts/voice_identity_drift_smoke_test.py](/mnt/c/Projects/Piper/scripts/voice_identity_drift_smoke_test.py:1)
-- [scripts/speaker_identity_correction_smoke_test.py](/mnt/c/Projects/Piper/scripts/speaker_identity_correction_smoke_test.py:1)
+- [`scripts/voice_identity_inference_smoke_test.py`](../../scripts/voice_identity_inference_smoke_test.py)
+- [`scripts/voice_identity_drift_smoke_test.py`](../../scripts/voice_identity_drift_smoke_test.py)
+- [`scripts/speaker_identity_correction_smoke_test.py`](../../scripts/speaker_identity_correction_smoke_test.py)
 
 ## Shipped Foundation
 
@@ -65,7 +65,7 @@ This should be treated as the live design center unless code changes prove other
 
 ## Decision Model
 
-The main decision object is `VoiceMatchDecision` in [core/voice_recognition.py](/mnt/c/Projects/Piper/core/voice_recognition.py:18).
+The main decision object is `VoiceMatchDecision` in [`core/voice_recognition.py`](../../core/voice_recognition.py).
 
 Important fields:
 - `best_user`
@@ -97,7 +97,7 @@ The current smoke-test expectations show a calibrated threshold model with:
 - low-confidence boundary
 - first-turn inference threshold
 
-These are validated in [scripts/voice_identity_inference_smoke_test.py](/mnt/c/Projects/Piper/scripts/voice_identity_inference_smoke_test.py:1).
+These are validated in [`scripts/voice_identity_inference_smoke_test.py`](../../scripts/voice_identity_inference_smoke_test.py).
 
 This threshold model should remain centralized in config/runtime code, not copied into Persona or scattered docs.
 

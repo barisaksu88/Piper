@@ -24,7 +24,7 @@ The main job is:
 ## Current Runtime Truth
 
 The authoritative live runtime description is already in:
-- [docs/architecture/TRIGGER_FLOW.md](/mnt/c/Projects/Piper/docs/architecture/TRIGGER_FLOW.md:1)
+- [`docs/architecture/TRIGGER_FLOW.md`](../architecture/TRIGGER_FLOW.md)
 
 Important LangGraph sections there:
 - dual runtime overview
@@ -37,23 +37,23 @@ Important LangGraph sections there:
 - implemented migration section
 
 Primary runtime surfaces:
-- [core/orchestrator.py](/mnt/c/Projects/Piper/core/orchestrator.py:1)
-- [core/orchestrator_graph_builder.py](/mnt/c/Projects/Piper/core/orchestrator_graph_builder.py:1)
-- [core/orchestrator_graph.py](/mnt/c/Projects/Piper/core/orchestrator_graph.py:1)
-- [core/graph_nodes.py](/mnt/c/Projects/Piper/core/graph_nodes.py:1)
-- [core/orchestrator_phases.py](/mnt/c/Projects/Piper/core/orchestrator_phases.py:1)
+- [`core/orchestrator.py`](../../core/orchestrator.py)
+- [`core/orchestrator_graph_builder.py`](../../core/orchestrator_graph_builder.py)
+- [`core/orchestrator_graph.py`](../../core/orchestrator_graph.py)
+- [`core/graph_nodes.py`](../../core/graph_nodes.py)
+- [`core/orchestrator_phases.py`](../../core/orchestrator_phases.py)
 
 Validation surface examples:
-- [scripts/langgraph_interrupt_smoke_test.py](/mnt/c/Projects/Piper/scripts/langgraph_interrupt_smoke_test.py:1)
-- [scripts/langgraph_checkpoint_recovery_smoke_test.py](/mnt/c/Projects/Piper/scripts/langgraph_checkpoint_recovery_smoke_test.py:1)
-- [scripts/langgraph_recovery_command_smoke_test.py](/mnt/c/Projects/Piper/scripts/langgraph_recovery_command_smoke_test.py:1)
-- [scripts/langgraph_checkpoint_inspect_smoke_test.py](/mnt/c/Projects/Piper/scripts/langgraph_checkpoint_inspect_smoke_test.py:1)
+- [`scripts/langgraph_interrupt_smoke_test.py`](../../scripts/langgraph_interrupt_smoke_test.py)
+- [`scripts/langgraph_checkpoint_recovery_smoke_test.py`](../../scripts/langgraph_checkpoint_recovery_smoke_test.py)
+- [`scripts/langgraph_recovery_command_smoke_test.py`](../../scripts/langgraph_recovery_command_smoke_test.py)
+- [`scripts/langgraph_checkpoint_inspect_smoke_test.py`](../../scripts/langgraph_checkpoint_inspect_smoke_test.py)
 
 ## Historical Context
 
 Older migration-planning material still exists in:
-- [docs/PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md](/mnt/c/Projects/Piper/docs/PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md:1)
-- [docs/archive/Piper_LangGraph_Migration_Spec.md](/mnt/c/Projects/Piper/docs/archive/Piper_LangGraph_Migration_Spec.md:1)
+- [`docs/PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md`](../PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md)
+- [`docs/archive/Piper_LangGraph_Migration_Spec.md`](../archive/Piper_LangGraph_Migration_Spec.md)
 
 Those are useful for historical rationale, but they are not the best starting point for current runtime truth.
 

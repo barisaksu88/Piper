@@ -32,20 +32,20 @@ The design goal is:
 The repo already has a real browser-first `COMPUTER_USE` path and harness surface.
 
 Primary runtime surfaces:
-- [core/engines/computer_use_engine.py](/mnt/c/Projects/Piper/core/engines/computer_use_engine.py:1)
-- [core/engines/computer_use_verifier.py](/mnt/c/Projects/Piper/core/engines/computer_use_verifier.py:1)
-- [core/executor.py](/mnt/c/Projects/Piper/core/executor.py:1)
-- [core/planner_boundary.py](/mnt/c/Projects/Piper/core/planner_boundary.py:1)
-- [core/prompt_builder.py](/mnt/c/Projects/Piper/core/prompt_builder.py:1)
-- [core/routing/route_normalizer.py](/mnt/c/Projects/Piper/core/routing/route_normalizer.py:1)
-- [tools/registry.py](/mnt/c/Projects/Piper/tools/registry.py:1)
+- [`core/engines/computer_use_engine.py`](../../core/engines/computer_use_engine.py)
+- [`core/engines/computer_use_verifier.py`](../../core/engines/computer_use_verifier.py)
+- [`core/executor.py`](../../core/executor.py)
+- [`core/planner_boundary.py`](../../core/planner_boundary.py)
+- [`core/prompt_builder.py`](../../core/prompt_builder.py)
+- [`core/routing/route_normalizer.py`](../../core/routing/route_normalizer.py)
+- [`tools/registry.py`](../../tools/registry.py)
 
 Validation surface examples:
-- [scripts/computer_use_engine_smoke_test.py](/mnt/c/Projects/Piper/scripts/computer_use_engine_smoke_test.py:1)
-- [scripts/computer_use_harness_smoke_test.py](/mnt/c/Projects/Piper/scripts/computer_use_harness_smoke_test.py:1)
-- [scripts/computer_use_browser_followup_harness_smoke_test.py](/mnt/c/Projects/Piper/scripts/computer_use_browser_followup_harness_smoke_test.py:1)
-- [scripts/computer_use_extract_download_harness_smoke_test.py](/mnt/c/Projects/Piper/scripts/computer_use_extract_download_harness_smoke_test.py:1)
-- [scripts/computer_use_playwright_blocked_domain_harness_smoke_test.py](/mnt/c/Projects/Piper/scripts/computer_use_playwright_blocked_domain_harness_smoke_test.py:1)
+- [`scripts/computer_use_engine_smoke_test.py`](../../scripts/computer_use_engine_smoke_test.py)
+- [`scripts/computer_use_harness_smoke_test.py`](../../scripts/computer_use_harness_smoke_test.py)
+- [`scripts/computer_use_browser_followup_harness_smoke_test.py`](../../scripts/computer_use_browser_followup_harness_smoke_test.py)
+- [`scripts/computer_use_extract_download_harness_smoke_test.py`](../../scripts/computer_use_extract_download_harness_smoke_test.py)
+- [`scripts/computer_use_playwright_blocked_domain_harness_smoke_test.py`](../../scripts/computer_use_playwright_blocked_domain_harness_smoke_test.py)
 
 ## Shipped Foundation
 
@@ -124,8 +124,8 @@ Keep growing confidence through deterministic harnesses and known-good notes rat
 ### 3. Trigger-flow promotion
 
 As behavior stabilizes, ensure the relevant computer-use truth stays documented in:
-- [docs/architecture/TRIGGER_FLOW.md](/mnt/c/Projects/Piper/docs/architecture/TRIGGER_FLOW.md:1)
-- [docs/architecture/CAPABILITIES.md](/mnt/c/Projects/Piper/docs/architecture/CAPABILITIES.md:1)
+- [`docs/architecture/TRIGGER_FLOW.md`](../architecture/TRIGGER_FLOW.md)
+- [`docs/architecture/CAPABILITIES.md`](../architecture/CAPABILITIES.md)
 
 ### 4. Keep desktop expansion separate
 
