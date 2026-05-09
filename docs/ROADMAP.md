@@ -208,7 +208,7 @@ Features:
 
 Why: True hands-free operation while cooking, driving, walking.
 
-Effort: ~2–3 days. Uses existing TTS/STT pipeline + event loop changes.
+Effort: ~2–3 days. Uses existing TTS/STT pipeline + event loop changes
 
 Files (tentative): `tools/wake_word.py`; `core/pipeline.py` barge-in support; `tools/stt.py` noise profile improvement
 
@@ -269,6 +269,11 @@ Primary spec: `docs/specs/async-task-queue.md`
 
 **Notebook-aware file tools**
 Primary spec: `docs/specs/notebook-aware-file-tools.md`
+
+---
+
+**Modern UI refresh / avatar shell**
+Primary spec: `docs/specs/ui-refresh.md`
 
 ---
 
