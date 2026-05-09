@@ -57,3 +57,20 @@ data/stats.jsonl
 data/users/
 data/benchmarks/results/
 data/reference/user_notes/
+# Voice runtime data
+data/voice_calibration/
+data/voice_embeddings/
+
+# Temp/debug artifacts
+testfile.txt
+out.txt
+out2.txt
+tmp_*.txt
+tmp_*.py
+_git_*.txt
+aga
+.codex
+scripts/check_checkpoint*.py
+scripts/debug_*.py
+scripts/phase8_debug_*.py
+scripts/phase8_approval_only.py
