@@ -76,6 +76,53 @@ def route_node(state: PiperState, config=None) -> PiperState:
     }
 
 
+def _dispatch_stage_node(state: PiperState, config, *, stage_name: str) -> PiperState:
+    runtime = (config or {}).get("configurable", {}) if config else {}
+    orc = runtime.get("orchestrator")
+    if orc is None:
+        raise RuntimeError(
+            f"{stage_name.lower()}_node requires an orchestrator instance in "
+            "config['configurable']['orchestrator']. Pass it when building the graph or invoking the node."
+        )
+
+    orc.dispatch_stage(stage_name)
+    return {
+        **state,
+        "stage": stage_name,
+        "route_decision": dict(orc.route_decision) if getattr(orc, "route_decision", None) else None,
+    }
+
+
+def document_focus_node(state: PiperState, config=None) -> PiperState:
+    """DOC_FOCUS stage — condense ingested-document context before persona."""
+    return _dispatch_stage_node(state, config, stage_name="DOC_FOCUS")
+
+
+def search_node(state: PiperState, config=None) -> PiperState:
+    """SEARCH stage — emit first-pass reply and launch background search."""
+    return _dispatch_stage_node(state, config, stage_name="SEARCH")
+
+
+def reporter_node(state: PiperState, config=None) -> PiperState:
+    """REPORTER stage — summarize completed background search results."""
+    return _dispatch_stage_node(state, config, stage_name="REPORTER")
+
+
+def undo_node(state: PiperState, config=None) -> PiperState:
+    """UNDO stage — invert the most recent reversible file mutation."""
+    return _dispatch_stage_node(state, config, stage_name="UNDO")
+
+
+def reminder_set_node(state: PiperState, config=None) -> PiperState:
+    """REMINDER_SET stage — schedule a reminder via the reminder store."""
+    return _dispatch_stage_node(state, config, stage_name="REMINDER_SET")
+
+
+def explain_node(state: PiperState, config=None) -> PiperState:
+    """EXPLAIN stage — produce an explanation turn from the explain interceptor."""
+    return _dispatch_stage_node(state, config, stage_name="EXPLAIN")
+
+
 # ---------------------------------------------------------------------------
 # MANAGER
 # ---------------------------------------------------------------------------

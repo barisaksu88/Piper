@@ -17,6 +17,7 @@ from core.engines.conversation_compressor import ConversationCompressor
 from core.engines.stats_collector import StatsCollector
 from core.orchestrator_phases import (
     phase_document_focus,
+    phase_explain,
     phase_manager,
     phase_persona,
     phase_reminder_set,
@@ -452,7 +453,7 @@ class Orchestrator:
         phase_reminder_set(self)
 
     def _phase_explain(self):
-        phase_persona(self)
+        phase_explain(self)
 
     def _phase_persona(self):
         phase_persona(self)

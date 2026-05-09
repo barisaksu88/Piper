@@ -104,9 +104,15 @@ When the feature flag is set, `Orchestrator.run()` delegates to `_run_langgraph(
 START
   │
   ▼
-ROUTE  ──[conditional]──► MANAGER  (if TASK)
+ROUTE  ──[conditional]──► MANAGER       (if TASK)
   │                         │
-  └───────────────────────► PERSONA  (if CHAT / SEARCH)
+  ├───────────────────────► SEARCH       (if SEARCH)
+  ├───────────────────────► REPORTER     (pending search payload)
+  ├───────────────────────► DOC_FOCUS    (document-chat bypass)
+  ├───────────────────────► UNDO         (undo interceptor)
+  ├───────────────────────► REMINDER_SET (reminder interceptor)
+  ├───────────────────────► EXPLAIN      (explain interceptor)
+  └───────────────────────► PERSONA      (if CHAT)
                             │
                             ▼
                           VERIFY
@@ -133,14 +139,21 @@ ROUTE  ──[conditional]──► MANAGER  (if TASK)
 | Node | File | Delegates to |
 |---|---|---|
 | `ROUTE` | `core/graph_nodes.py` → `route_node()` | `_run_route_core()` in `orchestrator_phases.py` |
+| `DOC_FOCUS` | `core/graph_nodes.py` → `document_focus_node()` | `dispatch_stage("DOC_FOCUS")` |
+| `SEARCH` | `core/graph_nodes.py` → `search_node()` | `dispatch_stage("SEARCH")` |
+| `REPORTER` | `core/graph_nodes.py` → `reporter_node()` | `dispatch_stage("REPORTER")` |
 | `MANAGER` | `core/graph_nodes.py` → `manager_node()` | `_run_manager_core()` in `orchestrator_phases.py` |
+| `UNDO` | `core/graph_nodes.py` → `undo_node()` | `dispatch_stage("UNDO")` |
+| `REMINDER_SET` | `core/graph_nodes.py` → `reminder_set_node()` | `dispatch_stage("REMINDER_SET")` |
+| `EXPLAIN` | `core/graph_nodes.py` → `explain_node()` | `dispatch_stage("EXPLAIN")` |
 | `VERIFY` | `core/graph_nodes.py` → `verify_node()` | Reads `orc.last_verification` + pending interrupt state |
 | `AWAIT_INTERRUPT` | `core/graph_nodes.py` → `await_interrupt_node()` | Calls `langgraph.types.interrupt()`, applies resume helper |
 | `PERSONA` | `core/graph_nodes.py` → `persona_node()` | `_run_persona_core()` in `orchestrator_phases.py` |
 
 **Conditional edges:**
 
-- `ROUTE → {MANAGER, PERSONA}` — based on `route_decision.decision`
+- `ROUTE → {DOC_FOCUS, SEARCH, REPORTER, MANAGER, UNDO, REMINDER_SET, EXPLAIN, PERSONA}` — based on `orc.next_stage` first, with `route_decision.decision` only as fallback
+- `DOC_FOCUS / SEARCH / REPORTER / UNDO / REMINDER_SET / EXPLAIN → {ROUTE, DOC_FOCUS, SEARCH, REPORTER, MANAGER, UNDO, REMINDER_SET, EXPLAIN, PERSONA, END}` — based on `orc.next_stage`
 - `VERIFY → {AWAIT_INTERRUPT, MANAGER, ROUTE, PERSONA}` — based on `interrupt_payload` + `orc.next_stage`
 - `PERSONA → {END, ROUTE, MANAGER}` — based on `orc.next_stage` (mirrors legacy [ROUTER] / auto-reroute)
 

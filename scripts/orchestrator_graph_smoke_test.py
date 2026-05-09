@@ -90,6 +90,29 @@ class RuntimeDummyOrchestrator(DummyOrchestrator):
         raise RuntimeError(f"Unexpected smoke-test stage: {stage_name}")
 
 
+class SearchRuntimeDummyOrchestrator(DummyOrchestrator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.next_stage = "ROUTE"
+        self.route_decision = {}
+        self.context_card = {}
+        self.scratchpad = []
+        self.pending_file_target_confirmation = None
+        self.pending_stage_pause = None
+
+    def dispatch_stage(self, stage_name: str) -> None:
+        if stage_name == "ROUTE":
+            self.route_decision = {"decision": "SEARCH", "card": {"query": "latest model news"}}
+            self.next_stage = "SEARCH"
+            self.scratchpad.append("ROUTE: SEARCH")
+            return
+        if stage_name == "SEARCH":
+            self.next_stage = "FINISHED"
+            self.scratchpad.append("SEARCH: finished")
+            return
+        raise RuntimeError(f"Unexpected search smoke-test stage: {stage_name}")
+
+
 def _run_sqlite_checkpoint_smoke() -> dict:
     with TemporaryDirectory() as tmp_dir:
         checkpoint_path = Path(tmp_dir) / "langgraph_checkpoints.sqlite"
@@ -138,6 +161,30 @@ def _run_sqlite_checkpoint_smoke() -> dict:
         }
 
 
+def _run_search_route_runtime_smoke() -> dict:
+    runtime = build_orchestrator_graph_runtime(
+        with_checkpointer=False,
+        checkpoint_mode="none",
+    )
+    try:
+        dummy = SearchRuntimeDummyOrchestrator()
+        initial_state = snapshot_orchestrator_state(dummy, stage_trace=[])
+        result = runtime.graph.invoke(
+            initial_state,
+            config={"configurable": {"thread_id": "graph-search-smoke"}},
+            context=OrchestratorGraphContext(orchestrator=dummy),
+        )
+    finally:
+        runtime.close()
+
+    stage_trace = list(result.get("stage_trace") or [])
+    return {
+        "ok": bool(stage_trace == ["ROUTE", "SEARCH"] and result.get("next_stage") == "FINISHED"),
+        "stage_trace": stage_trace,
+        "next_stage": result.get("next_stage"),
+    }
+
+
 def main() -> int:
     dummy = DummyOrchestrator()
     state = snapshot_orchestrator_state(dummy, stage_trace=["ROUTE", "MANAGER"])
@@ -170,19 +217,25 @@ def main() -> int:
     )
 
     sqlite_checkpoint = {"ok": False, "error": "graph unavailable"}
+    search_route_runtime = {"ok": False, "error": "graph unavailable"}
     if graph_available:
         try:
             sqlite_checkpoint = _run_sqlite_checkpoint_smoke()
         except Exception as exc:
             sqlite_checkpoint = {"ok": False, "error": str(exc)}
+        try:
+            search_route_runtime = _run_search_route_runtime_smoke()
+        except Exception as exc:
+            search_route_runtime = {"ok": False, "error": str(exc)}
 
-    success = bool(roundtrip_ok and graph_available and sqlite_checkpoint.get("ok"))
+    success = bool(roundtrip_ok and graph_available and sqlite_checkpoint.get("ok") and search_route_runtime.get("ok"))
     report = {
         "success": success,
         "roundtrip_ok": bool(roundtrip_ok),
         "graph_available": bool(graph_available),
         "graph_error": graph_error,
         "sqlite_checkpoint": sqlite_checkpoint,
+        "search_route_runtime": search_route_runtime,
         "state_keys": sorted(state.keys()),
         "stage_timings_present": "stage_timings" in state,
         "verification": asdict(restored.last_verification) if restored.last_verification else None,

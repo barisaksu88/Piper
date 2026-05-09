@@ -122,6 +122,7 @@ class VoiceIdentityDriftReport:
     baris_to_unknown_after_one: str
     baris_to_unknown_after_three: str
     fresh_sessions_after_single_admin_mismatch: int
+    baris_recovered_after_admin_revocation: str
     checks: dict[str, bool]
 
 
@@ -205,14 +206,22 @@ def run_smoke() -> VoiceIdentityDriftReport:
         _apply(controller_c, _unknown())
         baris_to_unknown_after_three = runtime_c.active_profile().user_id
 
+        runtime_d = _runtime(root / "baris_return")
+        runtime_d.switch_active_user("admin_baris")
+        controller_d = _DummyController(runtime_d)
+        _apply(controller_d, _unknown())
+        _apply(controller_d, _accepted("baris", admin=True))
+        baris_recovered_after_admin_revocation = runtime_d.active_profile().user_id
+
     checks = {
         "baris_to_max_revokes_admin_on_first_mismatch": baris_to_max_after_one == "unknown",
         "baris_to_max_waits_for_three": baris_to_max_after_three == "max",
-        "single_admin_mismatch_does_not_start_new_session": fresh_after_one == 0,
+        "single_admin_mismatch_hides_prior_admin_session": fresh_after_one == 1,
         "max_to_baris_waits_for_three": max_to_baris_after_two == "max"
         and max_to_baris_after_three == "admin_baris",
         "baris_to_unknown_revokes_admin_then_stays_unknown": baris_to_unknown_after_one == "unknown"
         and baris_to_unknown_after_three == "unknown",
+        "baris_return_after_admin_revocation_recovers_immediately": baris_recovered_after_admin_revocation == "admin_baris",
         "voice_events_use_event_block": "[VOICE IDENTITY EVENT]" in baris_to_max_notice
         and "[VOICE IDENTITY EVENT]" in max_to_baris_notice,
     }
@@ -225,6 +234,7 @@ def run_smoke() -> VoiceIdentityDriftReport:
         baris_to_unknown_after_one=baris_to_unknown_after_one,
         baris_to_unknown_after_three=baris_to_unknown_after_three,
         fresh_sessions_after_single_admin_mismatch=fresh_after_one,
+        baris_recovered_after_admin_revocation=baris_recovered_after_admin_revocation,
         checks=checks,
     )
 

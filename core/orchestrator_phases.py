@@ -2080,6 +2080,21 @@ def phase_reminder_set(orc) -> None:
     orc.next_stage = "PERSONA"
 
 
+def phase_explain(orc) -> None:
+    """EXPLAIN stage — produce an explanation turn from the explain interceptor.
+
+    The interceptor already placed the ``explain_last_turn`` system notice in
+    ``route_decision``.  This stage simply logs the bypass and routes to
+    PERSONA so the explanation is generated with the proper context.
+    """
+    orc.raise_if_cancelled()
+    orc.ui.put(("agent_log", "--- PHASE 1: EXPLAIN ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "persona")
+    orc.stats_collector.note_route(orc.turn_stats, decision="CHAT", bypass="explain_last_turn")
+    orc.stats_collector.end_phase(orc.turn_stats, "persona")
+    orc.next_stage = "PERSONA"
+
+
 def _emit_fallback_assistant_answer(orc, text: str) -> None:
     fallback = (text or "").strip()
     if not fallback:
