@@ -10,7 +10,7 @@ Purpose:
 - prevent the work from drifting into patch-by-patch improvisation
 - define what counts as progress and what counts as distraction
 
-If this file conflicts with [AGENTS.md](/mnt/c/Projects/Piper/AGENTS.md), follow `AGENTS.md`.
+If this file conflicts with [AGENTS.md](../../AGENTS.md), follow `AGENTS.md`.
 
 Reference baseline:
 - `Piper v0` source snapshot lives in [versions/piper_v0](../../versions/piper_v0)
