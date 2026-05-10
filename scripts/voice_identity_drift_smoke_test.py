@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tempfile
 import types
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+# Prevent heavy ML libraries from hanging the smoke test at import time.
+class _StubModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        raise ImportError(f"{self.__name__} is stubbed in smoke test")
+
+for _mod_name in ("resemblyzer", "sentence_transformers"):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = _StubModule(_mod_name)
 
 from _bootstrap import ROOT_DIR
 
@@ -239,7 +249,23 @@ def run_smoke() -> VoiceIdentityDriftReport:
     )
 
 
-if __name__ == "__main__":
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Voice identity drift smoke test.")
+    parser.add_argument("--json", action="store_true", dest="as_json", help="Print the final report as JSON.")
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     report = run_smoke()
-    print(json.dumps(asdict(report), indent=2))
-    raise SystemExit(0 if report.success else 1)
+    if args.as_json:
+        print(json.dumps(asdict(report), indent=2))
+    else:
+        print(f"SUCCESS: {report.success}")
+        for name, value in report.checks.items():
+            print(f"  {name}: {value}")
+    return 0 if report.success else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
