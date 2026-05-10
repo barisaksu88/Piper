@@ -288,10 +288,14 @@ def find_suspicious_typos(paths: Iterable[str]) -> list[tuple[str, str]]:
 @dataclass
 class HygieneResult:
     tracked_risky_files: list[str] = field(default_factory=list)
+    tracked_claude_files: list[str] = field(default_factory=list)
+    tracked_codex_files: list[str] = field(default_factory=list)
     tracked_binary_artifacts: list[str] = field(default_factory=list)
     tracked_large_files: list[tuple[str, float]] = field(default_factory=list)
     ignored_but_tracked: list[str] = field(default_factory=list)
     untracked_risky_files: list[str] = field(default_factory=list)
+    untracked_claude_files: list[str] = field(default_factory=list)
+    untracked_codex_files: list[str] = field(default_factory=list)
     untracked_scratch_files: list[str] = field(default_factory=list)
     staged_risky_files: list[str] = field(default_factory=list)
     suspicious_typos: list[tuple[str, str]] = field(default_factory=list)
@@ -317,6 +321,10 @@ def run_hygiene() -> HygieneResult:
     for path in all_tracked:
         if is_risky_path(path) or is_risky_name_prefix(path):
             result.tracked_risky_files.append(path)
+        if path.startswith(".claude/") or path == ".claude":
+            result.tracked_claude_files.append(path)
+        if path.startswith(".codex/") or path == ".codex":
+            result.tracked_codex_files.append(path)
         if is_binary_artifact(path):
             result.tracked_binary_artifacts.append(path)
 
@@ -337,6 +345,10 @@ def run_hygiene() -> HygieneResult:
     for path in untracked:
         if is_risky_path(path) or is_risky_name_prefix(path) or is_binary_artifact(path):
             result.untracked_risky_files.append(path)
+        if path.startswith(".claude/") or path == ".claude":
+            result.untracked_claude_files.append(path)
+        if path.startswith(".codex/") or path == ".codex":
+            result.untracked_codex_files.append(path)
 
     # 5. Untracked scratch files
     for path in all_working_tree:
@@ -347,23 +359,38 @@ def run_hygiene() -> HygieneResult:
     for path in staged:
         if is_risky_path(path) or is_risky_name_prefix(path) or is_binary_artifact(path):
             result.staged_risky_files.append(path)
+        if path.startswith(".claude/") or path == ".claude":
+            result.tracked_claude_files.append(path)
+        if path.startswith(".codex/") or path == ".codex":
+            result.tracked_codex_files.append(path)
 
     # 7. Suspicious typos
     result.suspicious_typos = find_suspicious_typos(all_tracked)
 
     # 8. Absolute paths in text files
+    self_name = Path(__file__).name
     for path in all_tracked:
-        if is_text_file(path):
+        if is_text_file(path) and Path(path).name != self_name:
             found = find_absolute_paths(path)
             if found:
                 result.absolute_paths_in_text.append((path, found))
 
     # ---------- Verdict ----------
-    if result.tracked_risky_files or result.tracked_binary_artifacts or result.staged_risky_files:
+    if (
+        result.tracked_risky_files
+        or result.tracked_claude_files
+        or result.tracked_codex_files
+        or result.tracked_binary_artifacts
+        or result.staged_risky_files
+    ):
         result.verdict = "BLOCKED"
         reasons: list[str] = []
         if result.tracked_risky_files:
             reasons.append(f"tracked risky files: {len(result.tracked_risky_files)}")
+        if result.tracked_claude_files:
+            reasons.append(f"tracked .claude files: {len(result.tracked_claude_files)}")
+        if result.tracked_codex_files:
+            reasons.append(f"tracked .codex files: {len(result.tracked_codex_files)}")
         if result.tracked_binary_artifacts:
             reasons.append(f"tracked binary artifacts: {len(result.tracked_binary_artifacts)}")
         if result.staged_risky_files:
@@ -373,6 +400,8 @@ def run_hygiene() -> HygieneResult:
         result.reason = "; ".join(reasons)
     elif (
         result.untracked_risky_files
+        or result.untracked_claude_files
+        or result.untracked_codex_files
         or result.untracked_scratch_files
         or result.ignored_but_tracked
         or result.suspicious_typos
@@ -383,6 +412,10 @@ def run_hygiene() -> HygieneResult:
         reasons = []
         if result.untracked_risky_files:
             reasons.append(f"untracked risky files: {len(result.untracked_risky_files)}")
+        if result.untracked_claude_files:
+            reasons.append(f"untracked .claude files: {len(result.untracked_claude_files)}")
+        if result.untracked_codex_files:
+            reasons.append(f"untracked .codex files: {len(result.untracked_codex_files)}")
         if result.untracked_scratch_files:
             reasons.append(f"untracked scratch files: {len(result.untracked_scratch_files)}")
         if result.ignored_but_tracked:
@@ -444,6 +477,12 @@ def print_human(result: HygieneResult) -> None:
     print("=== Tracked risky/private/runtime files ===")
     print(_fmt_list(result.tracked_risky_files))
     print()
+    print("=== Tracked .claude files (BLOCKED) ===")
+    print(_fmt_list(result.tracked_claude_files))
+    print()
+    print("=== Tracked .codex files (BLOCKED) ===")
+    print(_fmt_list(result.tracked_codex_files))
+    print()
     print("=== Tracked binary artifacts ===")
     print(_fmt_list(result.tracked_binary_artifacts))
     print()
@@ -455,6 +494,12 @@ def print_human(result: HygieneResult) -> None:
     print()
     print("=== Untracked risky files ===")
     print(_fmt_list(result.untracked_risky_files))
+    print()
+    print("=== Untracked .claude files (WARN) ===")
+    print(_fmt_list(result.untracked_claude_files))
+    print()
+    print("=== Untracked .codex files (WARN) ===")
+    print(_fmt_list(result.untracked_codex_files))
     print()
     print("=== Untracked scratch files ===")
     print(_fmt_list(result.untracked_scratch_files))
