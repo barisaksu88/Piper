@@ -83,7 +83,7 @@ DOMAIN_RULES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Smoke-test recommendations per domain
+# Fast deterministic smoke-test recommendations per domain
 # ---------------------------------------------------------------------------
 SMOKE_MAP: dict[str, list[str]] = {
     "voice identity": [
@@ -110,7 +110,30 @@ SMOKE_MAP: dict[str, list[str]] = {
         "scripts/adversarial_safety_check.py --json",
     ],
     "docs": [
-        "python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts",
+        "python -m compileall app.py config.py core ui memory tools llm",
+    ],
+}
+
+# ---------------------------------------------------------------------------
+# Optional slow / integration / harness tests (not required for default gate)
+# ---------------------------------------------------------------------------
+OPTIONAL_INTEGRATION_SMOKES: dict[str, list[str]] = {
+    "voice identity": [
+        "scripts/voice_identity_inference_smoke_test.py --json --include-stt-hook",
+    ],
+    "UI/controller": [
+        "scripts/user_runtime_smoke_test.py --json --include-harness",
+    ],
+    "routing/orchestrator/executor": [
+        "scripts/langgraph_checkpoint_recovery_smoke_test.py --json",
+        "scripts/langgraph_interrupt_smoke_test.py --json",
+    ],
+    "memory/privacy/user runtime": [
+        "scripts/user_runtime_smoke_test.py --json --include-harness",
+        "scripts/memory_state_harness_smoke_test.py --json",
+    ],
+    "tools/scripts": [
+        "scripts/run_smoke_tests.py",
     ],
 }
 
@@ -253,6 +276,7 @@ class GateResult:
     touched_domains: list[str] = field(default_factory=list)
     high_risk_domains: list[str] = field(default_factory=list)
     recommended_smokes: list[str] = field(default_factory=list)
+    optional_integration_smokes: list[str] = field(default_factory=list)
     verdict: str = "SHIP"
     reason: str = ""
 
@@ -286,11 +310,17 @@ def run_gate() -> GateResult:
     result.touched_domains = sorted(domains)
     result.high_risk_domains = sorted(domains & HIGH_RISK_DOMAINS)
 
-    # Smoke recommendations
+    # Smoke recommendations (fast deterministic only)
     smokes: set[str] = set()
     for d in domains:
         smokes.update(SMOKE_MAP.get(d, []))
     result.recommended_smokes = sorted(smokes)
+
+    # Optional slow / integration tests
+    optional: set[str] = set()
+    for d in domains:
+        optional.update(OPTIONAL_INTEGRATION_SMOKES.get(d, []))
+    result.optional_integration_smokes = sorted(optional)
 
     # ---------- Verdict ----------
     # BLOCKED: risky files staged, or high-risk runtime work on main
@@ -359,8 +389,11 @@ def print_human(result: GateResult) -> None:
     print("Touched domains       :", result.touched_domains or ["(none)"])
     print("High-risk domains     :", result.high_risk_domains or ["(none)"])
     print()
-    print("Recommended smoke tests:")
+    print("Recommended smoke tests (fast / deterministic):")
     print(_fmt_list(result.recommended_smokes))
+    print()
+    print("Optional integration tests (slow / may require LLM server / audio stack):")
+    print(_fmt_list(result.optional_integration_smokes))
     print()
     print(f"Verdict : {result.verdict}")
     print(f"Reason  : {result.reason}")

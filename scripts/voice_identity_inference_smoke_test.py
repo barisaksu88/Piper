@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import sys
 import tempfile
+import types
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
+
+# Prevent heavy ML libraries from hanging the smoke test at import time.
+# These are only needed for real audio/embedding inference; the fast smoke
+# path works with pure-Python threshold logic and mocked engines.
+class _StubModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        raise ImportError(f"{self.__name__} is stubbed in smoke test")
+
+for _mod_name in ("resemblyzer", "sentence_transformers"):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = _StubModule(_mod_name)
 
 from _bootstrap import ROOT_DIR
 
@@ -55,7 +68,73 @@ def _embedding_with_score_against(reference, score: float):
     return np.array([math.cos(base_angle + math.acos(score)), math.sin(base_angle + math.acos(score))])
 
 
-def run_smoke() -> VoiceIdentityInferenceReport:
+def _stt_hook_checks() -> dict[str, bool]:
+    """Optional STT hook verification — may touch audio-stack mocks."""
+    try:
+        import numpy as np
+        import core.voice_recognition as voice_recognition
+        from tools.stt import STTEngine
+
+        class _Segment:
+            text = "hello"
+
+        class _FakeWhisper:
+            def transcribe(self, audio, **kwargs):
+                return [_Segment()], object()
+
+        class _FakeVoiceEngine:
+            def available(self):
+                return True
+
+            def extract_embedding(self, samples):
+                return np.array([1.0, 0.0])
+
+            def evaluate_match(self, embedding):
+                return SimpleNamespace(
+                    best_user="baris",
+                    best_score=0.865,
+                    second_score=0.681,
+                    margin=0.184,
+                    best_is_admin=True,
+                    threshold=0.82,
+                    margin_threshold=0.14,
+                    final_user="baris",
+                    decision="accepted_admin",
+                    reason="accepted_admin",
+                )
+
+            def is_enrolling(self, user_id):
+                return False
+
+        previous_engine = getattr(voice_recognition, "_voice_engine", None)
+        voice_recognition._voice_engine = _FakeVoiceEngine()
+        try:
+            stt = STTEngine()
+            stt.model = _FakeWhisper()
+            stt._min_rms = 0.0
+            stt._audio_data = [np.ones((16000, 1), dtype=np.int16)]
+            stt.set_active_voice_profile("unknown", is_unknown=True)
+            transcript = stt.stop_recording()
+            stt_match = stt.consume_last_voice_match()
+        finally:
+            voice_recognition._voice_engine = previous_engine
+        details = stt_match[2] if isinstance(stt_match, tuple) and len(stt_match) >= 3 else {}
+        return {
+            "stt_hook_records_margin_decision": (
+                transcript == "hello"
+                and isinstance(stt_match, tuple)
+                and stt_match[0] == "baris"
+                and float(stt_match[1]) >= 0.865
+                and isinstance(details, dict)
+                and abs(float(details.get("margin") or 0.0) - 0.184) < 0.001
+                and bool(details.get("best_is_admin"))
+            ),
+        }
+    except Exception:
+        return {"stt_hook_records_margin_decision": False}
+
+
+def run_smoke(include_stt_hook: bool = False) -> VoiceIdentityInferenceReport:
     try:
         import numpy as np
     except Exception as exc:
@@ -184,65 +263,9 @@ def run_smoke() -> VoiceIdentityInferenceReport:
                 and rejected_runtime.active_profile().user_id == "unknown"
             ),
         }
-        try:
-            import core.voice_recognition as voice_recognition
-            from tools.stt import STTEngine
 
-            class _Segment:
-                text = "hello"
-
-            class _FakeWhisper:
-                def transcribe(self, audio, **kwargs):
-                    return [_Segment()], object()
-
-            class _FakeVoiceEngine:
-                def available(self):
-                    return True
-
-                def extract_embedding(self, samples):
-                    return np.array([1.0, 0.0])
-
-                def evaluate_match(self, embedding):
-                    return SimpleNamespace(
-                        best_user="baris",
-                        best_score=0.865,
-                        second_score=0.681,
-                        margin=0.184,
-                        best_is_admin=True,
-                        threshold=0.82,
-                        margin_threshold=0.14,
-                        final_user="baris",
-                        decision="accepted_admin",
-                        reason="accepted_admin",
-                    )
-
-                def is_enrolling(self, user_id):
-                    return False
-
-            previous_engine = getattr(voice_recognition, "_voice_engine", None)
-            voice_recognition._voice_engine = _FakeVoiceEngine()
-            try:
-                stt = STTEngine()
-                stt.model = _FakeWhisper()
-                stt._min_rms = 0.0
-                stt._audio_data = [np.ones((16000, 1), dtype=np.int16)]
-                stt.set_active_voice_profile("unknown", is_unknown=True)
-                transcript = stt.stop_recording()
-                stt_match = stt.consume_last_voice_match()
-            finally:
-                voice_recognition._voice_engine = previous_engine
-            details = stt_match[2] if isinstance(stt_match, tuple) and len(stt_match) >= 3 else {}
-            checks["stt_hook_records_margin_decision"] = (
-                transcript == "hello"
-                and isinstance(stt_match, tuple)
-                and stt_match[0] == "baris"
-                and float(stt_match[1]) >= 0.865
-                and isinstance(details, dict)
-                and abs(float(details.get("margin") or 0.0) - 0.184) < 0.001
-                and bool(details.get("best_is_admin"))
-            )
-        except Exception:
-            checks["stt_hook_records_margin_decision"] = False
+        if include_stt_hook:
+            checks.update(_stt_hook_checks())
 
     return VoiceIdentityInferenceReport(
         success=all(checks.values()),
@@ -263,9 +286,28 @@ def run_smoke() -> VoiceIdentityInferenceReport:
     )
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Voice identity inference smoke test.")
+    parser.add_argument("--json", action="store_true", dest="as_json", help="Print the final report as JSON.")
+    parser.add_argument(
+        "--include-stt-hook",
+        action="store_true",
+        help="Also verify the STT hook margin-decision path (slower, touches audio-stack mocks).",
+    )
+    return parser
+
+
 def main() -> int:
-    report = run_smoke()
-    print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
+    args = build_parser().parse_args()
+    report = run_smoke(include_stt_hook=args.include_stt_hook)
+    if args.as_json:
+        print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
+    else:
+        print(f"SUCCESS: {report.success}")
+        print(f"SKIPPED: {report.skipped}")
+        if report.reason:
+            print(f"REASON: {report.reason}")
+        print(f"CHECKS: {report.checks}")
     return 0 if report.success else 1
 
 
