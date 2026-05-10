@@ -235,6 +235,29 @@ Expected review states:
 
 `NEEDS_EVIDENCE` is acceptable for high-risk branches only if the required evidence is captured and the remaining manual gates are clearly documented.
 
+### Task Eval Harness
+
+Use:
+
+```powershell
+python scripts/task_eval_harness.py --json
+```
+
+Purpose:
+
+- deterministic scoring for route/interceptor/boundary/file-stage policy behavior
+- checks outcomes, not final answer style
+- does not require live model calls
+- useful before expanding task execution, browser/computer-use, or orchestrator behavior
+
+Expected review state:
+
+```text
+PASS
+```
+
+Failing cases should block review unless GPT explicitly accepts the failure as unrelated.
+
 ### Typical Pre-Review Command Set
 
 ```powershell
@@ -242,6 +265,12 @@ git status --short
 python -m compileall app.py config.py core ui memory tools llm
 python scripts/check_repo_hygiene.py --json
 python scripts/release_gate.py --json
+```
+
+For branches touching routing, task execution, file-stage policy, or orchestrator behavior, also run:
+
+```powershell
+python scripts/task_eval_harness.py --json
 ```
 
 For voice identity / runtime branches, also run:
