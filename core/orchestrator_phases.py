@@ -2555,7 +2555,15 @@ def _run_persona_core(orc) -> None:
             "The current user turn came from microphone speech recognition.\n"
             "If [ACTIVE USER] is still unknown, do not ask who is speaking just because identity is unknown; "
             "voice recognition is handled by the runtime before Persona.\n"
+            "Do not say the user is typing, text-based, or keyboard-based.\n"
+            "Do not mention microphone capture, voice recognition, or input modality unless the user explicitly asks about it.\n"
             "Answer the user's actual message normally, using only public/session context and no persistent personal memory."
+        )
+    else:
+        tail_system_parts.append(
+            "[INPUT MODALITY]\n"
+            "Do not mention or infer how the user entered this message unless the user explicitly asks about input method.\n"
+            "Do not say things like 'I see you are typing' or speculate about microphone/keyboard use."
         )
     if not allow_persona_recall:
         tail_system_parts.append(
@@ -2563,6 +2571,17 @@ def _run_persona_core(orc) -> None:
             "Do not emit [RECALL: ...] markers on this turn.\n"
             "Answer only from the current turn evidence, runtime context, and verified state."
         )
+    tail_system_parts.append(
+        "[FACTUAL TRUTHFULNESS RULE]\n"
+        "If a factual claim is uncertain, do not guess.\n"
+        "Say you are not sure.\n"
+        "If the user is asking for a factual answer and the claim is externally verifiable on the web, prefer a short line like 'I am not sure. Let me check online.' and append [ROUTER] instead of bluffing.\n"
+        "Use this for uncertain externally checkable claims when the current runtime context does not already contain grounded evidence, including titles, lyrics, quotes, names, authorship, release facts, dates, rankings, prices, companies, public figures, laws, and current events.\n"
+        "Do not ask the user for permission before checking online when the user is clearly seeking a factual answer and a web search would directly resolve the uncertainty.\n"
+        "Do not reroute just because the conversation is vague, speculative, creative, or emotionally open-ended. Use reroute for factual verification.\n"
+        "Do this at most once on this turn. If a search is already running or already finished for this turn, do not append [ROUTER] again.\n"
+        "Do not present a best guess as if it were verified fact."
+    )
 
     history = orc.get_context()
     if reporter_just_ran:

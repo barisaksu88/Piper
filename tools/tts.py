@@ -1746,7 +1746,24 @@ class TTS:
                             raise TTSError("TTS engine cannot synthesize or speak text.")
                     except Exception as e:
                         log_tts_error(f"TTS SYNTH ERROR: {e}")
-                        continue
+                        if os.name == "nt" and isinstance(self.engine, _KokoroEngine):
+                            fallback_backend = backend
+                            try:
+                                self.engine._disable_with_reason(f"Kokoro synth error: {e}")
+                                if backend not in {"torch", "system"}:
+                                    fallback_backend = self.engine.choose_reply_backend(voice=voice, speed=speed)
+                                if fallback_backend == "torch" and self.engine._voice_fallback_engine is not None:
+                                    samples, sr = self.engine._voice_fallback_engine.synthesize(text, voice=voice, speed=speed)
+                                elif fallback_backend == "system" and self.engine._fallback_engine is not None:
+                                    self.engine._fallback_engine.speak_text_blocking(text, voice=voice, speed=speed)
+                                    continue
+                                else:
+                                    continue
+                            except Exception as fallback_exc:
+                                log_tts_error(f"TTS STREAM FALLBACK ERROR: {fallback_exc}")
+                                continue
+                        else:
+                            continue
 
                     if epoch != self._get_epoch():
                         continue

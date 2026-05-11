@@ -14,13 +14,6 @@ import hashlib
 from pathlib import Path
 from typing import List, Dict, Optional
 
-try:
-    import chromadb
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    chromadb = None
-    SentenceTransformer = None
-
 _LOG = logging.getLogger(__name__)
 
 def _get_deterministic_id(text: str) -> str:
@@ -65,6 +58,8 @@ class _QuietSentenceTransformerEmbeddingFunction:
             return self._model
         with self._lock:
             if self._model is None:
+                from sentence_transformers import SentenceTransformer
+
                 self._model = SentenceTransformer(self.model_name)
         return self._model
 
@@ -91,7 +86,7 @@ class PiperBrain:
         self._fallback_store_path = data_dir / "state" / "brain_fallback.json"
         self._fallback_lock = threading.Lock()
         self._fallback_entries: list[dict] = []
-        self._vector_memory_available = chromadb is not None and SentenceTransformer is not None
+        self._vector_memory_available = self._vector_backend_dependencies_available()
         self._vector_init_lock = threading.Lock()
         self._vector_init_started = False
         self._vector_init_failed = False
@@ -140,8 +135,22 @@ class PiperBrain:
             ).start()
             return True
 
+    @staticmethod
+    def _vector_backend_dependencies_available() -> bool:
+        try:
+            import chromadb  # noqa: F401
+            import sentence_transformers  # noqa: F401
+        except ImportError:
+            return False
+        except Exception as exc:
+            _LOG.warning("[Brain] Vector backend dependency probe failed: %s", exc)
+            return False
+        return True
+
     def _initialize_vector_backend(self) -> None:
         try:
+            import chromadb
+
             embedding_func = _QuietSentenceTransformerEmbeddingFunction("all-MiniLM-L6-v2")
             client = chromadb.PersistentClient(path=str(self.db_path))
             collection = client.get_or_create_collection(
