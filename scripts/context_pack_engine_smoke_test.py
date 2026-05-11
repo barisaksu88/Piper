@@ -315,7 +315,9 @@ def _run(tmp_workspace: Path) -> int:
         and search_first_pass_pack.document_hits == []
         and search_first_pass_pack.situational_state == ""
         and search_first_pass_pack.intent_state == ""
+        and search_first_pass_pack.style_overlay == "[STYLE]\nKeep it crisp."
         and reporter_pack.brain_hits == [{"text": "remember the grocery list flow", "metadata": {"date": "Mar 10, 2026"}, "distance": 0.18}]
+        and reporter_pack.style_overlay == ""
         and reporter_pack.world_state == ""
         and reporter_pack.situational_state == ""
         and reporter_pack.intent_state == ""
@@ -362,7 +364,7 @@ def _run(tmp_workspace: Path) -> int:
         and failed_mutation_runtime.outcome_failed
         and failed_mutation_runtime.verification_verdict == "FAILED"
         and failed_mutation_runtime.verification_checker_path == "MUTATION"
-        and len(directive_pack.tail_system_blocks) == 4
+        and len(directive_pack.tail_system_blocks) >= 4
         and directive_pack.direct_answer == ""
         and "[CONTEXT_ARBITRATION_RULE]" in directive_pack.tail_system_blocks[0]
         and "[DOCUMENT_QA_RULE]" in directive_pack.tail_system_blocks[1]
@@ -376,6 +378,8 @@ def _run(tmp_workspace: Path) -> int:
         and any("[FAILED_VERIFICATION_RULE]" in block for block in failed_directive_pack.tail_system_blocks)
         and any("[CONTEXT_ARBITRATION_RULE]" in block for block in search_directive_pack.tail_system_blocks)
         and "[SEARCH_REPORT_RULE]" in search_rule_block
+        and "background inference handoff" in search_rule_block
+        and "Do not add attitude from the selected persona style." in search_rule_block
         and "extend, refine, or correct" in search_rule_block
         and "[LATEST_RUNTIME_CONTEXT]" in runtime_message
         and "Previous route: TASK" in runtime_message
@@ -409,8 +413,10 @@ def _run(tmp_workspace: Path) -> int:
             "world_state": search_first_pass_pack.world_state,
             "operational_state": search_first_pass_pack.operational_state,
             "document_hit_count": len(search_first_pass_pack.document_hits),
+            "style_overlay": search_first_pass_pack.style_overlay,
         },
         "reporter_pack": {
+            "style_overlay": reporter_pack.style_overlay,
             "world_state": reporter_pack.world_state,
             "operational_state": reporter_pack.operational_state,
             "env_block": reporter_pack.env_block,

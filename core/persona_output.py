@@ -17,6 +17,7 @@ _CASUAL_CHAT_REFERENCE_RE = re.compile(
     r"(?i)\b(task|tasks|event|events|schedule|scheduled|calendar|reminder|memory|knowledge)\b"
 )
 _THINK_TAG_RE = re.compile(r"(?is)</?think>")
+_RECALL_TAG_INLINE_RE = re.compile(r"(?is)\[RECALL:\s*.*?\]")
 
 
 def sanitize_persona_output(
@@ -31,6 +32,7 @@ def sanitize_persona_output(
         return ""
 
     cleaned = _THINK_TAG_RE.sub("", cleaned).strip()
+    cleaned = _RECALL_TAG_INLINE_RE.sub("", cleaned).strip()
     cleaned = re.sub(r"(?i)\bupcoming tasks\b", "upcoming events", cleaned)
     cleaned = re.sub(r"(?i)\bupcoming task\b", "upcoming event", cleaned)
     cleaned = re.sub(

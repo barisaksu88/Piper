@@ -51,6 +51,16 @@ def main() -> int:
         "A blue window with a highlighted button is visible.",
         mode=EVENT_SPEECH_ALL,
     )
+    important_search_result = event_speech_message(
+        "search_result",
+        {"query": "latest news on llama.cpp performance benchmarks"},
+        mode=EVENT_SPEECH_IMPORTANT,
+    )
+    all_search_result = event_speech_message(
+        "search_result",
+        {"query": "latest news on llama.cpp performance benchmarks"},
+        mode=EVENT_SPEECH_ALL,
+    )
     off_error = event_speech_message(
         "error",
         "Example error",
@@ -68,6 +78,8 @@ def main() -> int:
         and noisy_vision is not None
         and noisy_vision_dict is not None
         and all_vision is None
+        and important_search_result is None
+        and all_search_result is None
         and off_error is None
     )
     print(
@@ -80,6 +92,8 @@ def main() -> int:
                 "noisy_vision": noisy_vision,
                 "noisy_vision_dict": noisy_vision_dict,
                 "all_vision": all_vision,
+                "important_search_result": important_search_result,
+                "all_search_result": all_search_result,
                 "off_error": off_error,
             },
             indent=2,
