@@ -1,0 +1,1 @@
+"""Piper search backend adapters."""

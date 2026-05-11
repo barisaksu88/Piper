@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.runtime_control import CancellationToken, OperationCancelled
 from core.search_contracts import SEARCH_TOOL_ERROR_PREFIX
+from core.search.backends.searxng import SearXNGBackend
 # 1. Search Library
 # Import lazily/fault-tolerantly so test harnesses can patch perform_search/DDGS
 # without requiring the live DuckDuckGo backend in every environment.
@@ -463,6 +464,23 @@ def _run_search_query(
     return _run_ddgs_query(query=query, mode=mode, cancel_token=cancel_token)
 
 
+def _run_searxng_search(
+    query: str,
+    *,
+    cancel_token: CancellationToken | None = None,
+) -> list[dict]:
+    _raise_if_cancelled(cancel_token)
+    backend = SearXNGBackend(
+        base_url=CFG.SEARXNG_URL,
+        timeout_s=CFG.SEARXNG_TIMEOUT_S,
+    )
+    results = backend.search(query, max_results=CFG.SEARCH_MAX_RESULTS)
+    return [
+        {"title": r.title, "body": r.snippet, "href": r.url}
+        for r in results
+    ]
+
+
 def _collect_search_results(
     query: str,
     *,
@@ -470,6 +488,26 @@ def _collect_search_results(
     cancel_token: CancellationToken | None = None,
 ) -> tuple[list[dict], str, str]:
     original_query = " ".join(str(query or "").split()).strip()
+
+    # SearXNG path: single backend call, no multi-mode fallback
+    if str(CFG.SEARCH_BACKEND or "").strip().lower() == "searxng":
+        log(f"Search attempt (searxng): {original_query}")
+        try:
+            results = _run_searxng_search(query=original_query, cancel_token=cancel_token)
+        except OperationCancelled:
+            raise
+        except Exception as exc:
+            log(f"Search attempt failed (searxng): {exc}")
+            raise
+        _raise_if_cancelled(cancel_token)
+        if results:
+            relevant_results = _filter_relevant_results(results, original_query)
+            if relevant_results:
+                if len(relevant_results) != len(results):
+                    log(f"Filtered {len(results) - len(relevant_results)} low-relevance search result(s).")
+                return relevant_results[: CFG.SEARCH_MAX_RESULTS], original_query, "searxng"
+        return [], "", ""
+
     relaxed_query = _normalize_search_query(original_query)
     strategies: list[tuple[str, str]] = []
     news_like_query = _query_looks_like_news(original_query)

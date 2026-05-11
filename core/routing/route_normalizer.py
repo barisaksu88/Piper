@@ -47,6 +47,7 @@ from core.routing.route_patterns import (
 from core.routing.route_subjects import (
     looks_like_task_creation,
 )
+from core.search.topic_resolver import resolve_search_topic
 
 _DOCUMENT_READ_REQUEST_RE = re.compile(
     r"(?i)\b(what does it say in|what(?:'s| is) in|tell me what it says in|show me|read|open)\b"
@@ -520,6 +521,43 @@ def _registered_persona_web_search_loopback(
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     return _normalize_persona_web_search_loopback(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_search_topic_resolution(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    if not decision or str(decision.get("decision") or "").strip().upper() != "SEARCH":
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    resolution = resolve_search_topic(
+        user_text=user_msg,
+        recent_history=recent_history,
+        previous_user_request=str(runtime.get("previous_user_request") or ""),
+        last_search_query=str(runtime.get("search_query") or ""),
+        last_search_status=str(runtime.get("last_search_status") or ""),
+    )
+
+    if resolution.needs_clarification:
+        return {
+            "decision": "CHAT",
+            "system_notice": {
+                "kind": "search_clarification",
+                "reply": resolution.clarification_question,
+            },
+        }
+
+    if resolution.query:
+        card = dict(decision.get("card") or {})
+        card["query"] = resolution.query
+        updated = dict(decision)
+        updated["card"] = card
+        return updated
+
+    return None
 
 
 @register_normalizer

@@ -818,6 +818,9 @@ class Config:
     # Web Search (DuckDuckGo + Jina.ai Reader)
     # ---------------------------------------------------------------------
 
+    SEARCH_BACKEND: str = "duckduckgo"
+    SEARXNG_URL: str = "http://127.0.0.1:8888"
+    SEARXNG_TIMEOUT_S: float = 10.0
     SEARCH_BLACKLIST: list[str] = field(default_factory=lambda: ["zhihu.com", "baidu.com", "weibo.com"])
     SEARCH_URL_FETCH_TIMEOUT_S: float = 20.0
     SEARCH_MIN_CONTENT_LENGTH: int = 100
