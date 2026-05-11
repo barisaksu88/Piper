@@ -29,6 +29,7 @@ class SearchV1SmokeReport:
     no_evidence_not_verified_ok: bool
     extraction_produces_text_ok: bool
     scorer_prefers_exact_match_ok: bool
+    end_to_end_pipeline_ok: bool
 
 
 def _test_meta_followup_guard() -> bool:
@@ -85,6 +86,61 @@ def _test_scorer_prefers_exact_match() -> bool:
     return exact_score > generic_score
 
 
+def _test_end_to_end_pipeline() -> bool:
+    """Run the full pipeline with a fake backend and monkeypatched fetch."""
+    from core.search.backends.base import SearchBackend
+    from core.search.pipeline import GroundedSearchPipeline
+
+    class FakeBackend(SearchBackend):
+        name = "fake"
+
+        def search(self, query: str, *, max_results: int = 8):
+            return [
+                SearchResult(
+                    title="Python 3.13 Release",
+                    url="https://example.com/python-3-13",
+                    snippet="Python 3.13 was released in October 2024 with new features.",
+                )
+            ]
+
+    # Monkeypatch fetch_source so the fake URL returns readable text
+    original_fetch_source = fetch_source.__globals__.get("fetch_source")
+    def _fake_fetch_source(result, *, cancel_token=None, min_length=100):
+        url = str(result.get("href") or result.get("url") or "").strip()
+        if "example.com" in url:
+            return FetchedSource(
+                url=url,
+                title=str(result.get("title") or ""),
+                extracted_text=(
+                    "Python 3.13 was released in October 2024. "
+                    "It includes a new incremental garbage collector and improved error messages."
+                ),
+                status="ok",
+            )
+        return fetch_source(result, cancel_token=cancel_token, min_length=min_length)
+
+    import core.search.pipeline as _pipeline_mod
+    import core.search.fetcher as _fetcher_mod
+
+    _fetcher_mod.fetch_source = _fake_fetch_source
+    try:
+        pipeline = GroundedSearchPipeline(backend=FakeBackend(), max_fetch=1)
+        evidence = pipeline.run("Python 3.13 release date")
+
+        if evidence.verdict not in ("verified", "partial"):
+            return False
+        if not evidence.chosen_sources:
+            return False
+        reporter = evidence.to_reporter_string()
+        if "VERDICT:" not in reporter:
+            return False
+        if "ANSWER:" not in reporter:
+            return False
+        return True
+    finally:
+        _fetcher_mod.fetch_source = fetch_source
+
+
 def run_smoke() -> SearchV1SmokeReport:
     results = {
         "meta_followup_guard_ok": _test_meta_followup_guard(),
@@ -92,6 +148,7 @@ def run_smoke() -> SearchV1SmokeReport:
         "no_evidence_not_verified_ok": _test_no_evidence_not_verified(),
         "extraction_produces_text_ok": _test_extraction_produces_text(),
         "scorer_prefers_exact_match_ok": _test_scorer_prefers_exact_match(),
+        "end_to_end_pipeline_ok": _test_end_to_end_pipeline(),
     }
     success = all(results.values())
     return SearchV1SmokeReport(success=success, **results)

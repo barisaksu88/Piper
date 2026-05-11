@@ -138,11 +138,16 @@ class GroundedSearchPipeline:
                 source_title=source.title,
                 max_passages=self.max_passages_per_source,
             )
-            # Apply source-level score boost
+            # Apply source-level score boost (construct new frozen instances)
             source_score = score_source(source, query)
             for p in passages:
-                p.relevance_score = round(p.relevance_score + source_score * 0.1, 3)
-            all_passages.extend(passages)
+                boosted = SourcePassage(
+                    text=p.text,
+                    source_url=p.source_url,
+                    source_title=p.source_title,
+                    relevance_score=round(p.relevance_score + source_score * 0.1, 3),
+                )
+                all_passages.append(boosted)
 
         # 5. Score and rank passages
         ranked = score_passages(all_passages)
