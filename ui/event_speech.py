@@ -93,13 +93,6 @@ def event_speech_message(kind: object, payload: Any, *, mode: object) -> dict[st
     elif event_key == "error":
         text = _truncate(payload)
         dedupe_key = f"error:{text.lower()}"
-    elif event_key == "search_result":
-        if normalized_mode in {EVENT_SPEECH_IMPORTANT, EVENT_SPEECH_ALL, EVENT_SPEECH_NOISY}:
-            query = ""
-            if isinstance(payload, dict):
-                query = _clean_text(payload.get("query") or "")
-            text = f"Search complete for {query}." if query else "Search complete."
-            dedupe_key = f"search:{query.lower() or 'complete'}"
     elif event_key == "code_session_launch":
         if normalized_mode in {EVENT_SPEECH_ALL, EVENT_SPEECH_NOISY}:
             path = ""

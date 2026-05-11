@@ -93,6 +93,7 @@ def build_persona_messages(
 ) -> List[Dict[str, str]]:
     """Build persona-phase chat messages with model-specific compatibility rules."""
     cleaned_history = _clean_for_model(history)
+    search_report_turn = "[SEARCH_REPORT_RULE]" in str(tail_system_content or "")
 
     latest_terminal_search_event = ""
 
@@ -107,7 +108,7 @@ def build_persona_messages(
                 latest_terminal_search_event = content
                 continue
             messages.append({"role": role, "content": content})
-        if latest_terminal_search_event:
+        if latest_terminal_search_event and search_report_turn:
             messages.append({"role": "system", "content": latest_terminal_search_event})
         if tail_system_content:
             messages.append({"role": "system", "content": tail_system_content})
@@ -138,9 +139,9 @@ def build_persona_messages(
         merged_system_parts.append(
             "[SUPPLEMENTAL_SYSTEM_CONTEXT]\n" + "\n\n".join(supplemental_system)
         )
-    if tail_system_content or outcome_block or latest_terminal_search_event:
+    if tail_system_content or outcome_block or (latest_terminal_search_event and search_report_turn):
         runtime_context_parts: List[str] = []
-        if latest_terminal_search_event:
+        if latest_terminal_search_event and search_report_turn:
             runtime_context_parts.append("[LATEST_SYSTEM_EVENT]\n" + latest_terminal_search_event)
         if tail_system_content:
             # tail_system_content holds directive rules (NO_MUTATION_RULE, ACTIVE_SKILL, etc.)

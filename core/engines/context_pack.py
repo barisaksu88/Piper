@@ -359,6 +359,10 @@ class ContextPackEngine:
                 continue
             for field_name in field_names:
                 updates[field_name] = _clear_pack_field_value(field_name)
+        if turn_type == "REPORTER":
+            # Reporter tone should stay neutral and grounded regardless of the
+            # currently selected persona style.
+            updates["style_overlay"] = ""
         if not updates:
             return pack
         return replace(pack, **updates)
@@ -705,10 +709,21 @@ def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
     return (
         "[SEARCH_REPORT_RULE]\n"
         "This turn is the final user-facing summary of a search attempt that already finished.\n"
-        "The user already received an initial response while the search was running.\n"
-        "Use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
+        "This is a background inference handoff, not a personality moment.\n"
+        "If the user already received an initial response while the search was running, use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
+        "If there was no earlier preview reply, treat this as the only user-facing answer for the search turn.\n"
         "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
-        "Answer directly from the search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
+        "Answer directly from the search summary.\n"
+        "Keep the tone neutral, calm, and matter-of-fact.\n"
+        "Do not tease, scold, mock, challenge, flirt, or editorialize.\n"
+        "Do not add attitude from the selected persona style.\n"
+        "Prefer short factual wording over banter, sarcasm, or performative commentary.\n"
+        "Do not say you are still searching, still scanning, still loading, waiting for results, or that more details are still on the way.\n"
+        "Do not say 'while it loads' or preserve any provisional first-pass phrasing from before the search finished.\n"
+        "Do not ask identity questions, speaker questions, or side-channel runtime questions on this turn.\n"
+        "Do not narrate the search as ongoing. The search is already finished on this turn.\n"
+        "If the search summary says the evidence was insufficient or the verdict is NOT_VERIFIED, tell the user honestly that you could not verify the answer. Do not guess.\n"
+        "Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
     )
 
 
