@@ -708,7 +708,9 @@ def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
         "The user already received an initial response while the search was running.\n"
         "Use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
         "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
-        "Answer directly from the search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
+        "Answer directly from the search summary.\n"
+        "If the search summary says the evidence was insufficient or the verdict is NOT_VERIFIED, tell the user honestly that you could not verify the answer. Do not guess.\n"
+        "Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
     )
 
 

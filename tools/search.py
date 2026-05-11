@@ -572,99 +572,27 @@ def _collect_search_results(
     return [], "", ""
 
 def perform_search(query: str, data_dir, log_callback=None, cancel_token: CancellationToken | None = None):
-    # Helper to log to both Console and UI
+    """Run a grounded web search and return structured evidence as a formatted string.
+
+    v1 replaces the old single-query snippet dump with a pipeline:
+    query planner -> search backend -> page fetch -> passage extraction
+    -> source scoring -> grounded answer assembly.
+    """
     def log(msg):
         _LOG.info("%s", msg)
         if log_callback:
             log_callback(msg)
-            
-    # Helper to clean URLs for display
-    def clean_url(u):
-        return u.replace("https://", "").replace("http://", "").replace("www.", "").strip()
 
     log(f"Searching web for: {query}")
-    
-    results = []
-    used_mode = "text"
-    
-    # 1. Search
+
     try:
-        results, used_query, used_mode = _collect_search_results(
-            query,
-            log=log,
-            cancel_token=cancel_token,
-        )
-        if not results: 
-            log(f"{SEARCH_TOOL_ERROR_PREFIX} Zero results.")
-            return f"{SEARCH_TOOL_ERROR_PREFIX} Zero results."
+        from core.search.pipeline import GroundedSearchPipeline
+
+        pipeline = GroundedSearchPipeline()
+        evidence = pipeline.run(query, cancel_token=cancel_token, log_callback=log_callback)
+        return evidence.to_reporter_string()
     except OperationCancelled:
         raise
     except Exception as e:
         log(f"{SEARCH_TOOL_ERROR_PREFIX} {e}")
         return f"{SEARCH_TOOL_ERROR_PREFIX} {e}"
-
-    # Filter Blacklist
-    filtered = [r for r in results if not any(d in _result_url(r) for d in CFG.SEARCH_BLACKLIST)]
-    if not filtered and results:
-        filtered = list(results)
-        log("All search results were blacklisted. Falling back to the unfiltered result set.")
-    log(f"Collected {len(filtered)} candidate results via {used_mode} search.")
-    
-    # 2. Build Base Context (Snippets)
-    output_parts = [
-        "SEARCH META:",
-        f"Query used: {used_query}",
-        f"Candidate results after filtering: {len(filtered)}",
-        "SEARCH SNIPPETS:",
-    ]
-    for r in filtered[:CFG.SEARCH_SNIPPETS_LIMIT]:
-        output_parts.append(f"Title: {r.get('title')}\nSnippet: {r.get('body')}")
-
-    # 3. Greedy Deep Dive (Top 6 Links)
-    output_parts.append("\n--- DEEP DIVE (Full Content) ---")
-    log(f"Deep-diving up to {CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT} links.")
-    
-    links_visited = 0
-
-    for r in filtered:
-        _raise_if_cancelled(cancel_token)
-        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT: break
-        
-        link = _result_url(r)
-        if not link: continue
-        
-        log(clean_url(link))
-        content = fetch_clean_text(link, cancel_token=cancel_token)
-        
-        # Check for errors
-        if "Error reading page" in content:
-            # We can keep errors silent or logged to console only to keep UI clean?
-            # Let's log to console but not UI for cleaner activity window
-            # log(f"Skipped: {clean_url(link)} (Error)")
-            continue
-        if _looks_like_blocked_page(content):
-            log(f"Skipped blocked page: {clean_url(link)}")
-            continue
-        if not _content_matches_query(content, used_query):
-            log(f"Skipped low-relevance page content: {clean_url(link)}")
-            continue
-        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
-            continue
-
-        output_parts.append(f"\nSource: {link}\nContent: {content[:CFG.SEARCH_CONTENT_SLICE_LENGTH]}")
-        links_visited += 1
-
-    output_parts.append(f"\nSOURCE COVERAGE: {links_visited} readable source(s) from {len(filtered)} candidate result(s).")
-
-    if links_visited == 0:
-        if filtered:
-            log("Search found results, but no deep-dive pages were readable. Returning snippet-only context.")
-            output_parts.append(
-                "No readable full-content pages were available. "
-                "Use the snippet evidence above only; do not infer article details beyond the title/snippet."
-            )
-            return "\n".join(output_parts)
-        log("Error: Found results but could not read content from any link.")
-        return f"{SEARCH_TOOL_ERROR_PREFIX} Found results but could not read content from any link."
-
-    return "\n".join(output_parts)
