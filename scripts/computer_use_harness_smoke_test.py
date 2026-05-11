@@ -3,7 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import types
 from dataclasses import asdict, dataclass
+
+# Pre-stub heavy ML libs that hang at import on Windows.
+class _StubModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        raise ImportError(f"{self.__name__} is stubbed")
+
+for _mod_name in ("resemblyzer", "sentence_transformers"):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = _StubModule(_mod_name)
 
 from _bootstrap import ROOT_DIR
 

@@ -1061,6 +1061,21 @@ class StageExecutor:
             _view = FileWorkEngine.render_artifact_view(tool_result)
             if _view:
                 self.ui.put(("code_view", _view))
+            # If the browser action was blocked by scope/domain policy, retrying
+            # will never succeed. Force an honest stage exit so persona can report
+            # the block instead of burning the full planner budget.
+            # This check must run BEFORE tool_result_is_success because BLOCKED
+            # results are not considered successful.
+            if (
+                self._stage_is_computer_use(stage)
+                and base_tag == "BROWSER_OP"
+                and isinstance(tool_result, dict)
+                and str(tool_result.get("status") or "").upper() == "BLOCKED"
+            ):
+                self.ui.put(("agent_log", "   -> BROWSER_OP blocked by scope policy. Stopping stage."))
+                self._log_dashboard("Browser action blocked by scope policy.")
+                success = False
+                break
             if tool_result_is_success(tool_spec, tool_result):
                 self._last_successful_tool_name = base_tag
                 self._last_successful_tool_result = tool_result

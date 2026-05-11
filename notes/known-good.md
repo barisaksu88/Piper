@@ -37,6 +37,8 @@
   - a small live-site pilot allowlist (`example.com`, `iana.org`, `apache.org`, `w3.org`, `python.org`, `rfc-editor.org`, `localhost`, `127.0.0.1`)
 - Bare-domain browser requests like `open example.com in the browser` now normalize to `https://example.com`; localhost/IP inputs normalize to `http://...`.
 - Live-site browser requests outside the pilot allowlist are blocked honestly before navigation instead of failing deep inside the browser step loop.
+- Blocked BROWSER_OP results (`status: BLOCKED`) now force an immediate stage exit in the executor so the planner cannot retry the same blocked action indefinitely.
+- Windows `file://` URLs with absolute paths (e.g. `file:///C:/...`) resolve correctly; the leading slash is stripped before `Path()` so local fixtures load on Windows.
 - Playwright browser sessions are now suspended at the end of each turn on the worker thread that used them, then rehydrated from the last verified browser state on the next turn if needed. This avoids cross-thread browser reuse and noisy shutdown `EPIPE` errors.
 - Live Playwright harnesses that boot Piper should be run sequentially, not in parallel, because overlapping runs can race the shared llama-server lifecycle.
 - Vague browser follow-ups such as `what else is there`, `anything else?`, and short topical replies like `general info` now stay in `COMPUTER_USE` when recent browser context is active instead of degrading into clarification chat or `FILE_WORK`.
