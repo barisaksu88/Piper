@@ -1605,6 +1605,32 @@ def phase_reporter(orc) -> None:
             outcome="FAILED",
             detail=f"Search failed: {normalize_search_error(data)[:500]}",
         )
+    elif "VERDICT:" in data and "ANSWER:" in data:
+        # Search v1 grounded evidence format: extract the pre-assembled answer
+        # instead of asking the LLM to summarize raw text.
+        answer_start = data.find("ANSWER:")
+        if answer_start != -1:
+            summary = data[answer_start + len("ANSWER:"):].strip()
+        else:
+            summary = data
+        verdict_line = ""
+        for line in data.splitlines():
+            if line.startswith("VERDICT:"):
+                verdict_line = line.replace("VERDICT:", "").strip()
+                break
+        orc.ui.put(("agent_log", f"   -> Grounded search verdict: {verdict_line}"))
+        if "not_verified" in verdict_line.lower():
+            orc.stats_collector.finalize_outcome(
+                orc.turn_stats,
+                outcome="PARTIAL",
+                detail="Search returned insufficient evidence.",
+            )
+        else:
+            orc.stats_collector.finalize_outcome(
+                orc.turn_stats,
+                outcome="VERIFIED" if "verified" in verdict_line.lower() else "PARTIAL",
+                detail=f"Search grounded answer: {summary[:200]}",
+            )
     else:
         reporter_path = CFG.PROMPTS_DIR / "reporter.txt"
         sys_template = reporter_path.read_text(encoding="utf-8") if reporter_path.exists() else "Summarize this."
