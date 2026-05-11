@@ -59,6 +59,8 @@ From code and recent notes, the active behavior is roughly:
 - Admin unlock uses stricter thresholds than public speaker selection.
 - A mistaken or low-confidence admin situation revokes private/admin access conservatively.
 - Known-speaker drift requires repeated evidence instead of a single sample.
+- A different known enrolled speaker must win `VOICE_DRIFT_CONFIRMATION_TURNS` consecutive turns before Piper switches away from the current known speaker.
+- Repeated unresolved low-confidence turns are handled separately: Piper only drops from a known speaker to `unknown` after `VOICE_DRIFT_CONFIRMATION_TURNS` consecutive below-threshold turns that do not resolve to any known user.
 - Explicit typed/router identity correction can move from a mistaken guess to the correct public profile.
 
 This should be treated as the live design center unless code changes prove otherwise.
@@ -109,6 +111,8 @@ This threshold model should remain centralized in config/runtime code, not copie
 - Router/typed correction must remain able to fix a mistaken voice guess.
 - Unknown is acceptable and often preferable to false certainty.
 - Revoking admin/private access on uncertainty is safer than leaking it.
+- One strong sample from a different known voice must not immediately evict the current verified speaker.
+- One below-threshold turn must not immediately drop a known speaker to `unknown`.
 
 ## Remaining Active Work
 

@@ -557,8 +557,13 @@
     - durable public-speaker facts saved into that speaker's world model are mirrored into Baris's admin world graph under `person:<user_id>`.
     - explicit relation hints like `Baris's friend` create a matching relation edge in Baris's world graph.
     - prompt context for `unknown` or incomplete public profiles asks at most one short natural identity/relationship question.
+    - one turn from another known enrolled speaker does not evict the current known speaker.
+    - `VOICE_DRIFT_CONFIRMATION_TURNS` consecutive turns for the same other known speaker switch to that user.
+    - one unresolved below-threshold turn does not drop a known speaker to `unknown`.
+    - `VOICE_DRIFT_CONFIRMATION_TURNS` consecutive unresolved below-threshold turns switch to `unknown`.
   - Focused green:
     - `python3 scripts/user_runtime_smoke_test.py --json`
+    - `python scripts/voice_identity_drift_smoke_test.py --json`
 - World-model scrubbing now rejects question-shaped profile values as malformed memory.
   - Expected behavior:
     - values like `max, what is yours` are removed from both `world_model.json` and the legacy `knowledge.json` mirror.
