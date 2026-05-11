@@ -34,6 +34,7 @@ class ComputerUseEngineSmokeReport:
     navigation_download_ok: bool
     direct_url_download_ok: bool
     scope_block_ok: bool
+    configured_allowlist_block_ok: bool
     downloaded_rel: str
     final_url: str
 
@@ -116,6 +117,14 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
                 "action": "goto_url",
                 "url": "https://example.com/",
                 "allowed_domains": ["not-example.com"],
+            },
+        )
+        configured_allowlist_block_result = _run_action(
+            engine,
+            {
+                "action": "goto_url",
+                "url": "https://openai.com/",
+                "allowed_domains": ["openai.com"],
             },
         )
 
@@ -202,6 +211,10 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
             scope_block_result.get("status") == "BLOCKED"
             and "outside the allowed browser scope" in str(scope_block_result.get("summary") or "").lower()
         )
+        configured_allowlist_block_ok = (
+            configured_allowlist_block_result.get("status") == "BLOCKED"
+            and "outside the live-site browser pilot allowlist" in str(configured_allowlist_block_result.get("summary") or "").lower()
+        )
         success = all(
             (
                 title_ok,
@@ -219,6 +232,7 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
                 navigation_download_ok,
                 direct_url_download_ok,
                 scope_block_ok,
+                configured_allowlist_block_ok,
             )
         )
 
@@ -239,6 +253,7 @@ def run_smoke() -> ComputerUseEngineSmokeReport:
             navigation_download_ok=bool(navigation_download_ok),
             direct_url_download_ok=bool(direct_url_download_ok),
             scope_block_ok=bool(scope_block_ok),
+            configured_allowlist_block_ok=bool(configured_allowlist_block_ok),
             downloaded_rel=downloaded_rel,
             final_url=str(click_result.get("current_url") or ""),
         )

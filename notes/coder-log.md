@@ -1,5 +1,27 @@
 # Coder Log
 
+- 2026-05-09: Stabilized browser-first computer use v0 on `stabilize/computer-use-v0`.
+  - Fixed Windows `file://` URL resolution bug in `core/engines/computer_use_engine.py`.
+    - Root cause: `urllib.parse.urlparse("file:///C:/...").path` produces `"/C:/..."`, and `Path("/C:/...")` does not exist on Windows.
+    - Fix: strip the leading slash when the path matches a Windows drive-letter pattern (`/C:/...`).
+  - Fixed BROWSER_OP retry loop on scope/domain BLOCKED results in `core/executor.py`.
+    - Root cause: the BLOCKED early-exit check was placed INSIDE `if tool_result_is_success(...)`, but `tool_result_is_success` returns `False` for BLOCKED status, so the check was never reached. The planner kept retrying the same blocked action until the step budget was exhausted, causing harness timeouts.
+    - Fix: moved the BLOCKED check to run BEFORE `tool_result_is_success`, so blocked browser actions exit the stage immediately regardless of success classification.
+  - Added `configured_allowlist_block_ok` coverage to `scripts/computer_use_engine_smoke_test.py`, verifying `openai.com` is blocked by `COMPUTER_USE_ALLOWED_HTTP_DOMAINS`.
+  - Added ML-lib stubbing (`resemblyzer`, `sentence_transformers`) to all computer-use harness scripts so they run on Windows without import hangs.
+  - Removed stale 83 MB `data/debug/llm_http_payload_debug.txt` from March.
+  - Validation:
+    - `python -m compileall app.py config.py core ui memory tools llm AGENTS/harness scripts` — clean
+    - `scripts/computer_use_engine_smoke_test.py --json` — 16/16 pass
+    - `scripts/computer_use_route_normalizer_smoke_test.py --json` — all pass
+    - `scripts/task_eval_harness.py --json` — 21/21 pass
+    - `scripts/computer_use_harness_smoke_test.py --json` — pass (9.4s)
+    - `scripts/computer_use_browser_followup_harness_smoke_test.py --json` — pass (both turns)
+    - `scripts/computer_use_extract_download_harness_smoke_test.py --json` — pass (14.3s)
+    - `scripts/computer_use_playwright_blocked_domain_harness_smoke_test.py --json` — pass (19.7s)
+    - `scripts/check_repo_hygiene.py` — SHIP
+    - `scripts/startup_self_check.py --json` — OK
+
 - 2026-04-27: Hardened `scripts/piper_graded_stress_test.py` after reviewing the new graded stress harness.
   - Fixed dict-union checks that were intended to mean text OR, passed current-turn stats into route checks, made workspace file snapshots relative-path based, failed timed-out turns, and changed suite exit status to nonzero on gating failures.
   - Tightened `chained_task` so success requires verified artifact state (`chain_start.txt` absent and `chain_end.txt` contains `alpha`) instead of accepting narration about a rename.

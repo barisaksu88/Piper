@@ -331,6 +331,10 @@ class ComputerUseEngine:
         raw_path = urllib.parse.unquote(parsed.path or "")
         if parsed.netloc:
             raw_path = f"//{parsed.netloc}{raw_path}"
+        # Windows: urllib.parse.urlparse leaves a leading slash on absolute paths
+        # e.g. file:///C:/foo → path="/C:/foo". Strip it so Path() resolves correctly.
+        if raw_path.startswith("/") and len(raw_path) > 2 and raw_path[2] == ":":
+            raw_path = raw_path[1:]
         return Path(raw_path)
 
     @staticmethod
