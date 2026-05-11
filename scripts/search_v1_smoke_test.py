@@ -103,8 +103,8 @@ def _test_end_to_end_pipeline() -> bool:
                 )
             ]
 
-    # Monkeypatch fetch_source so the fake URL returns readable text
-    original_fetch_source = fetch_source.__globals__.get("fetch_source")
+    # Monkeypatch fetch_source so the fake URL returns readable text.
+    # Patch both modules because GroundedSearchPipeline imports it directly.
     def _fake_fetch_source(result, *, cancel_token=None, min_length=100):
         url = str(result.get("href") or result.get("url") or "").strip()
         if "example.com" in url:
@@ -122,6 +122,9 @@ def _test_end_to_end_pipeline() -> bool:
     import core.search.pipeline as _pipeline_mod
     import core.search.fetcher as _fetcher_mod
 
+    _orig_pipeline_fetch = _pipeline_mod.fetch_source
+    _orig_fetcher_fetch = _fetcher_mod.fetch_source
+    _pipeline_mod.fetch_source = _fake_fetch_source
     _fetcher_mod.fetch_source = _fake_fetch_source
     try:
         pipeline = GroundedSearchPipeline(backend=FakeBackend(), max_fetch=1)
@@ -138,7 +141,8 @@ def _test_end_to_end_pipeline() -> bool:
             return False
         return True
     finally:
-        _fetcher_mod.fetch_source = fetch_source
+        _pipeline_mod.fetch_source = _orig_pipeline_fetch
+        _fetcher_mod.fetch_source = _orig_fetcher_fetch
 
 
 def run_smoke() -> SearchV1SmokeReport:
