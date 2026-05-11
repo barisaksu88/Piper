@@ -290,6 +290,51 @@ def _build_search_failed_persona_reply(orc) -> str:
     )
 
 
+def _sanitize_completed_search_reply(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(
+        r"(?is)^\s*(?:while\s+it\s+loads?|while\s+that\s+loads?|while\s+it\s+is\s+loading)\s*[,.:;-]?\s*",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?is)\b(?:while\s+it\s+loads?|while\s+that\s+loads?|while\s+it\s+is\s+loading)\b[,.]?\s*",
+        "",
+        cleaned,
+    )
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", cleaned) if part.strip()]
+    filtered: list[str] = []
+    for paragraph in paragraphs:
+        lower = paragraph.casefold()
+        if (
+            "who are they" in lower
+            or "what should i call you" in lower
+            or "who am i speaking with" in lower
+            or "their name is still unknown" in lower
+            or "the user is speaking but their name is still" in lower
+            or "i also remember from our earlier chat" in lower
+            or "from our earlier chat" in lower
+            or "from earlier in our conversation" in lower
+            or "from the earlier chat" in lower
+            or "i also remember" in lower
+            or "i remember you asked" in lower
+            or "internal records" in lower
+            or "does this sound like something baris" in lower
+            or "something baris has been working on" in lower
+            or ("baris" in lower and "?" in paragraph)
+            or "i already knew" in lower
+            or "what specifically are you looking for" in lower
+            or "i already have that in the context" in lower
+        ):
+            continue
+        filtered.append(paragraph)
+    cleaned = "\n\n".join(filtered).strip()
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
 def _build_search_in_flight_reply(notice: dict) -> str:
     active_query = str(notice.get("active_query", "") or "").strip()
     requested_query = str(notice.get("requested_query", "") or "").strip()
@@ -323,10 +368,17 @@ def _build_search_first_pass_rule(query: str) -> str:
         [
             "While it runs, engage with the topic using the current system context and your existing knowledge only.",
             "Give a useful first-pass response: relevant context, a best-effort answer, or one focused follow-up question if that would materially help.",
+            "Keep the first-pass response brief and tentative.",
+            "Use at most three short sentences or two short bullet points.",
+            "Do not improvise lore, personality riffs, speculative backstory, or guesses about Baris, secret projects, fiction, codenames, vibes, or motives.",
+            "Do not pretend to recognize the topic unless the current system context actually supports that recognition.",
+            "If the topic is unfamiliar, say that briefly and stay with the literal topic instead of riffing.",
+            "Do not mention Baris, earlier chats, memory, the workspace, static knowledge bases, classified files, secret initiatives, defense projects, crypto, or sci-fi unless the current system context explicitly requires it.",
+            "Do not describe the topic as classified, clandestine, secret, defense-related, fictional, startup-related, or cryptic unless the current system context explicitly supports that description.",
             "The runtime will automatically deliver the completed search results on this same turn as soon as the search finishes.",
             "Do not ask whether to proceed, whether the user wants the results, or whether you should continue once the search completes.",
             "Do not tell the user to wait, reply, or confirm before the search finishes.",
-            "If you ask a question, it must clarify the search topic itself, not permission to continue the search.",
+            "Only ask a question if the search topic itself is ambiguous. Do not ask interpretive, social, or vibe-based questions about the topic.",
             "Stay tightly on the search topic. Do not riff on unrelated profile facts, tasks, events, memories, or document excerpts.",
             "Ignore any personal or workspace context unless it is directly relevant to the search query itself.",
             "Do not speculate that the web findings are empty, quiet, lacking breakthroughs, or already leaning one way unless the current system context explicitly says so.",
@@ -357,6 +409,28 @@ def _build_search_first_pass_fallback(query: str) -> str:
     if clean_query:
         return f'I\'m checking the web for "{clean_query}" now. I\'ll bring the results back automatically in a moment.'
     return "I'm checking the web for that now. I'll bring the results back automatically in a moment."
+
+
+_BAD_SEARCH_FIRST_PASS_RE = re.compile(
+    r"(?i)\b("
+    r"baris|sci[- ]?fi|startup|classified|secret|clandestine|crypto|"
+    r"coffee maker|testing my confidence|internal database|static knowledge base|"
+    r"doesn't ring a bell|sounds like something from a movie|i already know nothing"
+    r")\b"
+)
+
+
+def _search_first_pass_is_usable(text: str, query: str) -> bool:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return False
+    if _BAD_SEARCH_FIRST_PASS_RE.search(cleaned):
+        return False
+    if len(cleaned) > 420:
+        return False
+    if "?" in cleaned and not _SEARCH_RECENCY_HINT_RE.search(str(query or "")):
+        return False
+    return True
 
 
 def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
@@ -918,6 +992,12 @@ def _run_route_core(orc) -> None:
         if message.get("role") == "user":
             orc.user_msg = message.get("content", "")
             break
+    if (
+        not orc.synthetic_user_turn
+        and recent_history
+        and str(recent_history[-1].get("role") or "").strip().lower() == "user"
+    ):
+        orc.reporter_just_ran = False
     fire_hooks("on_pre_route", orc, recent_history=recent_history)
 
     # Build router_history: exclude the current user turn (passed separately as
@@ -1390,49 +1470,47 @@ def phase_search(orc) -> None:
 
     fallback_text = _build_search_first_pass_fallback(query)
     full_answer = ""
-    if _SEARCH_RECENCY_HINT_RE.search(str(query or "")):
-        _emit_fallback_assistant_answer(orc, fallback_text)
-    else:
-        orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
-        try:
-            full_answer, _ = _stream_or_capture_persona_answer_text_only(
-                orc,
-                speak_messages,
-                allow_recall=False,
-            )
-        except OperationCancelled:
-            orc.ui.put(("assistant_stream_end", ""))
-            raise
-        except LLMClientError as exc:
-            orc.emit_runtime_signal(
-                {
-                    "kind": "search_preview_error",
-                    "severity": "warning",
-                    "source": "search",
-                    "summary": f"Search first-pass error: {exc}",
-                    "details": str(exc),
-                }
-            )
-            orc.ui.put(("agent_log", f"   -> Search first-pass error: {exc}"))
-        except Exception as exc:
-            orc.ui.put(("agent_log", f"   -> Search first-pass fallback: {exc}"))
-
-        clean_answer = sanitize_persona_output(
-            _strip_persona_control_tags(full_answer),
-            route_decision=orc.route_decision,
-            outcome_block="",
-            user_msg=orc.user_msg,
+    try:
+        full_answer, _ = _stream_or_capture_persona_answer_text_only(
+            orc,
+            speak_messages,
+            allow_recall=False,
+            emit_stream=False,
         )
-        if clean_answer:
-            orc.ui.put(("assistant_stream_end", ""))
-            if clean_answer != full_answer.strip():
-                orc.chat.replace_last_assistant_content(clean_answer)
-        else:
-            orc.ui.put(("agent_log", "   -> Search first-pass reply unavailable. Using brief fallback acknowledgment."))
-            _emit_fallback_assistant_answer(orc, fallback_text)
+    except OperationCancelled:
+        raise
+    except LLMClientError as exc:
+        orc.emit_runtime_signal(
+            {
+                "kind": "search_preview_error",
+                "severity": "warning",
+                "source": "search",
+                "summary": f"Search first-pass error: {exc}",
+                "details": str(exc),
+            }
+        )
+        orc.ui.put(("agent_log", f"   -> Search first-pass error: {exc}"))
+    except Exception as exc:
+        orc.ui.put(("agent_log", f"   -> Search first-pass fallback: {exc}"))
+
+    clean_answer = sanitize_persona_output(
+        _strip_persona_control_tags(full_answer),
+        route_decision=orc.route_decision,
+        outcome_block="",
+        user_msg=orc.user_msg,
+    )
+    if clean_answer and not _search_first_pass_is_usable(clean_answer, query):
+        orc.ui.put(("agent_log", "   -> Search first-pass reply was too speculative. Using brief fallback acknowledgment."))
+        clean_answer = ""
+    if clean_answer:
+        _emit_fallback_assistant_answer(orc, clean_answer)
+    else:
+        orc.ui.put(("agent_log", "   -> Search first-pass reply unavailable. Using brief fallback acknowledgment."))
+        _emit_fallback_assistant_answer(orc, fallback_text)
 
     orc.stats_collector.end_phase(orc.turn_stats, "persona")
     orc.stats_collector.note_tts_metrics(orc.turn_stats, _consume_pipeline_stream_metrics(orc))
+    orc.ui.put(("status", "Searching Web..."))
 
     from tools.search import perform_search
 
@@ -1607,7 +1685,7 @@ def phase_reporter(orc) -> None:
         )
     elif "VERDICT:" in data and "ANSWER:" in data:
         # Search v1 grounded evidence format: extract the pre-assembled answer
-        # instead of asking the LLM to summarize raw text.
+        # and let Persona turn it into the final user-facing reply.
         answer_start = data.find("ANSWER:")
         if answer_start != -1:
             summary = data[answer_start + len("ANSWER:"):].strip()
@@ -2156,6 +2234,22 @@ def _strip_persona_control_tags(text: str) -> str:
     return cleaned.strip()
 
 
+def _filter_disallowed_stream_control_tags(chunk: str, pending: str) -> tuple[str, str]:
+    combined = f"{pending}{str(chunk or '')}"
+    if not combined:
+        return "", ""
+    combined = combined.replace("[ROUTER]", "")
+    combined = _RECALL_TAG_RE.sub("", combined)
+    open_idx = combined.upper().find("[RECALL:")
+    if open_idx == -1:
+        return combined, ""
+    closing_idx = combined.find("]", open_idx)
+    if closing_idx == -1:
+        return combined[:open_idx], combined[open_idx:]
+    cleaned = combined[:open_idx] + combined[closing_idx + 1 :]
+    return cleaned, ""
+
+
 def _render_recall_block(query: str, hits: list[dict]) -> str:
     lines = [f"[RECALL RESULT FOR '{query}']"]
     if not hits:
@@ -2244,6 +2338,7 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
     visible_stream_started = False
     leading_buffer = ""
     recall_query = ""
+    disallowed_tag_pending = ""
     stream = None
     live_screen_path = _resolve_live_screen_turn_image(orc)
     try:
@@ -2271,6 +2366,13 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
             full_answer += display_delta
             if not allow_recall or visible_stream_started:
                 if display_delta:
+                    if not allow_recall:
+                        display_delta, disallowed_tag_pending = _filter_disallowed_stream_control_tags(
+                            display_delta,
+                            disallowed_tag_pending,
+                        )
+                        if not display_delta:
+                            continue
                     _LOG.debug("[QUEUE-PUT] len=%d", len(full_answer))
                     orc.ui.put(("assistant_stream_delta", {"text": display_delta}))
                 continue
@@ -2308,11 +2410,18 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
                 pass
 
 
-def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: bool) -> tuple[str, bool]:
+def _stream_or_capture_persona_answer_text_only(
+    orc,
+    messages,
+    *,
+    allow_recall: bool,
+    emit_stream: bool = True,
+) -> tuple[str, bool]:
     full_answer = ""
     visible_stream_started = False
     leading_buffer = ""
     recall_query = ""
+    disallowed_tag_pending = ""
     stream = None
     try:
         stream = orc.llm.generate_stream(
@@ -2328,8 +2437,16 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
             full_answer += display_delta
             if not allow_recall or visible_stream_started:
                 if display_delta:
-                    _LOG.debug("[QUEUE-PUT] len=%d", len(full_answer))
-                    orc.ui.put(("assistant_stream_delta", {"text": display_delta}))
+                    if not allow_recall:
+                        display_delta, disallowed_tag_pending = _filter_disallowed_stream_control_tags(
+                            display_delta,
+                            disallowed_tag_pending,
+                        )
+                        if not display_delta:
+                            continue
+                    if emit_stream:
+                        _LOG.debug("[QUEUE-PUT] len=%d", len(full_answer))
+                        orc.ui.put(("assistant_stream_delta", {"text": display_delta}))
                 continue
 
             # Recall detection: only buffer if response might start with [RECALL:
@@ -2348,13 +2465,15 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
                     break
                 # Buffer overflow: treat as regular response (RECALL incomplete)
                 visible_stream_started = True
-                orc.ui.put(("assistant_stream_delta", {"text": leading_buffer}))
+                if emit_stream:
+                    orc.ui.put(("assistant_stream_delta", {"text": leading_buffer}))
                 leading_buffer = ""
             else:
                 # Doesn't start with [RECALL: — this is regular response text
                 # Switch to streaming mode immediately (don't batch)
                 visible_stream_started = True
-                orc.ui.put(("assistant_stream_delta", {"text": leading_buffer}))
+                if emit_stream:
+                    orc.ui.put(("assistant_stream_delta", {"text": leading_buffer}))
                 leading_buffer = ""
         return full_answer, bool(recall_query)
     finally:
@@ -2591,6 +2710,20 @@ def _run_persona_core(orc) -> None:
             "Do not mention or infer how the user entered this message unless the user explicitly asks about input method.\n"
             "Do not say things like 'I see you are typing' or speculate about microphone/keyboard use."
         )
+    _active_profile = None
+    try:
+        _active_profile = getattr(getattr(orc, "_cfg", None), "user_runtime", None).active_profile()
+    except Exception:
+        _active_profile = None
+    if bool(getattr(_active_profile, "is_unknown", False)) and not reporter_just_ran:
+        tail_system_parts.append(
+            "[UNKNOWN USER RULE]\n"
+            "The active speaker is still unknown.\n"
+            "If you need to ask who they are, ask one short natural name question only.\n"
+            "Do not mention typing, keyboard use, microphone use, voice recognition, public speaker state, or input modality when asking.\n"
+            "Good pattern: 'Who am I speaking with?' or 'What should I call you?'\n"
+            "Bad pattern: 'You're typing, not speaking, so...' or any explanation about why identity is unknown."
+        )
     if not allow_persona_recall:
         tail_system_parts.append(
             "[MEMORY RECALL RULE]\n"
@@ -2811,6 +2944,8 @@ def _run_persona_core(orc) -> None:
         outcome_block=outcome_block,
         user_msg=orc.user_msg,
     )
+    if reporter_just_ran:
+        clean_answer = _sanitize_completed_search_reply(clean_answer)
     clean_answer = _append_undo_notice_if_needed(orc, clean_answer)
     latest_route_error = str(getattr(orc, "latest_route_error", "") or "").strip()
     if reporter_just_ran and not clean_answer and search_summary_fallback:

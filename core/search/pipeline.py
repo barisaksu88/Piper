@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Optional
 
-from core.runtime_control import CancellationToken
+from core.runtime_control import CancellationToken, OperationCancelled
 from core.search.backends.base import SearchBackend
 from core.search.backends.duckduckgo import DuckDuckGoBackend
 from core.search.contracts import (
@@ -21,6 +22,33 @@ from core.search.scorer import score_passages, score_source
 from core.search.answer_builder import build_answer
 
 _LOG = logging.getLogger(__name__)
+_RECENCY_QUERY_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month|developments|updates)\b")
+_AUTHORITATIVE_DOMAIN_HINTS = (
+    ".gov",
+    ".edu",
+    "wikipedia.org",
+    "github.com",
+    "docs.python.org",
+    "developer.mozilla.org",
+    "rfc-editor.org",
+    "ietf.org",
+    "arxiv.org",
+    "pubmed",
+    "reuters.com",
+    "apnews.com",
+    "bbc.com",
+    "nytimes.com",
+    "technologyreview.com",
+    "techcrunch.com",
+    "pcmag.com",
+    "sciencedaily.com",
+    "hai.stanford.edu",
+)
+
+
+def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
+    if cancel_token is not None:
+        cancel_token.raise_if_cancelled()
 
 
 class GroundedSearchPipeline:
@@ -31,14 +59,36 @@ class GroundedSearchPipeline:
         backend: Optional[SearchBackend] = None,
         max_results_per_query: int = 5,
         max_fetch: int = 3,
+        max_fetch_attempts: int = 8,
+        max_fetch_for_recency: int = 6,
         max_passages_per_source: int = 2,
         max_total_passages: int = 5,
     ) -> None:
         self.backend = backend or DuckDuckGoBackend()
         self.max_results_per_query = max_results_per_query
         self.max_fetch = max_fetch
+        self.max_fetch_attempts = max_fetch_attempts
+        self.max_fetch_for_recency = max_fetch_for_recency
         self.max_passages_per_source = max_passages_per_source
         self.max_total_passages = max_total_passages
+
+    @staticmethod
+    def _source_is_authoritative(url: str) -> bool:
+        lower = str(url or "").lower()
+        return any(domain in lower for domain in _AUTHORITATIVE_DOMAIN_HINTS)
+
+    def _needs_more_fetches_for_query(self, query: str, fetched: List[FetchedSource]) -> bool:
+        readable = [source for source in fetched if source.status == "ok"]
+        if not readable:
+            return True
+        if not _RECENCY_QUERY_RE.search(str(query or "")):
+            return len(readable) < self.max_fetch
+        authoritative = [source for source in readable if self._source_is_authoritative(source.url)]
+        if len(readable) < self.max_fetch:
+            return True
+        if authoritative:
+            return False
+        return len(readable) < self.max_fetch_for_recency
 
     def run(
         self,
@@ -80,8 +130,7 @@ class GroundedSearchPipeline:
         all_results: List[SearchResult] = []
 
         for variant in variants:
-            if cancel_token and cancel_token.cancelled:
-                raise RuntimeError("Search cancelled.")
+            _raise_if_cancelled(cancel_token)
 
             try:
                 results = self.backend.search(variant, max_results=self.max_results_per_query)
@@ -106,12 +155,15 @@ class GroundedSearchPipeline:
         # 3. Fetch top candidate pages
         fetched: List[FetchedSource] = []
         fetch_count = 0
+        fetch_attempts = 0
         for r in all_results:
-            if cancel_token and cancel_token.cancelled:
-                raise RuntimeError("Search cancelled.")
-            if fetch_count >= self.max_fetch:
+            _raise_if_cancelled(cancel_token)
+            if fetch_attempts >= self.max_fetch_attempts:
+                break
+            if fetch_count >= self.max_fetch and not self._needs_more_fetches_for_query(query, fetched):
                 break
 
+            fetch_attempts += 1
             log(f"Fetching: {r.url}")
             source = fetch_source(
                 {"title": r.title, "href": r.url, "body": r.snippet},
@@ -131,6 +183,7 @@ class GroundedSearchPipeline:
         for source in fetched:
             if source.status != "ok":
                 continue
+            source_score = score_source(source, query)
             passages = extract_passages(
                 source.extracted_text,
                 query=query,
@@ -139,7 +192,6 @@ class GroundedSearchPipeline:
                 max_passages=self.max_passages_per_source,
             )
             # Apply source-level score boost (construct new frozen instances)
-            source_score = score_source(source, query)
             for p in passages:
                 boosted = SourcePassage(
                     text=p.text,

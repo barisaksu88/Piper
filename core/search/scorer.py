@@ -7,6 +7,29 @@ from typing import List
 
 from core.search.contracts import FetchedSource, SourcePassage
 
+_QUERY_STOPWORDS = {
+    "a",
+    "an",
+    "about",
+    "ai",
+    "the",
+    "for",
+    "in",
+    "on",
+    "of",
+    "to",
+    "and",
+    "or",
+    "latest",
+    "current",
+    "recent",
+    "news",
+    "online",
+    "today",
+    "this",
+    "week",
+    "month",
+}
 
 def score_passages(passages: List[SourcePassage]) -> List[SourcePassage]:
     """Sort passages by relevance score descending.
@@ -39,8 +62,6 @@ def _domain_bonus(url: str) -> float:
         if domain in lower:
             return 0.15
     return 0.0
-
-
 def score_source(source: FetchedSource, query: str) -> float:
     """Score a fetched source overall.
 
@@ -60,7 +81,11 @@ def score_source(source: FetchedSource, query: str) -> float:
     score += min(len(text) / 2000.0, 1.0) * 0.2
 
     # Token overlap
-    query_tokens = set(re.findall(r"[a-z][a-z0-9]*", query.lower()))
+    query_tokens = {
+        token
+        for token in re.findall(r"[a-z][a-z0-9]*", query.lower())
+        if token not in _QUERY_STOPWORDS
+    }
     text_tokens = set(re.findall(r"[a-z][a-z0-9]*", text.lower()))
     if query_tokens:
         overlap = len(query_tokens & text_tokens) / len(query_tokens)
@@ -73,4 +98,4 @@ def score_source(source: FetchedSource, query: str) -> float:
     # Domain authority
     score += _domain_bonus(source.url)
 
-    return round(min(score, 1.0), 3)
+    return round(max(0.0, min(score, 1.0)), 3)

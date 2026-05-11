@@ -58,9 +58,16 @@ def main() -> int:
         tail_system_content=_build_search_first_pass_rule("latest nvidia news"),
         model_path="Qwen3.5-9B-Q6_K.gguf",
     )
+    followup_chat_messages = build_persona_messages(
+        system_content="BASE_SYSTEM",
+        history=report_history,
+        tail_system_content="[NO_MUTATION_RULE]\nNo state change happened.",
+        model_path="Qwen3.5-9B-Q6_K.gguf",
+    )
 
     final_system = str(final_messages[0].get("content") or "") if final_messages else ""
     preview_system = str(preview_messages[0].get("content") or "") if preview_messages else ""
+    followup_chat_system = str(followup_chat_messages[0].get("content") or "") if followup_chat_messages else ""
     preview_user = str(preview_messages[1].get("content") or "") if len(preview_messages) > 1 else ""
     fallback_text = _build_search_first_pass_fallback("search the web for latest Python 3.13 news")
 
@@ -83,6 +90,8 @@ def main() -> int:
         and "The query is recency-sensitive" in preview_system
         and "Do not state current/live facts" in preview_system
         and "[SEARCH SUMMARY FOR 'latest news on llama.cpp performance benchmarks']" not in preview_system
+        and "[SEARCH SUMMARY FOR 'latest nvidia news']" not in followup_chat_system
+        and "[LATEST_SYSTEM_EVENT]\n[SEARCH SUMMARY FOR 'latest nvidia news']" not in followup_chat_system
         and preview_user == "search for the latest nvidia news"
     )
 
@@ -93,6 +102,7 @@ def main() -> int:
                 "preview_history": preview_history,
                 "report_history": report_history,
                 "preview_system": preview_system,
+                "followup_chat_system": followup_chat_system,
                 "final_system_excerpt": final_system[:1200],
                 "fallback_text": fallback_text,
             },

@@ -32,6 +32,7 @@ class ExplicitWebSearchTopicReport:
     timed_out: bool
     duration_s: float
     assistant_turn_count: int
+    tts_utterance_count: int
     first_assistant_text: str
     final_assistant_text: str
     query_seen_by_search: str
@@ -72,6 +73,7 @@ def run_smoke(*, timeout: float) -> ExplicitWebSearchTopicReport:
     seen_query = ""
     result = None
     assistant_messages: list[str] = []
+    tts_utterances: list[dict[str, object]] = []
     search_result_event_count = 0
     hidden_search_summary_present = False
     try:
@@ -82,6 +84,7 @@ def run_smoke(*, timeout: float) -> ExplicitWebSearchTopicReport:
             for message in messages
             if str(message.get("role") or "").strip() == "assistant"
         ]
+        tts_utterances = list(result.tts_utterances)
         search_result_event_count = sum(
             1 for event in result.ui_events if str(event.get("kind") or "").strip() == "search_result"
         )
@@ -104,8 +107,9 @@ def run_smoke(*, timeout: float) -> ExplicitWebSearchTopicReport:
         bool(boot.ready)
         and not timed_out
         and "llama.cpp performance benchmarks" in seen_query.lower()
-        and len(assistant_messages) >= 2
-        and "no matching files found" not in first_lower
+        and len(assistant_messages) == 2
+        and len(tts_utterances) == 2
+        and ("web" in first_lower or "search" in first_lower or "checking" in first_lower)
         and "no matching files found" not in final_lower
         and search_result_event_count >= 1
         and hidden_search_summary_present
@@ -117,6 +121,7 @@ def run_smoke(*, timeout: float) -> ExplicitWebSearchTopicReport:
         timed_out=timed_out,
         duration_s=duration_s,
         assistant_turn_count=len(assistant_messages),
+        tts_utterance_count=len(tts_utterances),
         first_assistant_text=first_assistant,
         final_assistant_text=final_assistant,
         query_seen_by_search=seen_query,
@@ -142,6 +147,7 @@ def main() -> int:
         print(f"READY: {report.ready}")
         print(f"SUCCESS: {report.success}")
         print(f"QUERY_SEEN_BY_SEARCH: {report.query_seen_by_search}")
+        print(f"TTS_UTTERANCE_COUNT: {report.tts_utterance_count}")
         print(f"FIRST_ASSISTANT: {report.first_assistant_text}")
         print(f"FINAL_ASSISTANT: {report.final_assistant_text}")
     return 0 if report.success else 1

@@ -8,6 +8,45 @@ from typing import List
 _QUOTE_RE = re.compile(r'"([^"]{10,500})"')
 _LATEST_RE = re.compile(r"(?i)\b(latest|current|recent|news|today|this week|this month)\b")
 _WHO_RE = re.compile(r"(?i)\b(who (said|wrote|composed|sang|performed)|attribution|author)\b")
+_EXCERPT_REQUEST_RE = re.compile(
+    r"(?i)\b("
+    r"do you know (?:these|the) (?:lyrics|lyric|quote|quotes|words|lines)|"
+    r"what (?:song|quote|book|poem|movie|show|speech) is this|"
+    r"what is this from|where is this from|"
+    r"who (?:said|wrote|sang|performed) this|"
+    r"who is this by|"
+    r"are these (?:lyrics|lines|words|quotes) real|"
+    r"is this (?:a real song|a real quote|real|correct)|"
+    r"do you recognize (?:this|these)"
+    r")\b"
+)
+_LYRIC_HINT_RE = re.compile(r"(?i)\b(lyric|lyrics|song|artist|band|track|album)\b")
+_QUOTE_HINT_RE = re.compile(r"(?i)\b(quote|quoted|said|wrote|author|attributed|attribution|speech)\b")
+
+
+def _extract_unquoted_excerpt(text: str) -> str:
+    raw = " ".join(str(text or "").split()).strip()
+    if not raw or not _EXCERPT_REQUEST_RE.search(raw):
+        return ""
+    marker_patterns = [
+        r"(?i)\bdo you know (?:these|the) (?:lyrics|lyric|quote|quotes|words|lines)\b",
+        r"(?i)\bwhat (?:song|quote|book|poem|movie|show|speech) is this\b",
+        r"(?i)\bwhat is this from\b",
+        r"(?i)\bwhere is this from\b",
+        r"(?i)\bwho (?:said|wrote|sang|performed) this\b",
+        r"(?i)\bwho is this by\b",
+        r"(?i)\bare these (?:lyrics|lines|words|quotes) real\b",
+        r"(?i)\bis this (?:a real song|a real quote|real|correct)\b",
+        r"(?i)\bdo you recognize (?:this|these)\b",
+    ]
+    cut = len(raw)
+    for pattern in marker_patterns:
+        match = re.search(pattern, raw)
+        if match:
+            cut = min(cut, match.start())
+    candidate = raw[:cut].strip(" ,.;:!?-")
+    candidate = re.sub(r"(?i)^(?:and\s+|but\s+)?(?:these|this|the following)\s*:\s*", "", candidate).strip()
+    return candidate if len(candidate.split()) >= 5 else ""
 
 
 def plan_queries(original_query: str) -> List[str]:
@@ -31,6 +70,17 @@ def plan_queries(original_query: str) -> List[str]:
         for q in quotes[:1]:
             variants.append(f'"{q}" attribution')
             variants.append(f'"{q}" source')
+        return [original] + list(dict.fromkeys(variants))
+
+    excerpt = _extract_unquoted_excerpt(original)
+    if excerpt:
+        variants.append(f'"{excerpt}"')
+        if _LYRIC_HINT_RE.search(original):
+            variants.append(f'"{excerpt}" lyrics')
+            variants.append(f'"{excerpt}" song')
+        if _QUOTE_HINT_RE.search(original) or _WHO_RE.search(original):
+            variants.append(f'"{excerpt}" attribution')
+            variants.append(f'"{excerpt}" source')
         return [original] + list(dict.fromkeys(variants))
 
     # Detect latest/current questions

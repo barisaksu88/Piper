@@ -36,6 +36,48 @@ BAD_PREVIEW_FOLLOWUPS = (
     "when they are available",
     "shall i proceed with the search results",
 )
+BAD_PREVIEW_ONGOING_PHRASES = (
+    "shall i proceed",
+    "would you like me to continue",
+    "do you want me to continue",
+    "want me to continue",
+)
+BAD_PREVIEW_SPECULATIVE_PHRASES = (
+    "baris",
+    "baris loves",
+    "classified",
+    "secret initiative",
+    "classified file",
+    "static knowledge base",
+    "sci-fi",
+    "secret projects",
+)
+BAD_FINAL_ONGOING_PHRASES = (
+    "i'm scanning",
+    "still searching",
+    "still scanning",
+    "still loading",
+    "while it loads",
+    "on the way",
+    "when the results arrive",
+)
+BAD_FINAL_IDENTITY_MODALITY_PHRASES = (
+    "you're typing",
+    "you are typing",
+    "not speaking",
+    "voice doesn't automatically show",
+    "your name doesn't automatically show",
+)
+BAD_FINAL_CALLBACK_PHRASES = (
+    "from our earlier chat",
+    "from earlier in our conversation",
+    "i also remember",
+    "[recall:",
+    "internal records",
+    "i already knew",
+    "i already have that in the context",
+    "what specifically are you looking for",
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +89,7 @@ class SearchSmokeReport:
     timed_out: bool
     duration_s: float
     assistant_turn_count: int
+    tts_utterance_count: int
     first_assistant_text: str
     final_assistant_text: str
     search_result_event_count: int
@@ -66,6 +109,7 @@ class SearchSmokeReport:
     reporter_situational_state_present: bool
     reporter_operational_state_present: bool
     reporter_document_matches_present: bool
+    reporter_delivery_mode: str
     query_seen_by_search: str
     stats_record_count: int
     stats_decision: str
@@ -135,6 +179,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
     seen_query = ""
     result = None
     assistant_messages: list[str] = []
+    tts_utterances: list[dict[str, Any]] = []
     search_result_event_count = 0
     hidden_search_summary_present = False
     search_report_consumed_present = False
@@ -152,6 +197,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
     reporter_situational_state_present = False
     reporter_operational_state_present = False
     reporter_document_matches_present = False
+    reporter_delivery_mode = "none"
     stats_record_count = 0
     stats_decision = ""
     stats_query = ""
@@ -163,6 +209,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
             for message in messages
             if str(message.get("role") or "").strip() == "assistant"
         ]
+        tts_utterances = list(result.tts_utterances)
         search_result_events = [
             event for event in result.ui_events
             if str(event.get("kind") or "").strip() == "search_result"
@@ -200,6 +247,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
         reporter_situational_state_present = _has_block_label(reporter_block, "[SITUATIONAL STATE]")
         reporter_operational_state_present = _has_block_label(reporter_block, "[OPERATIONAL STATE]")
         reporter_document_matches_present = _has_block_label(reporter_block, "[DOCUMENT MATCHES]")
+        reporter_delivery_mode = "persona_prompt" if reporter_prompt_logged else "fast_path"
         stats_path = Path(harness.data_dir) / "stats.jsonl"
         stats_records = [
             json.loads(line)
@@ -215,18 +263,37 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
 
     first_assistant = assistant_messages[0] if assistant_messages else ""
     final_assistant = assistant_messages[-1] if assistant_messages else ""
+    first_lower = first_assistant.lower()
     preview_asks_to_proceed = any(
-        phrase in first_assistant.lower()
+        phrase in first_lower
         for phrase in BAD_PREVIEW_FOLLOWUPS
     )
     final_lower = final_assistant.lower()
     timed_out = bool(result.timed_out) if result is not None else True
     duration_s = float(result.duration_s) if result is not None else 0.0
-    success = bool(boot.ready) and not timed_out and bool(seen_query.strip()) and (
-        "project halcyon lantern" in seen_query.lower()
-    ) and len(assistant_messages) >= 2 and bool(first_assistant) and bool(final_assistant) and (
-        first_assistant != final_assistant
-    ) and search_result_event_count >= 1 and hidden_search_summary_present and search_report_consumed_present and preview_prompt_logged and preview_rule_logged and preview_auto_continue_rule_logged and preview_world_state_present and not preview_document_matches_present and not preview_operational_state_present and not preview_asks_to_proceed and reporter_prompt_logged and reporter_rule_logged and not reporter_world_state_present and not reporter_situational_state_present and not reporter_operational_state_present and not reporter_document_matches_present and stats_record_count == 1 and stats_decision == "SEARCH" and "project halcyon lantern" in stats_query.lower() and any(
+    reporter_contract_ok = (
+        reporter_prompt_logged
+        and reporter_rule_logged
+        and not reporter_world_state_present
+        and not reporter_situational_state_present
+        and not reporter_operational_state_present
+        and not reporter_document_matches_present
+    )
+    preview_contract_ok = (
+        bool(first_assistant)
+        and ("web" in first_lower or "search" in first_lower or "checking" in first_lower)
+        and not any(phrase in first_lower for phrase in BAD_PREVIEW_ONGOING_PHRASES)
+        and not any(phrase in first_lower for phrase in BAD_PREVIEW_SPECULATIVE_PHRASES)
+    )
+    success = bool(boot.ready) and not timed_out and (
+        seen_query.strip() == "Project Halcyon Lantern"
+    ) and len(assistant_messages) == 2 and len(tts_utterances) == 2 and preview_contract_ok and bool(final_assistant) and first_assistant != final_assistant and reporter_delivery_mode == "persona_prompt" and not any(
+        phrase in final_lower for phrase in BAD_FINAL_ONGOING_PHRASES
+    ) and not any(
+        phrase in final_lower for phrase in BAD_FINAL_IDENTITY_MODALITY_PHRASES
+    ) and not any(
+        phrase in final_lower for phrase in BAD_FINAL_CALLBACK_PHRASES
+    ) and search_result_event_count >= 1 and hidden_search_summary_present and search_report_consumed_present and preview_prompt_logged and preview_rule_logged and preview_auto_continue_rule_logged and not preview_world_state_present and not preview_document_matches_present and not preview_operational_state_present and not preview_asks_to_proceed and reporter_contract_ok and stats_record_count == 1 and stats_decision == "SEARCH" and "project halcyon lantern" in stats_query.lower() and any(
         token in final_lower for token in DETAIL_TOKENS
     )
     return SearchSmokeReport(
@@ -237,6 +304,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
         timed_out=timed_out,
         duration_s=duration_s,
         assistant_turn_count=len(assistant_messages),
+        tts_utterance_count=len(tts_utterances),
         first_assistant_text=first_assistant,
         final_assistant_text=final_assistant,
         search_result_event_count=search_result_event_count,
@@ -256,6 +324,7 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
         reporter_situational_state_present=reporter_situational_state_present,
         reporter_operational_state_present=reporter_operational_state_present,
         reporter_document_matches_present=reporter_document_matches_present,
+        reporter_delivery_mode=reporter_delivery_mode,
         query_seen_by_search=seen_query,
         stats_record_count=stats_record_count,
         stats_decision=stats_decision,
@@ -284,6 +353,7 @@ def main() -> int:
         if report.kept_data_dir:
             print(f"KEPT_DATA_DIR: {report.kept_data_dir}")
         print(f"ASSISTANT_TURN_COUNT: {report.assistant_turn_count}")
+        print(f"TTS_UTTERANCE_COUNT: {report.tts_utterance_count}")
         print(f"SEARCH_RESULT_EVENT_COUNT: {report.search_result_event_count}")
         print(f"PREVIEW_PROMPT_LOGGED: {report.preview_prompt_logged}")
         print(f"PREVIEW_RULE_LOGGED: {report.preview_rule_logged}")

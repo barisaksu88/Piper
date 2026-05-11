@@ -188,6 +188,11 @@ _LOOKUP_SOURCE_REQUEST_RE = re.compile(
     r"(?P<verb>search for|look for|look up|find|locate|check(?: again)?)\s+"
     r"(?P<subject>.+?)[.?!]*\s*$"
 )
+_EXPLICIT_WEB_SEARCH_SUBJECT_RE = re.compile(
+    r"(?is)^\s*(?:please\s+)?(?:do|make|run|perform)?\s*"
+    r"(?:(?:an?|the)\s+)?(?:online|web|internet)\s+search\s+for\s+(?P<subject>.+?)[.?!]*\s*$"
+    r"|^\s*(?:please\s+)?search\s+(?:the\s+web|online|the\s+internet)\s+for\s+(?P<subject2>.+?)[.?!]*\s*$"
+)
 _WEB_SOURCE_HINT_RE = re.compile(
     r"(?i)\b(web|internet|online|website|websites|site|sites|google|bing|search engine|latest|current|news|headlines?)\b"
 )
@@ -223,6 +228,43 @@ _EXCERPT_IDENTIFICATION_REQUEST_RE = re.compile(
 )
 _LYRIC_HINT_RE = re.compile(r"(?i)\b(lyric|lyrics|song|sang|sung|artist|band|track)\b")
 _QUOTE_HINT_RE = re.compile(r"(?i)\b(quote|quoted|said|wrote|author|attributed|attribution|from)\b")
+_SEARCH_REQUEST_RE = re.compile(
+    r"(?is)^\s*(?:now\s+|then\s+|also\s+|just\s+)?(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
+    r"(?:(?:search(?:\s+the\s+web)?|look\s+up|look\s+for|find|check)(?:\s+for)?\s+)(?P<subject>.+?)[.?!]*\s*$"
+)
+_SEARCH_REQUEST_TAIL_RE = re.compile(
+    r"(?is)\s+(?:and|while)\s+"
+    r"(?:"
+    r"tell\s+me\s+what\s+you\s+(?:already\s+)?know(?:\s+about\s+it)?(?:\s+while\s+it\s+loads)?"
+    r"|tell\s+me\s+what\s+you\s+find"
+    r"|let\s+me\s+know\s+what\s+you\s+find"
+    r"|give\s+me\s+(?:an\s+)?update"
+    r"|keep\s+me\s+posted"
+    r"|while\s+it\s+loads"
+    r"|while\s+you(?:'re|\s+are)?\s+searching"
+    r"|while\s+the\s+search\s+runs"
+    r")\s*$"
+)
+_SEARCH_CORRECTION_RE = re.compile(
+    r"(?is)^\s*(?:it\s+got\s+cut\s+off\s*,?\s*)?(?:no\s*,?\s*)?(?:sorry\s*,?\s*)?(?:i\s+meant|i\s+mean)\s+(?P<subject>.+?)\s*[.?!]*\s*$"
+)
+_SEARCH_GENERIC_SUBJECT_RE = re.compile(
+    r"(?i)\b(models?|news|updates?|developments?|improvements?|results?|info|information|details?)\b"
+)
+_SEARCH_CONTEXT_SKIP_WORDS = {
+    "a", "an", "and", "are", "for", "from", "latest", "current", "recent", "news", "now",
+    "online", "search", "searching", "the", "these", "those", "this", "that",
+    "updates", "update", "developments", "development", "improvements", "improvement", "details",
+    "information", "info", "about", "in", "on", "of", "to", "up", "what", "recently",
+}
+_SEARCH_CONTEXT_GREETING_TOKENS = {
+    "hello",
+    "hi",
+    "hey",
+    "yo",
+    "sup",
+    "greetings",
+}
 _WORKSPACE_SOURCE_CHOICE_RE = re.compile(
     r"(?is)^\s*(?:the\s+)?(?:workspace|workspace files?|workspace file lookup|workspace lookup|file|files|document|documents|docs?)\s*[.!?]*\s*$"
 )
@@ -424,6 +466,142 @@ def _build_excerpt_identification_query(text: str) -> str:
     return f"\"{excerpt}\"{suffix}".strip()
 
 
+def _extract_search_request_subject(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = _SEARCH_REQUEST_RE.match(raw)
+    if not match:
+        return ""
+    subject = " ".join(str(match.group("subject") or "").split()).strip(" ,.;:!?")
+    while subject:
+        trimmed = _SEARCH_REQUEST_TAIL_RE.sub("", subject).strip(" ,.;:!?")
+        if trimmed == subject:
+            break
+        subject = trimmed
+    return subject
+
+
+def _normalize_search_context_text(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9.+#-]+", str(text or "").lower()))
+
+
+def _search_context_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    for token in re.findall(r"[a-z0-9.+#-]+", str(text or "").lower()):
+        if token in _SEARCH_CONTEXT_SKIP_WORDS:
+            continue
+        if len(token) < 2:
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _search_subject_is_generic(subject: str) -> bool:
+    clean = " ".join(str(subject or "").split()).strip().lower()
+    if not clean:
+        return False
+    tokens = _search_context_tokens(clean)
+    if not tokens:
+        return True
+    if all(_SEARCH_GENERIC_SUBJECT_RE.fullmatch(token) for token in tokens):
+        return True
+    return len(tokens) <= 2 and bool(_SEARCH_GENERIC_SUBJECT_RE.search(clean))
+
+
+def _extract_contextual_search_anchor(recent_history: Sequence[dict[str, Any]]) -> str:
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    candidates = [
+        str(runtime.get("search_query") or "").strip(),
+        str(runtime.get("previous_user_request") or "").strip(),
+    ]
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").strip().lower() != "user":
+            continue
+        content = str(item.get("content") or "").strip()
+        if content:
+            candidates.append(content)
+    for candidate in candidates:
+        tokens = _search_context_tokens(candidate)
+        if not tokens or all(token in _SEARCH_CONTEXT_GREETING_TOKENS for token in tokens):
+            continue
+        return " ".join(tokens[:4]).strip()
+    return ""
+
+
+def _repair_generic_search_followup_query(subject: str, recent_history: Sequence[dict[str, Any]]) -> str:
+    clean_subject = " ".join(str(subject or "").split()).strip(" ,.;:!?")
+    if not clean_subject:
+        return ""
+    if not _search_subject_is_generic(clean_subject):
+        return clean_subject
+    anchor = _extract_contextual_search_anchor(recent_history)
+    if not anchor:
+        return clean_subject
+    subject_tokens = _search_context_tokens(clean_subject)
+    anchor_tokens = _search_context_tokens(anchor)
+    merged: list[str] = []
+    for token in anchor_tokens + subject_tokens:
+        if token not in merged:
+            merged.append(token)
+    if not merged:
+        return clean_subject
+    return " ".join(merged)
+
+
+def _derive_search_query_from_turn(
+    current_text: str,
+    recent_history: Sequence[dict[str, Any]],
+    *,
+    prefer_context_repair: bool = True,
+) -> str:
+    text = str(current_text or "").strip()
+    if not text:
+        return ""
+
+    candidates: list[str] = []
+
+    search_subject = _extract_search_request_subject(text)
+    if search_subject:
+        candidates.append(search_subject)
+
+    lookup_subject = _extract_lookup_source_subject(text)
+    if lookup_subject:
+        candidates.append(lookup_subject)
+
+    cleaned_text = _clean_web_offer_query(text)
+    if cleaned_text:
+        candidates.append(cleaned_text)
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    previous_request = str(runtime.get("previous_user_request") or "").strip()
+    previous_subject = _extract_lookup_source_subject(previous_request)
+    if previous_subject:
+        candidates.append(previous_subject)
+    elif previous_request and _normalize_lookup_text(previous_request) != _normalize_lookup_text(text):
+        candidates.append(previous_request)
+
+    for candidate in candidates:
+        cleaned = _clean_web_offer_query(candidate)
+        if not cleaned:
+            continue
+        if prefer_context_repair:
+            repaired = _repair_generic_search_followup_query(cleaned, recent_history)
+            if repaired:
+                cleaned = repaired
+        if not _query_is_generic_web_placeholder(cleaned):
+            return cleaned
+
+    fallback = _extract_recent_web_search_topic(recent_history, text)
+    if fallback:
+        repaired = _repair_generic_search_followup_query(fallback, recent_history)
+        return repaired or fallback
+    return ""
+
+
 def annotate_file_stage_kinds(decision: RouteDecision) -> RouteDecision:
     if not decision or str(decision.get("decision") or "").strip().upper() != "TASK":
         return decision
@@ -520,6 +698,24 @@ def _registered_persona_web_search_loopback(
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     return _normalize_persona_web_search_loopback(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_contextual_search_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_contextual_search_followup(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_search_correction_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_search_correction_followup(decision, user_msg, recent_history)
 
 
 @register_normalizer
@@ -1061,17 +1257,7 @@ def _normalize_explicit_web_search(
     if not text or not _request_explicitly_scopes_lookup_to_web(text):
         return None
 
-    subject = _extract_lookup_source_subject(text)
-    runtime = extract_latest_runtime_context_fields(recent_history)
-    previous_request = str(runtime.get("previous_user_request") or "").strip()
-    if not subject:
-        previous_subject = _extract_lookup_source_subject(previous_request)
-        if previous_subject:
-            subject = previous_subject
-        elif previous_request and previous_request.strip().lower() != text.strip().lower():
-            subject = previous_request
-        else:
-            subject = _extract_recent_web_search_topic(recent_history, text)
+    subject = _derive_search_query_from_turn(text, recent_history)
 
     if _request_has_strong_workspace_scope(text):
         return _build_lookup_source_clarification_card(subject)
@@ -1257,6 +1443,61 @@ def _normalize_persona_web_search_loopback(
     }
 
 
+def _normalize_contextual_search_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    if str((decision or {}).get("decision") or "").strip().upper() != "SEARCH":
+        return None
+    if _SEARCH_CORRECTION_RE.match(text):
+        return None
+    query = _derive_search_query_from_turn(text, recent_history)
+    if not query:
+        return None
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": query,
+        },
+        "source_scope": "web",
+        "confidence": "high",
+    }
+
+
+def _normalize_search_correction_followup(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    match = _SEARCH_CORRECTION_RE.match(text)
+    if not match:
+        return None
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    previous_route = str(runtime.get("previous_route") or "").strip().upper()
+    previous_query = str(runtime.get("search_query") or "").strip()
+    latest_decision = str((decision or {}).get("decision") or "").strip().upper()
+    if previous_route != "SEARCH" and latest_decision != "SEARCH" and not previous_query:
+        return None
+    subject = _clean_web_offer_query(match.group("subject"))
+    if not subject:
+        return None
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": subject,
+        },
+        "source_scope": "web",
+        "confidence": "high",
+    }
+
+
 def _latest_history_assistant_message(recent_history: Sequence[dict[str, Any]]) -> str:
     if not recent_history:
         return ""
@@ -1363,6 +1604,11 @@ def _clean_web_offer_query(text: str) -> str:
     )
     cleaned = re.sub(r"(?is)\bor any other real[- ]time data\b.*$", "", cleaned)
     cleaned = re.sub(r"(?is)\bi can\b.*$", "", cleaned)
+    while cleaned:
+        trimmed = _SEARCH_REQUEST_TAIL_RE.sub("", cleaned).strip(" \"'`.,;:!?")
+        if trimmed == cleaned:
+            break
+        cleaned = trimmed
     cleaned = cleaned.strip(" \"'`.,;:!?")
     if len(cleaned) < 3:
         return ""
@@ -1402,12 +1648,18 @@ def _extract_lookup_source_followup_subject(
     if match:
         subject = _clean_document_lookup_subject(match.group("subject"))
         if subject:
+            repaired = _repair_lookup_subject_from_context(subject, recent_history)
+            if repaired:
+                return repaired
             return subject
 
     match = _WORKSPACE_LOOKUP_TASK_GOAL_RE.match(task_goal)
     if match:
         subject = _clean_document_lookup_subject(match.group("subject"))
         if subject:
+            repaired = _repair_lookup_subject_from_context(subject, recent_history)
+            if repaired:
+                return repaired
             return subject
 
     for item in reversed(list(recent_history or [])):
@@ -1420,10 +1672,78 @@ def _extract_lookup_source_followup_subject(
         if match:
             subject = _clean_document_lookup_subject(match.group("subject"))
             if subject:
+                repaired = _repair_lookup_subject_from_context(subject, recent_history)
+                if repaired:
+                    return repaired
                 return subject
 
     previous_request = str(runtime.get("previous_user_request") or "").strip()
-    return _extract_lookup_source_subject(previous_request)
+    subject = _extract_lookup_source_subject(previous_request)
+    repaired = _repair_lookup_subject_from_context(subject, recent_history)
+    if repaired:
+        return repaired
+    return subject
+
+
+def _repair_lookup_subject_from_context(
+    subject: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> str:
+    clean_subject = _clean_document_lookup_subject(subject)
+    if not clean_subject:
+        return ""
+    if not _lookup_subject_looks_like_first_person_stt_assertion(clean_subject):
+        return ""
+    fallback = _extract_prior_contextual_lookup_subject(
+        recent_history,
+        blocked_subject=clean_subject,
+    )
+    return fallback or ""
+
+
+def _lookup_subject_looks_like_first_person_stt_assertion(subject: str) -> bool:
+    raw = str(subject or "").strip()
+    if not raw:
+        return False
+    if not re.match(r"(?i)^(?:i[' ]?m|i am|im)\b", raw):
+        return False
+    return bool(
+        re.search(
+            r"\b(latest|current|recent|news|release|version|model|update|quote|lyrics|source|price|benchmark|result|results)\b",
+            raw,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _extract_prior_contextual_lookup_subject(
+    recent_history: Sequence[dict[str, Any]],
+    *,
+    blocked_subject: str,
+) -> str:
+    blocked_norm = _normalize_lookup_text(blocked_subject)
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "").strip().lower() != "user":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        normalized = _normalize_lookup_text(content)
+        if not normalized or normalized == blocked_norm:
+            continue
+        if _classify_lookup_source_choice(content):
+            continue
+        extracted = _extract_lookup_source_subject(content)
+        if extracted and _normalize_lookup_text(extracted) != blocked_norm:
+            return _clean_web_offer_query(extracted)
+        if re.search(r"(?i)\bdid you check\b|\bhow do you know\b", content):
+            continue
+        cleaned = _clean_web_offer_query(content)
+        if cleaned and _normalize_lookup_text(cleaned) != blocked_norm:
+            return cleaned
+    return ""
 
 
 def _classify_lookup_source_choice(text: str) -> str:
@@ -1515,15 +1835,22 @@ def _extract_lookup_source_subject(text: str) -> str:
     raw = str(text or "").strip()
     if not raw:
         return ""
+    explicit_web_match = _EXPLICIT_WEB_SEARCH_SUBJECT_RE.match(raw)
+    if explicit_web_match:
+        explicit_subject = _clean_document_lookup_subject(
+            explicit_web_match.group("subject") or explicit_web_match.group("subject2") or ""
+        )
+        if explicit_subject:
+            return _clean_web_offer_query(explicit_subject) or explicit_subject
     match = _LOOKUP_SOURCE_REQUEST_RE.match(raw)
     if not match:
         return ""
     subject = _clean_document_lookup_subject(match.group("subject"))
     if subject:
-        return subject
+        return _clean_web_offer_query(subject) or subject
     fallback = str(match.group("subject") or "").strip()
     fallback = re.sub(r"(?i)\b(?:again|please|online|on the web|on web|in the workspace|in my workspace|in workspace)\b", "", fallback).strip(" ,.;:!?")
-    return fallback
+    return _clean_web_offer_query(fallback) or fallback
 
 
 def _request_explicitly_scopes_lookup_to_web(text: str) -> bool:

@@ -339,22 +339,6 @@ def _apply_voice_identity_match(controller, engine) -> None:
                         "unknown_count": 0,
                     }
                 )
-                if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
-                    controller.user_runtime.switch_active_user("unknown")
-                    _apply_active_user_switch(
-                        controller,
-                        previous_was_unknown=False,
-                        preserve_current_session=False,
-                    )
-                    tracker = {
-                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                        "candidate_user_id": target_user_id,
-                        "candidate_count": candidate_count,
-                        "unknown_count": 0,
-                        "admin_revoked": True,
-                    }
-                    _set_voice_drift_tracker(controller, tracker)
-                    _log_voice_identity_ui("admin_revoked_on_voice_drift")
                 if candidate_count < threshold_turns:
                     _log_voice_identity_ui(
                         f"drift_pending from={getattr(old_profile, 'user_id', '')} "
@@ -375,22 +359,6 @@ def _apply_voice_identity_match(controller, engine) -> None:
                     "unknown_count": unknown_count,
                 }
             )
-            if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
-                controller.user_runtime.switch_active_user("unknown")
-                _apply_active_user_switch(
-                    controller,
-                    previous_was_unknown=False,
-                    preserve_current_session=False,
-                )
-                tracker = {
-                    "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                    "candidate_user_id": "",
-                    "candidate_count": 0,
-                    "unknown_count": unknown_count,
-                    "admin_revoked": True,
-                }
-                _set_voice_drift_tracker(controller, tracker)
-                _log_voice_identity_ui("admin_revoked_on_voice_uncertainty")
             if unknown_count >= threshold_turns:
                 if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
                     controller.user_runtime.switch_active_user("unknown")
