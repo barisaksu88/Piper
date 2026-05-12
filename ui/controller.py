@@ -1274,4 +1274,6 @@ class PiperController:
             dpg.destroy_context()
             self.agent_brain.shutdown()
             self.code_session.shutdown()
+            if getattr(self, "searxng_service", None):
+                self.searxng_service.shutdown()
         return RESTART_EXIT_CODE if self.restart_requested else 0
