@@ -80,6 +80,15 @@ Use this file as the shortest path from "what am I trying to do?" to "what shoul
 - Understand notebook-aware file-tool planning:
   [docs/specs/notebook-aware-file-tools.md](specs/notebook-aware-file-tools.md)
 
+- Understand local SearXNG setup and lifecycle:
+  [docs/specs/search_searxng_local_setup.md](specs/search_searxng_local_setup.md)
+
+- Understand config reference details:
+  [docs/specs/CONFIG_REFERENCE.md](specs/CONFIG_REFERENCE.md)
+
+- Understand memory/privacy model details:
+  [docs/specs/PIPER_MEMORY_PRIVACY_MODEL.md](specs/PIPER_MEMORY_PRIVACY_MODEL.md)
+
 - Understand development workflow:
   [docs/DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md)
 
@@ -102,9 +111,14 @@ Use this file as the shortest path from "what am I trying to do?" to "what shoul
 
 - Review older foundation/spec material for context only:
   [docs/foundation/BLUEPRINT.md](foundation/BLUEPRINT.md)
-  [docs/foundation/EXECUTION_ROADMAP.md](foundation/EXECUTION_ROADMAP.md)
   [docs/foundation/SUMMARY_ENGINE.md](foundation/SUMMARY_ENGINE.md)
   [docs/foundation/GLM_ADVICE.md](foundation/GLM_ADVICE.md)
+
+- Review archived foundation/history material for reference only:
+  [docs/archive/EXECUTION_ROADMAP.md](archive/EXECUTION_ROADMAP.md)
+  [docs/archive/PHASE5_INTERRUPT_INTEGRATION.md](archive/PHASE5_INTERRUPT_INTEGRATION.md)
+  [docs/archive/PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md](archive/PIPER_LANGGRAPH_MIGRATION_SPEC_v1.2.md)
+  [docs/archive/piper_phase8_test_checklist.md](archive/piper_phase8_test_checklist.md)
 
 ## Status Guide
 

@@ -17,5 +17,8 @@ Document roles:
 - `docs/architecture/TRIGGER_FLOW.md` = shipped runtime truth
 - `docs/WIP.md` = active implementation status
 - `docs/ROADMAP.md` = planning index and priorities
+- `docs/specs/search_searxng_local_setup.md` = local SearXNG setup and lifecycle reference
+- `docs/specs/CONFIG_REFERENCE.md` = config defaults and risk notes
+- `docs/specs/PIPER_MEMORY_PRIVACY_MODEL.md` = memory and privacy reference
 - `docs/specs/` = dense concept/reference docs
 - `notes/` = operational memory and evidence breadcrumbs

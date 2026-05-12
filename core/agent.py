@@ -16,8 +16,6 @@ import time
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
-from memory.brain import get_brain
-from core.engines.computer_use_engine import ComputerUseEngine
 from memory.state_owner import SharedStateOwner
 from core.runtime_control import CancellationToken, OperationCancelled
 from tools.registry import get_tool_spec
@@ -52,7 +50,7 @@ class AgentBrain:
         self.transient_state_manager = transient_state_manager
         self.memory_brain = memory_brain
         self.workspace_runtime = WorkspaceToolRuntime(self.workspace)
-        self.computer_use_engine = ComputerUseEngine(data_dir=self.data_dir, workspace=self.workspace)
+        self._computer_use_engine = None
 
     @property
     def task_store(self):
@@ -66,15 +64,25 @@ class AgentBrain:
     def knowledge_store(self):
         return self.state_owner.knowledge_store
 
+    @property
+    def computer_use_engine(self):
+        if self._computer_use_engine is None:
+            from core.engines.computer_use_engine import ComputerUseEngine
+
+            self._computer_use_engine = ComputerUseEngine(data_dir=self.data_dir, workspace=self.workspace)
+        return self._computer_use_engine
+
     def shutdown(self) -> None:
         try:
-            self.computer_use_engine.shutdown()
+            if self._computer_use_engine is not None:
+                self._computer_use_engine.shutdown()
         except Exception:
             pass
 
     def suspend_runtime_sessions(self) -> None:
         try:
-            self.computer_use_engine.suspend()
+            if self._computer_use_engine is not None:
+                self._computer_use_engine.suspend()
         except Exception:
             pass
 
@@ -131,7 +139,12 @@ class AgentBrain:
         if outcome_note:
             text += f" Outcome: {outcome_note}."
         try:
-            brain = self.memory_brain or get_brain(self.data_dir)
+            if self.memory_brain is not None:
+                brain = self.memory_brain
+            else:
+                from memory.brain import get_brain
+
+                brain = get_brain(self.data_dir)
             brain.remember(
                 text=text,
                 metadata={

@@ -40,6 +40,7 @@ from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
 from core.operational_state_service import OperationalStateService
 from core.prompt_context import PromptContextService
+from core.search.searxng_service import SearXNGService
 from core.style import StyleManager
 from llm.boot import BootManager
 from llm.llm_server_client import LlamaServerClient, LlamaServerConfig
@@ -144,11 +145,16 @@ def build_controller() -> PiperController:
     )
     img_gen = ImageGenerator(CFG.DATA_DIR)
 
+    searxng_service = SearXNGService()
+    searxng_service.ensure_available()
+    atexit.register(searxng_service.shutdown)
+
     atexit.register(boot_mgr.shutdown)
     atexit.register(live_screen.stop)
     atexit.register(agent_brain.shutdown)
 
     return PiperController(
+        searxng_service=searxng_service,
         app_title=APP_TITLE,
         width=W,
         height=H,

@@ -126,6 +126,7 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_query = ""
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.conversation_compressor = ConversationCompressor()
@@ -220,6 +221,7 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_query = ""
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.turn_stats = self.stats_collector.resume_or_start_turn(

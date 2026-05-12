@@ -61,6 +61,9 @@ data/reference/user_notes/
 data/voice_calibration/
 data/voice_embeddings/
 
+# Local runtime data (Docker volumes, caches, etc.)
+.local/
+
 # Temp/debug artifacts
 testfile.txt
 out.txt

@@ -85,6 +85,14 @@ def _clear_isolated_chat_memory(data_dir: Path) -> None:
     memory_path.write_text("", encoding="utf-8")
 
 
+def _seed_isolated_world_state(harness: PiperHarness) -> None:
+    """Make prompt-context assertions deterministic without touching live data."""
+    try:
+        harness.knowledge_mgr.upsert_fact("search smoke marker", "first pass context pack")
+    except Exception:
+        pass
+
+
 def _run_with_fake_search(harness: PiperHarness, *, timeout: float) -> tuple[Any, str]:
     original = search_module.perform_search
     seen_query = ""
@@ -131,6 +139,7 @@ def _has_block_label(text: str, label: str) -> bool:
 def run_smoke(*, timeout: float, keep_data_copy: bool) -> SearchSmokeReport:
     harness = PiperHarness(isolated_data=True, keep_data_copy=keep_data_copy)
     _clear_isolated_chat_memory(harness.data_dir)
+    _seed_isolated_world_state(harness)
     boot = harness.start()
     seen_query = ""
     result = None

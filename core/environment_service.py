@@ -20,14 +20,22 @@ _LOG = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class EnvironmentSnapshot:
     time: str
+    location: str
     weather: str
     system_load: str
 
 
 class EnvironmentService:
-    def __init__(self, state_owner: SharedStateOwner, *, weather_city: str = "Istanbul") -> None:
+    def __init__(
+        self,
+        state_owner: SharedStateOwner,
+        *,
+        weather_city: str = "Istanbul",
+        location_label: str = "Istanbul, Turkey",
+    ) -> None:
         self.state_owner = state_owner
         self.weather_city = weather_city
+        self.location_label = str(location_label or weather_city or "Istanbul").strip()
 
     @staticmethod
     def _time_str() -> str:
@@ -88,6 +96,7 @@ class EnvironmentService:
     def snapshot(self) -> EnvironmentSnapshot:
         return EnvironmentSnapshot(
             time=self._time_str(),
+            location=self.location_label,
             weather=self._weather(),
             system_load=self._system_load(),
         )
@@ -99,6 +108,7 @@ class EnvironmentService:
         lines = [
             "[ENVIRONMENT]",
             f"Today: {snapshot.time}",
+            f"Location: {snapshot.location}",
             f"Weather: {snapshot.weather}",
             f"System load: {snapshot.system_load}",
         ]

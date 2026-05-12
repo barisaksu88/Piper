@@ -68,6 +68,11 @@ _CONFIRMATION_PHRASES = (
     "attempt to reroute",
 )
 _RECALL_TAG_RE = re.compile(r"\[RECALL:\s*(.*?)\]", re.IGNORECASE | re.DOTALL)
+_PERSONA_SYSTEM_BLOCK_LABEL_RE = re.compile(
+    r"(?is)\n?\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|"
+    r"FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|SEARCH_FIRST_PASS_RULE|PROACTIVE_TRIGGER|REMINDER_SET_RESULT|"
+    r"EXPLAIN_LAST_TURN|CONTEXT_ARBITRATION_RULE)\](?:\n.*)?$"
+)
 _SCRATCHPAD_ERROR_PREFIXES = (
     "system error:",
     "security violation:",
@@ -76,6 +81,25 @@ _SCRATCHPAD_ERROR_PREFIXES = (
     "execution error:",
 )
 _SEARCH_RECENCY_HINT_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b")
+_SEARCH_PREVIEW_SOURCE_CHOICE_WORDS = {
+    "actually",
+    "do",
+    "internet",
+    "instead",
+    "it",
+    "online",
+    "please",
+    "pls",
+    "search",
+    "that",
+    "the",
+    "web",
+    "yeah",
+    "yep",
+    "yes",
+}
+_SEARCH_PREVIEW_SOURCE_WORDS = {"internet", "online", "web"}
+_SEARCH_SUMMARY_QUERY_RE = re.compile(r"(?is)^\[SEARCH SUMMARY FOR ['\"](?P<query>.+?)['\"]\]")
 _INGESTED_DOC_META_ACTION_RE = re.compile(
     r"(?i)^\s*/ingest\b|\b(ingest|upload|import|attach|add)\b.*\b(document|pdf|docx|file)\b"
 )
@@ -329,6 +353,7 @@ def _build_search_first_pass_rule(query: str) -> str:
             "If you ask a question, it must clarify the search topic itself, not permission to continue the search.",
             "Stay tightly on the search topic. Do not riff on unrelated profile facts, tasks, events, memories, or document excerpts.",
             "Ignore any personal or workspace context unless it is directly relevant to the search query itself.",
+            "If the query asks for externally verifiable facts, results, status, rankings, dates, specs, or claims not supplied by current system context, frame uncertainty plainly and defer specifics until the web results arrive.",
             "Do not speculate that the web findings are empty, quiet, lacking breakthroughs, or already leaning one way unless the current system context explicitly says so.",
             "Do not present your existing knowledge as if it came from the live web search.",
             "Make it clear the web findings will follow shortly.",
@@ -360,7 +385,16 @@ def _build_search_first_pass_fallback(query: str) -> str:
 
 
 def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
-    current_user = str(user_msg or query or "").strip()
+    raw_user = str(user_msg or "").strip()
+    clean_query = str(query or "").strip()
+    current_user = raw_user or clean_query
+    if clean_query and raw_user and raw_user.casefold() != clean_query.casefold():
+        words = set(re.findall(r"[a-z]+", raw_user.casefold()))
+        source_choice_only = bool(words & _SEARCH_PREVIEW_SOURCE_WORDS) and words.issubset(
+            _SEARCH_PREVIEW_SOURCE_CHOICE_WORDS
+        )
+        if source_choice_only:
+            current_user = f"Search the web for {clean_query}."
     if not current_user:
         return []
     return [{"role": "user", "content": current_user}]
@@ -373,16 +407,19 @@ def _build_search_report_history(
 ) -> list[dict[str, str]]:
     filtered: list[dict[str, str]] = []
     latest_summary = None
+    latest_summary_query = ""
     for message in reversed(list(history or [])):
         if str(message.get("role") or "").strip().lower() != "system":
             continue
         content = str(message.get("content") or "").strip()
         if content.startswith("[SEARCH SUMMARY FOR "):
             latest_summary = {"role": "system", "content": content}
+            match = _SEARCH_SUMMARY_QUERY_RE.match(content)
+            latest_summary_query = str(match.group("query") if match else "").strip()
             break
     if latest_summary is not None:
         filtered.append(latest_summary)
-    filtered.extend(_build_search_preview_history(user_msg, user_msg))
+    filtered.extend(_build_search_preview_history(user_msg, latest_summary_query or user_msg))
     return filtered
 
 
@@ -1593,6 +1630,7 @@ def phase_reporter(orc) -> None:
     search_failed = bool(payload.failed)
 
     orc.stats_collector.note_reporter_query(orc.turn_stats, query)
+    orc.latest_search_query = query
     orc.latest_search_failed = search_failed
     orc.latest_search_error = normalize_search_error(data) if search_failed else ""
 
@@ -2121,6 +2159,7 @@ def _extract_recall_query(text: str) -> str:
 def _strip_persona_control_tags(text: str) -> str:
     cleaned = _RECALL_TAG_RE.sub("", str(text or ""))
     cleaned = cleaned.replace("[ROUTER]", "")
+    cleaned = _PERSONA_SYSTEM_BLOCK_LABEL_RE.sub("", cleaned)
     cleaned = re.sub(
         r"\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|SEARCH_FIRST_PASS_RULE|PROACTIVE_TRIGGER|REMINDER_SET_RESULT|EXPLAIN_LAST_TURN|CONTEXT_ARBITRATION_RULE)\]",
         "",
@@ -2555,7 +2594,15 @@ def _run_persona_core(orc) -> None:
             "The current user turn came from microphone speech recognition.\n"
             "If [ACTIVE USER] is still unknown, do not ask who is speaking just because identity is unknown; "
             "voice recognition is handled by the runtime before Persona.\n"
+            "Do not say the user is typing, text-based, or keyboard-based.\n"
+            "Do not mention microphone capture, voice recognition, or input modality unless the user explicitly asks about it.\n"
             "Answer the user's actual message normally, using only public/session context and no persistent personal memory."
+        )
+    else:
+        tail_system_parts.append(
+            "[INPUT MODALITY]\n"
+            "Do not mention or infer how the user entered this message unless the user explicitly asks about input method.\n"
+            "Do not say things like 'I see you are typing' or speculate about microphone/keyboard use."
         )
     if not allow_persona_recall:
         tail_system_parts.append(
@@ -2563,6 +2610,17 @@ def _run_persona_core(orc) -> None:
             "Do not emit [RECALL: ...] markers on this turn.\n"
             "Answer only from the current turn evidence, runtime context, and verified state."
         )
+    tail_system_parts.append(
+        "[FACTUAL TRUTHFULNESS RULE]\n"
+        "If a factual claim is uncertain, do not guess.\n"
+        "Say you are not sure.\n"
+        "If the user is asking for a factual answer and the claim is externally verifiable on the web, prefer a short line like 'I am not sure. Let me check online.' and append [ROUTER] instead of bluffing.\n"
+        "Use this for uncertain externally checkable claims when the current runtime context does not already contain grounded evidence, including titles, lyrics, quotes, names, authorship, release facts, dates, rankings, prices, companies, public figures, laws, and current events.\n"
+        "Do not ask the user for permission before checking online when the user is clearly seeking a factual answer and a web search would directly resolve the uncertainty.\n"
+        "Do not reroute just because the conversation is vague, speculative, creative, or emotionally open-ended. Use reroute for factual verification.\n"
+        "Do this at most once on this turn. If a search is already running or already finished for this turn, do not append [ROUTER] again.\n"
+        "Do not present a best guess as if it were verified fact."
+    )
 
     history = orc.get_context()
     if reporter_just_ran:

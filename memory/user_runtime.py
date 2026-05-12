@@ -11,15 +11,16 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from config import data_state_path
-from memory.brain import get_brain
-from memory.documents import DocumentMemoryManager
 from memory.state_owner import SharedStateOwner
 from memory.stores import JsonDictStore, WorldModelStore
-from memory.transient_state import TransientStateManager
-from memory.world_model import WorldModelManager
+
+if TYPE_CHECKING:
+    from memory.documents import DocumentMemoryManager
+    from memory.transient_state import TransientStateManager
+    from memory.world_model import WorldModelManager
 
 
 DEFAULT_ADMIN_USER_ID = "admin_baris"
@@ -1421,6 +1422,8 @@ class ActiveUserRuntime:
             manager = self._knowledge_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.world_model import WorldModelManager
+
             owner = self.state_owner_for(key)
             profile = self.registry.profile_for_id(key)
             if profile is None:
@@ -1453,6 +1456,8 @@ class ActiveUserRuntime:
             manager = self._transient_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.transient_state import TransientStateManager
+
             owner = self.state_owner_for(key)
             manager = TransientStateManager(
                 situational_store=owner.situational_state_store,
@@ -1471,6 +1476,8 @@ class ActiveUserRuntime:
             manager = self._document_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.documents import DocumentMemoryManager
+
             profile = self.registry.profile_for_id(key)
             if profile is None:
                 raise KeyError(f"Unknown user_id: {user_id}")
@@ -1485,6 +1492,8 @@ class ActiveUserRuntime:
         profile = self.registry.profile_for_id(user_id)
         if profile is None:
             raise KeyError(f"Unknown user_id: {user_id}")
+        from memory.brain import get_brain
+
         return get_brain(profile.resolved_data_dir(self.data_dir))
 
     def current_brain(self) -> Any:
