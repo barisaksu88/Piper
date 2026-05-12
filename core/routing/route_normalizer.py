@@ -47,6 +47,7 @@ from core.routing.route_patterns import (
 from core.routing.route_subjects import (
     looks_like_task_creation,
 )
+from core.search.topic_resolver import resolve_search_topic
 
 _DOCUMENT_READ_REQUEST_RE = re.compile(
     r"(?i)\b(what does it say in|what(?:'s| is) in|tell me what it says in|show me|read|open)\b"
@@ -184,7 +185,7 @@ _APPEND_LINE_REQUEST_RE = re.compile(
     re.IGNORECASE,
 )
 _LOOKUP_SOURCE_REQUEST_RE = re.compile(
-    r"(?is)^\s*(?:maybe\s+|just\s+)?(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
+    r"(?is)^\s*(?:maybe\s+)?(?:just\s+)?(?:please\s+)?(?:can you\s+|could you\s+|would you\s+)?"
     r"(?P<verb>search for|look for|look up|find|locate|check(?: again)?)\s+"
     r"(?P<subject>.+?)[.?!]*\s*$"
 )
@@ -520,6 +521,75 @@ def _registered_persona_web_search_loopback(
     recent_history: Sequence[dict[str, Any]],
 ) -> RouteDecision | None:
     return _normalize_persona_web_search_loopback(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_search_topic_resolution(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    if not decision or str(decision.get("decision") or "").strip().upper() != "SEARCH":
+        return None
+
+    lookup_subject = _extract_lookup_source_subject(user_msg)
+    ambiguous_lookup_source = bool(lookup_subject) and not (
+        _request_explicitly_scopes_lookup_to_web(user_msg)
+        or _request_explicitly_scopes_lookup_to_workspace(user_msg)
+    )
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    resolution = resolve_search_topic(
+        user_text=user_msg,
+        recent_history=recent_history,
+        previous_user_request=str(runtime.get("previous_user_request") or ""),
+        last_search_query=str(runtime.get("search_query") or ""),
+        last_search_status=str(runtime.get("last_search_status") or ""),
+    )
+
+    if ambiguous_lookup_source and not _runtime_has_prior_search_context(runtime):
+        return None
+
+    if ambiguous_lookup_source and not resolution.used_context:
+        return None
+
+    if resolution.needs_clarification:
+        if ambiguous_lookup_source:
+            return None
+        return {
+            "decision": "CHAT",
+            "system_notice": {
+                "kind": "search_clarification",
+                "reply": resolution.clarification_question,
+            },
+        }
+
+    if resolution.query:
+        card = dict(decision.get("card") or {})
+        card["query"] = resolution.query
+        updated = dict(decision)
+        updated["card"] = card
+        return updated
+
+    return None
+
+
+@register_normalizer
+def _registered_contextual_search_refocus(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_contextual_search_refocus(decision, user_msg, recent_history)
+
+
+@register_normalizer
+def _registered_contextual_lookup_search_topic(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    return _normalize_contextual_lookup_search_topic(decision, user_msg, recent_history)
 
 
 @register_normalizer
@@ -1169,6 +1239,7 @@ def _normalize_lookup_source_choice_followup(
         return None
 
     if source_choice == "web":
+        subject = _resolve_contextual_web_search_subject(subject, recent_history) or subject
         return {
             "decision": "SEARCH",
             "card": {
@@ -1494,6 +1565,120 @@ def _normalize_ambiguous_lookup_source_clarification(
         return None
 
     return _resolve_ambiguous_lookup_source_from_router(decision, subject)
+
+
+def _normalize_contextual_lookup_search_topic(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    if _request_explicitly_scopes_lookup_to_workspace(text) or _request_has_strong_workspace_scope(text):
+        return None
+
+    subject = _extract_lookup_source_subject(text)
+    if not subject:
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    if not _runtime_has_prior_search_context(runtime):
+        return None
+
+    resolution = resolve_search_topic(
+        user_text=subject,
+        recent_history=recent_history,
+        previous_user_request=str(runtime.get("previous_user_request") or ""),
+        last_search_query=str(runtime.get("search_query") or ""),
+        last_search_status=str(runtime.get("last_search_status") or ""),
+    )
+    if resolution.needs_clarification or not resolution.query or not resolution.used_context:
+        return None
+
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": resolution.query,
+        },
+        "source_scope": "web",
+        "confidence": "medium",
+    }
+
+
+def _normalize_contextual_search_refocus(
+    decision: RouteDecision,
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> RouteDecision | None:
+    del decision
+    text = str(user_msg or "").strip()
+    if not text:
+        return None
+    if _request_explicitly_scopes_lookup_to_workspace(text) or _request_has_strong_workspace_scope(text):
+        return None
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    if not _runtime_has_prior_search_context(runtime):
+        return None
+
+    resolution = resolve_search_topic(
+        user_text=text,
+        recent_history=recent_history,
+        previous_user_request=str(runtime.get("previous_user_request") or ""),
+        last_search_query=str(runtime.get("search_query") or ""),
+        last_search_status=str(runtime.get("last_search_status") or ""),
+    )
+    if resolution.needs_clarification or not resolution.query:
+        return None
+    if not str(resolution.reason or "").startswith("refocus_"):
+        return None
+
+    return {
+        "decision": "SEARCH",
+        "card": {
+            "query": resolution.query,
+        },
+        "source_scope": "web",
+        "confidence": resolution.confidence,
+    }
+
+
+def _runtime_has_prior_search_context(runtime: dict[str, Any]) -> bool:
+    previous_route = str(runtime.get("previous_route") or "").strip().upper()
+    if previous_route == "SEARCH":
+        return True
+    search_query = str(runtime.get("search_query") or "").strip()
+    if search_query:
+        return True
+    previous_request = str(runtime.get("previous_user_request") or "").strip()
+    return bool(previous_request and _request_explicitly_scopes_lookup_to_web(previous_request))
+
+
+def _resolve_contextual_web_search_subject(
+    subject: str,
+    recent_history: Sequence[dict[str, Any]],
+) -> str:
+    clean_subject = str(subject or "").strip()
+    if not clean_subject:
+        return ""
+
+    runtime = extract_latest_runtime_context_fields(recent_history)
+    if not _runtime_has_prior_search_context(runtime):
+        return clean_subject
+
+    resolution = resolve_search_topic(
+        user_text=clean_subject,
+        recent_history=recent_history,
+        previous_user_request=str(runtime.get("previous_user_request") or ""),
+        last_search_query=str(runtime.get("search_query") or ""),
+        last_search_status=str(runtime.get("last_search_status") or ""),
+    )
+    if resolution.needs_clarification or not resolution.query:
+        return clean_subject
+    if resolution.used_context:
+        return resolution.query
+    return clean_subject
 
 
 def _resolve_ambiguous_lookup_source_from_router(

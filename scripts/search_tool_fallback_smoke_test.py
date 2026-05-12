@@ -116,6 +116,7 @@ def main() -> int:
     original_ddgs = search_module.DDGS
     original_fetch = search_module.fetch_clean_text
     original_urlopen = search_module.urllib.request.urlopen
+    original_backend = search_module.CFG.SEARCH_BACKEND
     logs: list[str] = []
 
     def fake_fetch(url: str, cancel_token=None) -> str:  # noqa: ARG001
@@ -150,7 +151,7 @@ def main() -> int:
             )
         return "A" * 160
 
-    def fake_urlopen(req, timeout=None):  # noqa: ARG001
+    def fake_urlopen(req, timeout=None, **kwargs):  # noqa: ARG001
         url = str(getattr(req, "full_url", req) or "")
         if "html.duckduckgo.com/html/" not in url and "lite.duckduckgo.com/lite/" not in url:
             raise AssertionError(f"Unexpected fallback URL: {url}")
@@ -174,6 +175,7 @@ def main() -> int:
         )
 
     try:
+        search_module.CFG.SEARCH_BACKEND = "duckduckgo"
         search_module.DDGS = _FakeDDGS
         search_module.fetch_clean_text = fake_fetch
         search_module.urllib.request.urlopen = fake_urlopen
@@ -210,6 +212,7 @@ def main() -> int:
             cancel_token=None,
         )
     finally:
+        search_module.CFG.SEARCH_BACKEND = original_backend
         search_module.DDGS = original_ddgs
         search_module.fetch_clean_text = original_fetch
         search_module.urllib.request.urlopen = original_urlopen

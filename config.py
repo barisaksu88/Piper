@@ -818,6 +818,17 @@ class Config:
     # Web Search (DuckDuckGo + Jina.ai Reader)
     # ---------------------------------------------------------------------
 
+    SEARCH_BACKEND: str = "searxng"
+    SEARXNG_URL: str = "http://127.0.0.1:8888"
+    SEARXNG_TIMEOUT_S: float = 10.0
+    SEARXNG_AUTO_START: bool = True
+    SEARXNG_STOP_ON_EXIT: bool = True
+    SEARXNG_DOCKER_CONTAINER: str = "piper-searxng"
+    SEARXNG_DOCKER_IMAGE: str = "searxng/searxng:latest"
+    SEARXNG_DOCKER_HOST_PORT: int = 8888
+    SEARXNG_DOCKER_CONTAINER_PORT: int = 8080
+    SEARXNG_DOCKER_CONFIG_DIR: str = ".local/searxng"
+    SEARXNG_REQUIRE: bool = False
     SEARCH_BLACKLIST: list[str] = field(default_factory=lambda: ["zhihu.com", "baidu.com", "weibo.com"])
     SEARCH_URL_FETCH_TIMEOUT_S: float = 20.0
     SEARCH_MIN_CONTENT_LENGTH: int = 100

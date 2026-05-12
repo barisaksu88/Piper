@@ -132,7 +132,12 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> LookupSourceWorkspaceT
 
     clarification_lower = clarification_text.lower()
     workspace_lower = workspace_text.lower()
+    web_first_lower = web_first_assistant_text.lower()
     web_final_lower = web_final_assistant_text.lower()
+    web_final_references_search_result = (
+        "recent" in web_final_lower
+        and any(marker in web_final_lower for marker in ("benchmark", "finding", "reporting", "result"))
+    )
     success = (
         bool(boot.ready)
         and not clarification_timed_out
@@ -151,6 +156,11 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> LookupSourceWorkspaceT
         and hidden_search_summary_present
         and "ambiguous" not in web_final_lower
         and "workspace" not in web_final_lower
+        and "what exactly do you need" not in web_final_lower
+        and "probably" not in web_final_lower
+        and "usual suspects" not in web_final_lower
+        and "[search_first_pass_rule]" not in web_first_lower
+        and web_final_references_search_result
     )
     return LookupSourceWorkspaceThenWebFlipReport(
         ready=bool(boot.ready),

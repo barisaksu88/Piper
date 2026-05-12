@@ -112,6 +112,11 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> LookupSourceWebFollowu
 
     clarification_lower = clarification_text.lower()
     final_lower = resolution_final_assistant_text.lower()
+    first_lower = resolution_first_assistant_text.lower()
+    final_references_search_result = (
+        "recent" in final_lower
+        and any(marker in final_lower for marker in ("benchmark", "finding", "reporting", "result"))
+    )
     success = (
         bool(boot.ready)
         and not clarification_timed_out
@@ -125,6 +130,11 @@ def run_smoke(*, timeout: float, keep_data_copy: bool) -> LookupSourceWebFollowu
         and EXPECTED_QUERY.lower() not in FOLLOWUP_TURN.lower()
         and "web pls" not in final_lower
         and "ambiguous" not in final_lower
+        and "what exactly do you need" not in final_lower
+        and "probably" not in final_lower
+        and "usual suspects" not in final_lower
+        and "[search_first_pass_rule]" not in first_lower
+        and final_references_search_result
     )
     return LookupSourceWebFollowupReport(
         ready=bool(boot.ready),

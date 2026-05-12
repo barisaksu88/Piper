@@ -62,6 +62,7 @@ from ui.controller_status import (
     set_status as set_status_action,
 )
 from tools.vision import VisionResolvedRequest, analyze_image
+from core.search.searxng_service import SearXNGService
 from memory.vision_session import VisionSessionMemory
 
 
@@ -212,6 +213,7 @@ class PiperController:
         img_gen,
         live_screen,
         vision_session_memory: VisionSessionMemory,
+        searxng_service: SearXNGService | None = None,
         tags: UiTags | None = None,
     ) -> None:
         self.app_title = app_title
@@ -233,6 +235,7 @@ class PiperController:
         self.img_gen = img_gen
         self.live_screen = live_screen
         self.vision_session_memory = vision_session_memory
+        self.searxng_service = searxng_service
         self.code_session = EmbeddedCodeSession(
             self.agent_brain.workspace,
             lambda kind, payload: self.ui_queue.put((kind, payload)),
@@ -1274,4 +1277,6 @@ class PiperController:
             dpg.destroy_context()
             self.agent_brain.shutdown()
             self.code_session.shutdown()
+            if getattr(self, "searxng_service", None):
+                self.searxng_service.shutdown()
         return RESTART_EXIT_CODE if self.restart_requested else 0
