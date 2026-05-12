@@ -137,6 +137,83 @@ def run_tests() -> list[dict]:
     else:
         results.append(_fail("pronoun_resolved_from_history", f"got query={res.query!r} reason={res.reason}"))
 
+    # ── 11. Bare generic subject inherits topical context ─────────────────
+    res = resolve_search_topic(
+        "search the models",
+        [{"role": "user", "content": "Search online for recent developments in AI."}],
+        previous_user_request="Search online for recent developments in AI.",
+    )
+    if res.query == "AI models" and res.reason == "underspecified_merged_with_context":
+        results.append(_ok("bare_generic_subject_context_merge"))
+    else:
+        results.append(_fail("bare_generic_subject_context_merge", f"got query={res.query!r} reason={res.reason}"))
+
+    # ── 12. Real lookup phrasing inherits topical context too ─────────────
+    res = resolve_search_topic(
+        "search for the models",
+        [{"role": "user", "content": "Search online for recent developments in AI."}],
+        previous_user_request="Search online for recent developments in AI.",
+    )
+    if res.query == "AI models" and res.reason == "underspecified_merged_with_context":
+        results.append(_ok("search_for_generic_subject_context_merge"))
+    else:
+        results.append(_fail("search_for_generic_subject_context_merge", f"got query={res.query!r} reason={res.reason}"))
+
+    # ── 13. Bare generic subject without context does not search garbage ───
+    res = resolve_search_topic(
+        "search the models",
+        [],
+        previous_user_request="",
+        last_search_query="",
+    )
+    if res.needs_clarification and res.reason == "underspecified_query_no_context":
+        results.append(_ok("bare_generic_subject_clarifies_without_context"))
+    else:
+        results.append(_fail("bare_generic_subject_clarifies_without_context", f"query={res.query!r} reason={res.reason}"))
+
+    # ── 14. Pronoun search uses the contextual topic, not filler words ─────
+    res = resolve_search_topic(
+        "Can you search for it please online?",
+        [{"role": "user", "content": "You know how AI is always developing?"}],
+        previous_user_request="You know how AI is always developing?",
+    )
+    if res.query == "AI developments" and res.reason == "pronoun_resolved_from_context":
+        results.append(_ok("pronoun_online_context_topic"))
+    else:
+        results.append(_fail("pronoun_online_context_topic", f"got query={res.query!r} reason={res.reason}"))
+
+    # ── 15. Preview instructions do not leak into provider query ──────────
+    res = resolve_search_topic(
+        "Search the web for Project Halcyon Lantern and tell me what you already know while it loads.",
+        [],
+    )
+    if res.query == "Project Halcyon Lantern":
+        results.append(_ok("preview_tail_stripped_from_query"))
+    else:
+        results.append(_fail("preview_tail_stripped_from_query", f"got query={res.query!r} reason={res.reason}"))
+
+    # ── 16. Conversational refocus inherits the previous search context ───
+    res = resolve_search_topic(
+        "actually i was asking more about models",
+        [{"role": "user", "content": "Search online for recent developments in AI."}],
+        previous_user_request="Search online for recent developments in AI.",
+        last_search_query="recent developments in AI",
+    )
+    if res.query == "AI models" and res.reason == "refocus_merged_with_context":
+        results.append(_ok("conversational_refocus_context_merge"))
+    else:
+        results.append(_fail("conversational_refocus_context_merge", f"got query={res.query!r} reason={res.reason}"))
+
+    # ── 17. Cut-off correction strips meta text before searching ──────────
+    res = resolve_search_topic(
+        "It got cut off, I meant research on the latest AI news.",
+        [],
+    )
+    if res.query == "latest AI news" and res.reason == "refocus_detected":
+        results.append(_ok("cutoff_refocus_strips_meta_text"))
+    else:
+        results.append(_fail("cutoff_refocus_strips_meta_text", f"got query={res.query!r} reason={res.reason}"))
+
     return results
 
 

@@ -47,11 +47,21 @@ _CORRECTION_RE = re.compile(
     r"(?i)\bno[,\s]+(?:i\s+meant|i\s+mean|actually|wait)\b"
     r"[:\s]*['\"]?(?P<corrected>[^'\"?!]{2,120})['\"]?"
 )
+_REFOCUS_QUERY_RE = re.compile(
+    r"(?is)^\s*(?:(?:no|wait|sorry|but)[,\s]+)?(?:actually[,\s]+)?(?:"
+    r"i\s+(?:was\s+)?(?:asking|looking|talking|thinking)\s+(?:more\s+)?(?:about|for|on)\s+"
+    r"|i\s+(?:mean|meant|wanted|want)\s+(?:to\s+(?:ask|search|know)\s+)?(?:more\s+)?(?:about|for|on)?\s*"
+    r"|it\s+got\s+cut\s+off[,\s]+i\s+(?:mean|meant)\s+"
+    r")(?P<topic>[^?!]{2,180})[.?!]*\s*$"
+)
+_REFOCUS_TOPIC_PREFIX_RE = re.compile(
+    r"(?is)^\s*(?:more\s+)?(?:about|for|on)\s+|^\s*research\s+(?:about|on)\s+(?:the\s+)?"
+)
 
 # Generic + context patterns: "search for recent models" where prior topic is "AI"
 _GENERIC_TOPIC_MERGE_RE = re.compile(
     r"(?i)^\s*(?:search\s+(?:for\s+)?|look\s+(?:for\s+)?|find\s+)?"
-    r"(?P<generic>(?:recent|latest|current|new|old|best|top|popular)\s+\w+)\s*$"
+    r"(?P<generic>(?:(?:recent|latest|current|new|old|best|top|popular)\s+)?\w+)\s*$"
 )
 
 _STALE_GREETING_RE = re.compile(
@@ -68,6 +78,19 @@ _CONVERSATIONAL_PREFIX_RE = re.compile(
     r"when\s+(?:is|are|did|does)\s+|"
     r"who\s+(?:is|are|was|were)\s+|"
     r"can\s+you\s+(?:tell\s+me\s+(?:about)?|explain)\s+)"
+)
+
+_SEARCH_REQUEST_TAIL_RE = re.compile(
+    r"(?is)\s+(?:"
+    r"and\s+(?:then\s+)?tell\s+me\s+what\s+you\s+(?:already\s+)?know(?:\s+about\s+it)?(?:\s+while\s+it\s+loads)?"
+    r"|and\s+(?:then\s+)?tell\s+me\s+what\s+you\s+find"
+    r"|and\s+(?:then\s+)?let\s+me\s+know\s+what\s+you\s+find"
+    r"|and\s+(?:then\s+)?give\s+me\s+(?:an\s+)?update"
+    r"|and\s+(?:then\s+)?keep\s+me\s+posted"
+    r"|while\s+it\s+loads"
+    r"|while\s+you(?:'re|\s+are)?\s+searching"
+    r"|while\s+the\s+search\s+runs"
+    r")\s*$"
 )
 
 # Words/phrases to strip from the end of a query
@@ -87,6 +110,138 @@ _TRAILING_FILLER_WORDS = (
     "on the web",
     "on web",
 )
+
+_GENERIC_QUERY_TERMS = {
+    "article",
+    "articles",
+    "benchmark",
+    "benchmarks",
+    "breakthrough",
+    "breakthroughs",
+    "current",
+    "detail",
+    "details",
+    "development",
+    "developments",
+    "info",
+    "information",
+    "latest",
+    "model",
+    "models",
+    "news",
+    "new",
+    "old",
+    "popular",
+    "recent",
+    "release",
+    "releases",
+    "report",
+    "reports",
+    "result",
+    "results",
+    "ranking",
+    "rankings",
+    "top",
+    "update",
+    "updates",
+    "version",
+    "versions",
+}
+
+_CONTEXT_STOPWORDS = {
+    "a",
+    "about",
+    "actually",
+    "all",
+    "always",
+    "an",
+    "and",
+    "are",
+    "as",
+    "asked",
+    "asking",
+    "at",
+    "be",
+    "been",
+    "being",
+    "but",
+    "by",
+    "can",
+    "could",
+    "do",
+    "does",
+    "doing",
+    "for",
+    "from",
+    "goes",
+    "going",
+    "has",
+    "have",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "its",
+    "know",
+    "like",
+    "look",
+    "me",
+    "mean",
+    "meant",
+    "more",
+    "of",
+    "on",
+    "online",
+    "please",
+    "search",
+    "searching",
+    "that",
+    "the",
+    "them",
+    "these",
+    "this",
+    "those",
+    "to",
+    "up",
+    "want",
+    "wanted",
+    "wanting",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "who",
+    "why",
+    "with",
+    "would",
+    "you",
+    "your",
+}
+
+_CONTEXT_ASPECT_MAP = {
+    "benchmark": "benchmarks",
+    "benchmarks": "benchmarks",
+    "developing": "developments",
+    "development": "developments",
+    "developments": "developments",
+    "improving": "improvements",
+    "improvement": "improvements",
+    "improvements": "improvements",
+    "model": "models",
+    "models": "models",
+    "news": "news",
+    "release": "releases",
+    "releases": "releases",
+    "result": "results",
+    "results": "results",
+    "update": "updates",
+    "updates": "updates",
+    "version": "versions",
+    "versions": "versions",
+}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -115,6 +270,11 @@ def _clean_query(text: str, *, strip_conversational: bool = False) -> str:
     cleaned = _SEARCH_FILLER_PREFIX_RE.sub("", cleaned)
     if strip_conversational:
         cleaned = _CONVERSATIONAL_PREFIX_RE.sub("", cleaned)
+    while cleaned:
+        trimmed = _SEARCH_REQUEST_TAIL_RE.sub("", cleaned).strip("\"'.,;:!?").strip()
+        if trimmed == cleaned:
+            break
+        cleaned = trimmed
     # Strip trailing filler
     cleaned = _strip_trailing_filler(cleaned)
     cleaned = " ".join(cleaned.split()).strip("\"'.,;:!?")
@@ -123,12 +283,183 @@ def _clean_query(text: str, *, strip_conversational: bool = False) -> str:
     return cleaned[:180]
 
 
+def _word_tokens(text: str) -> list[tuple[str, str]]:
+    """Return (surface, normalized) word tokens while preserving acronyms."""
+    tokens: list[tuple[str, str]] = []
+    for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9.+#-]*", str(text or "")):
+        surface = match.group(0).strip(".")
+        normalized = surface.lower().strip(".")
+        if surface and normalized:
+            tokens.append((surface, normalized))
+    return tokens
+
+
+def _is_underspecified_query(text: str) -> bool:
+    cleaned = _clean_query(text)
+    if not cleaned:
+        return True
+    if _is_pronoun_query(cleaned):
+        return True
+    tokens = _word_tokens(cleaned)
+    if not tokens:
+        return True
+    meaningful = [
+        norm
+        for _surface, norm in tokens
+        if norm not in _CONTEXT_STOPWORDS
+    ]
+    if not meaningful:
+        return True
+    return all(token in _GENERIC_QUERY_TERMS for token in meaningful)
+
+
+def _context_terms(text: str) -> tuple[list[str], list[str], str]:
+    cleaned = _clean_query(text, strip_conversational=True)
+    if not cleaned or _is_pronoun_query(cleaned) or _is_stale_greeting(cleaned):
+        return [], [], ""
+
+    entities: list[str] = []
+    aspects: list[str] = []
+    for surface, norm in _word_tokens(cleaned):
+        if norm in _CONTEXT_STOPWORDS:
+            continue
+        aspect = _CONTEXT_ASPECT_MAP.get(norm)
+        if aspect:
+            if aspect not in aspects:
+                aspects.append(aspect)
+            continue
+        if norm in {"latest", "recent", "current", "new", "old", "top", "best", "popular"}:
+            continue
+        token = surface.upper() if surface.isupper() else surface
+        if token not in entities:
+            entities.append(token)
+    return entities, aspects, cleaned
+
+
+def _context_topic_from_text(text: str) -> str:
+    entities, aspects, cleaned = _context_terms(text)
+    if not entities:
+        return ""
+    if aspects:
+        return " ".join([*entities, aspects[0]]).strip()
+    return cleaned
+
+
+def _context_entity_from_text(text: str) -> str:
+    entities, _aspects, _cleaned = _context_terms(text)
+    return " ".join(entities).strip()
+
+
+def _context_sources(
+    recent_history: Sequence[dict[str, str]],
+    current_text: str,
+    *,
+    previous_user_request: str = "",
+    last_search_query: str = "",
+) -> list[tuple[str, str]]:
+    sources: list[tuple[str, str]] = []
+    if previous_user_request:
+        sources.append(("previous_user_request", previous_user_request))
+    if last_search_query and not _is_underspecified_query(last_search_query):
+        sources.append(("last_search_query", last_search_query))
+
+    user_sources: list[tuple[str, str]] = []
+    assistant_sources: list[tuple[str, str]] = []
+    for item in reversed(list(recent_history or [])):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if not content or content == current_text:
+            continue
+        if role == "user":
+            user_sources.append(("history", content))
+        elif role == "assistant":
+            assistant_sources.append(("assistant_history", content))
+    sources.extend(user_sources)
+    sources.extend(assistant_sources)
+    return sources
+
+
+def _best_context_topic(
+    recent_history: Sequence[dict[str, str]],
+    current_text: str,
+    *,
+    previous_user_request: str = "",
+    last_search_query: str = "",
+) -> tuple[str, str]:
+    for source_name, source_value in _context_sources(
+        recent_history,
+        current_text,
+        previous_user_request=previous_user_request,
+        last_search_query=last_search_query,
+    ):
+        topic = _context_topic_from_text(source_value)
+        if topic:
+            return topic, source_name
+    return "", ""
+
+
+def _best_context_entity(
+    recent_history: Sequence[dict[str, str]],
+    current_text: str,
+    *,
+    previous_user_request: str = "",
+    last_search_query: str = "",
+) -> tuple[str, str]:
+    for source_name, source_value in _context_sources(
+        recent_history,
+        current_text,
+        previous_user_request=previous_user_request,
+        last_search_query=last_search_query,
+    ):
+        entity = _context_entity_from_text(source_value)
+        if entity:
+            return entity, source_name
+    return "", ""
+
+
+def _merge_query_with_context(query: str, context_entity: str) -> str:
+    clean_query = _clean_query(query)
+    clean_context = _clean_query(context_entity, strip_conversational=True)
+    if not clean_query:
+        return clean_context
+    if not clean_context:
+        return clean_query
+
+    query_tokens = [surface for surface, norm in _word_tokens(clean_query) if norm not in _CONTEXT_STOPWORDS]
+    if not query_tokens:
+        return clean_context
+
+    qualifier = ""
+    if query_tokens[0].lower() in {"recent", "latest", "current", "new", "old", "best", "top", "popular"}:
+        qualifier = query_tokens.pop(0).lower()
+
+    context_lower = clean_context.lower()
+    tail = [token for token in query_tokens if token.lower() not in context_lower.split()]
+    parts = [part for part in (qualifier, clean_context, " ".join(tail)) if part]
+    return " ".join(parts).strip()
+
+
 def _extract_correction(text: str) -> str:
     """Detect 'no, I meant X' and return X."""
     match = _CORRECTION_RE.search(text)
     if match:
         return _clean_query(match.group("corrected"))
     return ""
+
+
+def _extract_refocus_query(text: str) -> str:
+    """Detect conversational search refocus text and return the intended topic."""
+    match = _REFOCUS_QUERY_RE.match(str(text or ""))
+    if not match:
+        return ""
+    topic = str(match.group("topic") or "").strip()
+    previous = None
+    while previous != topic:
+        previous = topic
+        topic = _REFOCUS_TOPIC_PREFIX_RE.sub("", topic).strip()
+    return _clean_query(topic, strip_conversational=True)
 
 
 def _is_pronoun_query(text: str) -> bool:
@@ -242,29 +573,64 @@ def resolve_search_topic(
             used_context=tuple(),
         )
 
-    # 3. Detect pronoun / generic follow-up BEFORE explicit extraction
-    if _is_pronoun_query(text):
-        context_sources = [
-            ("previous_user_request", previous_user_request),
-            ("last_search_query", last_search_query),
-            ("history", _extract_last_user_topic(recent_history, text)),
-        ]
-        for source_name, source_value in context_sources:
-            topic = (
-                _extract_topic_from_previous_request(source_value)
-                if source_name == "previous_user_request"
-                else _clean_query(source_value)
+    # 2b. Conversational refocus after a search/report turn:
+    # "actually I was asking more about models" should become "AI models",
+    # not the whole sentence.
+    refocus = _extract_refocus_query(text)
+    if refocus:
+        if _is_underspecified_query(refocus):
+            context_entity, source_name = _best_context_entity(
+                recent_history,
+                text,
+                previous_user_request=previous_user_request,
+                last_search_query=last_search_query,
             )
-            if topic and not _is_pronoun_query(topic):
+            if context_entity:
+                merged = _merge_query_with_context(refocus, context_entity)
                 used_context.append(source_name)
                 return SearchTopicResolution(
-                    query=topic,
+                    query=merged,
                     confidence="medium",
                     needs_clarification=False,
                     clarification_question="",
-                    reason="pronoun_resolved_from_context",
+                    reason="refocus_merged_with_context",
                     used_context=tuple(used_context),
                 )
+            return SearchTopicResolution(
+                query="",
+                confidence="low",
+                needs_clarification=True,
+                clarification_question=f"What kind of {refocus} should I search for?",
+                reason="refocus_underspecified_no_context",
+                used_context=tuple(),
+            )
+        return SearchTopicResolution(
+            query=refocus,
+            confidence="high",
+            needs_clarification=False,
+            clarification_question="",
+            reason="refocus_detected",
+            used_context=tuple(),
+        )
+
+    # 3. Detect pronoun / generic follow-up BEFORE explicit extraction
+    if _is_pronoun_query(text):
+        topic, source_name = _best_context_topic(
+            recent_history,
+            text,
+            previous_user_request=previous_user_request,
+            last_search_query=last_search_query,
+        )
+        if topic:
+            used_context.append(source_name)
+            return SearchTopicResolution(
+                query=topic,
+                confidence="medium",
+                needs_clarification=False,
+                clarification_question="",
+                reason="pronoun_resolved_from_context",
+                used_context=tuple(used_context),
+            )
         # No context available -> ask for clarification
         return SearchTopicResolution(
             query="",
@@ -278,34 +644,57 @@ def resolve_search_topic(
     # 4. Explicit query extraction
     explicit = _clean_query(text)
 
-    # 5. Generic + context merge (e.g. "search for recent models" when prior topic was "AI")
+    # 5. Underspecified + context merge (e.g. "models" when prior topic was "AI")
+    if explicit and _is_underspecified_query(explicit):
+        context_entity, source_name = _best_context_entity(
+            recent_history,
+            text,
+            previous_user_request=previous_user_request,
+            last_search_query=last_search_query,
+        )
+        if context_entity:
+            merged = _merge_query_with_context(explicit, context_entity)
+            used_context.append(source_name)
+            return SearchTopicResolution(
+                query=merged,
+                confidence="medium",
+                needs_clarification=False,
+                clarification_question="",
+                reason="underspecified_merged_with_context",
+                used_context=tuple(used_context),
+            )
+        return SearchTopicResolution(
+            query="",
+            confidence="low",
+            needs_clarification=True,
+            clarification_question=f"What kind of {explicit} should I search for?",
+            reason="underspecified_query_no_context",
+            used_context=tuple(),
+        )
+
+    # 6. Generic + context merge (legacy qualifier pattern)
     if explicit:
         generic_match = _GENERIC_TOPIC_MERGE_RE.match(text)
-        if generic_match:
-            context_sources = [
-                ("previous_user_request", previous_user_request),
-                ("last_search_query", last_search_query),
-                ("history", _extract_last_user_topic(recent_history, text)),
-            ]
-            for source_name, source_value in context_sources:
-                topic = (
-                    _extract_topic_from_previous_request(source_value)
-                    if source_name == "previous_user_request"
-                    else _clean_query(source_value)
+        if generic_match and _is_underspecified_query(generic_match.group("generic")):
+            context_entity, source_name = _best_context_entity(
+                recent_history,
+                text,
+                previous_user_request=previous_user_request,
+                last_search_query=last_search_query,
+            )
+            if context_entity:
+                merged = _merge_query_with_context(explicit, context_entity)
+                used_context.append(source_name)
+                return SearchTopicResolution(
+                    query=merged,
+                    confidence="medium",
+                    needs_clarification=False,
+                    clarification_question="",
+                    reason="generic_merged_with_context",
+                    used_context=tuple(used_context),
                 )
-                if topic and not _is_pronoun_query(topic):
-                    merged = _merge_generic_with_context(explicit, topic)
-                    used_context.append(source_name)
-                    return SearchTopicResolution(
-                        query=merged,
-                        confidence="medium",
-                        needs_clarification=False,
-                        clarification_question="",
-                        reason="generic_merged_with_context",
-                        used_context=tuple(used_context),
-                    )
 
-    # 6. If we have an explicit query, use it
+    # 7. If we have an explicit query, use it
     if explicit:
         return SearchTopicResolution(
             query=explicit,
@@ -316,7 +705,7 @@ def resolve_search_topic(
             used_context=tuple(),
         )
 
-    # 7. Fallback: try to use previous request as topic if it looks like a search intent
+    # 8. Fallback: try to use previous request as topic if it looks like a search intent
     prior_topic = _extract_topic_from_previous_request(previous_user_request)
     if prior_topic:
         return SearchTopicResolution(
@@ -328,7 +717,7 @@ def resolve_search_topic(
             used_context=("previous_user_request",),
         )
 
-    # 8. Nothing worked — ask for clarification
+    # 9. Nothing worked — ask for clarification
     return SearchTopicResolution(
         query="",
         confidence="low",

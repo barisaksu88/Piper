@@ -362,12 +362,13 @@ def _run(tmp_workspace: Path) -> int:
         and failed_mutation_runtime.outcome_failed
         and failed_mutation_runtime.verification_verdict == "FAILED"
         and failed_mutation_runtime.verification_checker_path == "MUTATION"
-        and len(directive_pack.tail_system_blocks) == 4
+        and len(directive_pack.tail_system_blocks) == 5
         and directive_pack.direct_answer == ""
         and "[CONTEXT_ARBITRATION_RULE]" in directive_pack.tail_system_blocks[0]
         and "[DOCUMENT_QA_RULE]" in directive_pack.tail_system_blocks[1]
         and "[ACTIVE_SKILL]" in directive_pack.tail_system_blocks[2]
         and "[FILE_WORK_REPORT_RULE]" in directive_pack.tail_system_blocks[3]
+        and "[WORKSPACE_BOUNDARY_RULE]" in directive_pack.tail_system_blocks[4]
         and read_directive_pack.direct_answer == "Apples\nBananas"
         and paused_directive_pack.direct_answer == "Which specific fact from your memory would you like me to remove?"
         and any("[VERIFICATION_RESULT]" in block for block in partial_directive_pack.tail_system_blocks)

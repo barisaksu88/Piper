@@ -372,11 +372,17 @@ class ContextPackEngine:
         if decision not in {"TASK", "SEARCH"} and not reporter_just_ran:
             return RuntimeContextPack()
         user_msg = str(getattr(orc, "user_msg", "") or "").strip()
+        previous_route = "SEARCH" if reporter_just_ran else decision
+        search_query = str(
+            getattr(orc, "latest_search_query", "")
+            or card.get("query")
+            or (user_msg if decision == "SEARCH" else "")
+        ).strip()
         return RuntimeContextPack(
-            previous_route=decision,
+            previous_route=previous_route,
             previous_user_request=user_msg,
             task_goal="" if reporter_just_ran else str(card.get("goal") or "").strip(),
-            search_query=str(card.get("query") or user_msg).strip() if (decision == "SEARCH" or reporter_just_ran) else "",
+            search_query=search_query if (previous_route == "SEARCH" or reporter_just_ran) else "",
             execution_status="" if reporter_just_ran else SummaryEngine.extract_stage_status(getattr(orc, "scratchpad", []) or []),
             runtime_note="" if reporter_just_ran else SummaryEngine.build_runtime_note(getattr(orc, "scratchpad", []) or []),
             relevant_paths=self._collect_runtime_context_paths(orc),
@@ -706,8 +712,12 @@ def _tail_block_search_report_rule(ctx: TailBlockContext) -> str:
         "[SEARCH_REPORT_RULE]\n"
         "This turn is the final user-facing summary of a search attempt that already finished.\n"
         "The user already received an initial response while the search was running.\n"
+        "Make the handoff visible: phrase the answer as the completed web search result, not as a second standalone opinion.\n"
         "Use the search summary or search failure note to extend, refine, or correct that earlier response.\n"
+        "Do not say you need to check, will check, are checking, or should search; the search already happened.\n"
         "Do not restart from scratch or repeat unchanged context when the search findings simply confirm it.\n"
+        "If the findings are thin, partial, off-topic, or only snippet-backed, say that directly instead of padding.\n"
+        "Do not add likely winners, likely companies, dates, specs, rankings, causes, or other guesses that are not present in the search summary.\n"
         "Answer directly from the search summary. Do not append [ROUTER] unless the user asked for a brand-new action beyond this finished search attempt."
     )
 

@@ -52,6 +52,7 @@ class OrchestratorGraphState(TypedDict, total=False):
     last_verification: dict[str, Any] | None
     route_interceptor: str
     reporter_just_ran: bool
+    latest_search_query: str
     latest_search_summary: str
     latest_search_failed: bool
     latest_search_error: str
@@ -463,6 +464,7 @@ def snapshot_orchestrator_state(
         "last_verification": _serialize_state_value(getattr(orc, "last_verification", None)),
         "route_interceptor": str(getattr(orc, "route_interceptor", "") or ""),
         "reporter_just_ran": bool(getattr(orc, "reporter_just_ran", False)),
+        "latest_search_query": str(getattr(orc, "latest_search_query", "") or ""),
         "latest_search_summary": str(getattr(orc, "latest_search_summary", "") or ""),
         "latest_search_failed": bool(getattr(orc, "latest_search_failed", False)),
         "latest_search_error": str(getattr(orc, "latest_search_error", "") or ""),
@@ -497,6 +499,7 @@ def restore_orchestrator_state(orc: Orchestrator, state: OrchestratorGraphState)
     orc.last_verification = _deserialize_verification(state.get("last_verification"))
     orc.route_interceptor = str(state.get("route_interceptor", getattr(orc, "route_interceptor", "")) or "")
     orc.reporter_just_ran = bool(state.get("reporter_just_ran", getattr(orc, "reporter_just_ran", False)))
+    orc.latest_search_query = str(state.get("latest_search_query", getattr(orc, "latest_search_query", "")) or "")
     orc.latest_search_summary = str(state.get("latest_search_summary", getattr(orc, "latest_search_summary", "")) or "")
     orc.latest_search_failed = bool(state.get("latest_search_failed", getattr(orc, "latest_search_failed", False)))
     orc.latest_search_error = str(state.get("latest_search_error", getattr(orc, "latest_search_error", "")) or "")

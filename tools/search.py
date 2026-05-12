@@ -481,6 +481,34 @@ def _run_searxng_search(
     ]
 
 
+def _searxng_query_variants(original_query: str) -> list[str]:
+    clean = " ".join(str(original_query or "").split()).strip()
+    relaxed = _normalize_search_query(clean)
+    news_like = _query_looks_like_news(clean)
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        candidate = " ".join(str(value or "").split()).strip(" .?!")
+        key = candidate.casefold()
+        if candidate and key not in seen:
+            seen.add(key)
+            variants.append(candidate)
+
+    add(clean)
+    if relaxed and relaxed.casefold() != clean.casefold():
+        add(relaxed)
+
+    base = relaxed or clean
+    if news_like and base:
+        if not _query_looks_like_news(base):
+            add(f"latest {base} news")
+        add(f"{base} 2026")
+        add(f"{base} updates")
+
+    return variants
+
+
 def _collect_search_results(
     query: str,
     *,
@@ -489,23 +517,56 @@ def _collect_search_results(
 ) -> tuple[list[dict], str, str]:
     original_query = " ".join(str(query or "").split()).strip()
 
-    # SearXNG path: single backend call, no multi-mode fallback
+    # SearXNG path: keep asking with nearby query variants until there is
+    # enough source material to report, rather than accepting a thin first page.
     if str(CFG.SEARCH_BACKEND or "").strip().lower() == "searxng":
-        log(f"Search attempt (searxng): {original_query}")
-        try:
-            results = _run_searxng_search(query=original_query, cancel_token=cancel_token)
-        except OperationCancelled:
-            raise
-        except Exception as exc:
-            log(f"Search attempt failed (searxng): {exc}")
-            raise
-        _raise_if_cancelled(cancel_token)
-        if results:
-            relevant_results = _filter_relevant_results(results, original_query)
-            if relevant_results:
-                if len(relevant_results) != len(results):
-                    log(f"Filtered {len(results) - len(relevant_results)} low-relevance search result(s).")
-                return relevant_results[: CFG.SEARCH_MAX_RESULTS], original_query, "searxng"
+        seen_results: set[tuple[str, str]] = set()
+        collected: list[dict] = []
+        used_queries: list[str] = []
+        last_error = ""
+        completed_attempt = False
+        target_count = min(CFG.SEARCH_MAX_RESULTS, max(CFG.SEARCH_SNIPPETS_LIMIT, CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT))
+        for attempt_query in _searxng_query_variants(original_query):
+            log(f"Search attempt (searxng): {attempt_query}")
+            try:
+                results = _run_searxng_search(query=attempt_query, cancel_token=cancel_token)
+            except OperationCancelled:
+                raise
+            except Exception as exc:
+                last_error = str(exc)
+                log(f"Search attempt failed (searxng): {exc}")
+                continue
+            _raise_if_cancelled(cancel_token)
+            completed_attempt = True
+            if not results:
+                log(f"No results via searxng for: {attempt_query}")
+                continue
+            relevant_results = _filter_relevant_results(results, attempt_query)
+            if not relevant_results:
+                log(f"Search results via searxng did not match the core query terms for: {attempt_query}")
+                continue
+            if len(relevant_results) != len(results):
+                log(f"Filtered {len(results) - len(relevant_results)} low-relevance search result(s).")
+            added = 0
+            for result in relevant_results:
+                result_key = _result_dedupe_key(result)
+                if result_key in seen_results:
+                    continue
+                seen_results.add(result_key)
+                collected.append(result)
+                added += 1
+                if len(collected) >= CFG.SEARCH_MAX_RESULTS:
+                    break
+            if added:
+                used_queries.append(attempt_query)
+                log(f"Added {added} relevant result(s) from searxng: {attempt_query}")
+            if len(collected) >= target_count:
+                break
+        if collected:
+            query_label = "; ".join(used_queries) if used_queries else original_query
+            return collected[: CFG.SEARCH_MAX_RESULTS], query_label, "searxng"
+        if last_error and not completed_attempt:
+            raise RuntimeError(last_error)
         return [], "", ""
 
     relaxed_query = _normalize_search_query(original_query)
