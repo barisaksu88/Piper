@@ -23,6 +23,8 @@ class SearchTopicResolution:
 
 # ── Regex constants ──────────────────────────────────────────────────────
 
+_LEADING_ADVERB_RE = re.compile(r"(?i)^\s*(?:now|then|so|well|okay|ok)[,\s]+")
+
 _SEARCH_FILLER_PREFIX_RE = re.compile(
     r"(?i)^\s*(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|would\s+you\s+)?"
     r"(?:search\s+(?:the\s+)?(?:web|internet|online)?\s*(?:for\s+)?|"
@@ -190,6 +192,9 @@ _CONTEXT_STOPWORDS = {
     "mean",
     "meant",
     "more",
+    "never",
+    "no",
+    "not",
     "of",
     "on",
     "online",
@@ -267,6 +272,7 @@ def _clean_query(text: str, *, strip_conversational: bool = False) -> str:
     if not cleaned:
         return ""
     # Strip leading filler
+    cleaned = _LEADING_ADVERB_RE.sub("", cleaned)
     cleaned = _SEARCH_FILLER_PREFIX_RE.sub("", cleaned)
     if strip_conversational:
         cleaned = _CONVERSATIONAL_PREFIX_RE.sub("", cleaned)
