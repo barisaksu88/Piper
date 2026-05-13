@@ -276,6 +276,8 @@ Voice identity events use `_announce_voice_identity_event()` -> `_set_voice_iden
 
 Typed identity hints that require clarification return a message that gets `chat_append`ed as a **visible system message**.
 
+**Important (1414316 fix):** Ambiguous identity clarification is routed through an internal persona-facing `voice_identity_notice`, not through visible `chat_append`. The Web UI adapter must not surface raw `[VOICE IDENTITY CLARIFICATION]`, `[UI]` disambiguation text, or system identity-selection messages as chat-visible output. These are persona directive context only.
+
 ### 3.5 Thinking Placeholder
 
 `"Thinking..."` is appended as a visible assistant message during turn start. It is removed by `clear_thinking` before the real response streams. If streaming fails, the placeholder may persist.
@@ -365,6 +367,10 @@ Stats view uses `dpg.plot()`, `dpg.add_line_series()`, `dpg.fit_axis_data()`.
 **Risk:** A Web UI will use a charting library (e.g., Recharts, Chart.js). The bridge should emit `stats.data` events with raw series data, not plot widget commands.
 
 ---
+
+## 4.5 Desktop Window Policy
+
+Web UI means React/HTML/CSS rendering technology, not final delivery in a normal browser tab. Development may use browser access for debugging. Production target is a dedicated Piper desktop window with no address bar, no tabs, and local/offline assets. Wrapper choice is deferred until after parity: Tauri first, pywebview second, Edge/Chrome app-mode temporary fallback.
 
 ## 5. PROPOSED WEBSOCKET FRAME FORMAT
 
@@ -486,7 +492,7 @@ web_ui/
   bridge/
     CONTRACT.md          <- this document
     adapter.py           <- Phase 1: pure translation
-    message_schema.py    <- Phase 2: TypedDict / dataclass schemas
+    message_schema.py    <- Phase 1: TypedDict / dataclass schemas
     server.py            <- Phase 3: WebSocket server wiring
     tests/
       test_adapter.py    <- Phase 1: one test per event kind
@@ -497,8 +503,9 @@ web_ui/
 1. **Event encoding:** Convert `(kind, payload)` tuples from `ui_queue` into JSON frames (section 5.1).
 2. **Action decoding:** Convert incoming JSON action frames into controller method calls.
 3. **Unknown policy:**
-   - Unknown outgoing event kind -> encode as `event` frame with `kind` passthrough and raw payload. Log a warning.
-   - Unknown incoming action -> reply with `error` frame, kind `action_rejected`.
+   - Unknown outgoing event kind -> raise `ValueError`.
+   - Unknown incoming action name -> raise `ValueError`.
+   - No passthrough fallback in `adapter.py`.
 4. **Stateless:** Adapter holds no mutable session state. All state lives in `PiperController`.
 
 ### 6.4 Testing Strategy
