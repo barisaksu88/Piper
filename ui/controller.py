@@ -1214,6 +1214,165 @@ class PiperController:
         if update_ui:
             self._refresh_top_bar()
 
+    def _dispatch_web_action(self, action_name: str, payload: dict) -> None:
+        """Dispatch a Web UI action without touching DearPyGui widgets."""
+        if action_name == "send_message":
+            self.submit_user_text(payload.get("text", ""))
+        elif action_name == "stop":
+            self.on_stop()
+        elif action_name == "new_session":
+            self.on_new_session()
+        elif action_name == "clear_chat":
+            self.on_clear()
+        elif action_name == "mic_toggle":
+            self.ui_queue.put(
+                (
+                    "chat_append",
+                    {
+                        "role": "system",
+                        "content": "[UI] Microphone is not available in Web UI mode.",
+                    },
+                )
+            )
+        elif action_name == "snapshot_toggle":
+            self.on_snapshot()
+        elif action_name == "live_screen_mode":
+            mode = str(payload.get("mode", "display")).strip().lower()
+            self.live_screen.set_mode(mode)
+            enabled = False
+            try:
+                enabled = self.live_screen.is_enabled()
+            except Exception:
+                pass
+            self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {mode}"
+            self.set_vision_session_active(enabled)
+            self.ui_queue.put(
+                ("status_widget_dashboard_activity", f"Live screen source set to {mode}.")
+            )
+        elif action_name == "live_screen_interval":
+            interval_s = float(payload.get("interval_s", 10.0))
+            self.live_screen.set_interval(interval_s)
+            enabled = False
+            try:
+                enabled = self.live_screen.is_enabled()
+            except Exception:
+                pass
+            self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {interval_s}s"
+            self.ui_queue.put(
+                (
+                    "status_widget_dashboard_activity",
+                    f"Live screen interval set to {interval_s}s.",
+                )
+            )
+        elif action_name == "event_speech_mode":
+            mode = payload.get("mode", "")
+            self.set_event_speech_mode(mode, announce=True)
+        elif action_name == "restart_piper":
+            self.restart_requested = True
+            self.set_status("Restarting...")
+            self.boot_mgr.shutdown()
+            self.ui_queue.put(("status_widget_dashboard_activity", "Restart requested."))
+        elif action_name == "open_document_picker":
+            self.ui_queue.put(
+                (
+                    "chat_append",
+                    {
+                        "role": "system",
+                        "content": "[UI] Document picker is frontend-owned in Web UI mode.",
+                    },
+                )
+            )
+        elif action_name == "document_picker_selected":
+            paths = payload.get("paths", [])
+            if paths:
+                from ui.controller_actions import _start_document_ingest
+                _start_document_ingest(self, [str(p) for p in paths])
+            else:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {"role": "system", "content": "[UI] No document selected."},
+                    )
+                )
+        elif action_name == "document_picker_cancel":
+            pass
+        elif action_name == "code_send":
+            text = str(payload.get("text", "")).strip()
+            if text and self.has_active_code_session():
+                self.send_code_session_input(text)
+        elif action_name == "code_run":
+            path = str(payload.get("path", "")).strip()
+            if path:
+                self.start_code_session(path)
+                self.set_code_status(f"Launching: {path}")
+                self.set_status("CODE SESSION")
+            else:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {
+                            "role": "system",
+                            "content": "[UI] Code run requires a path in Web UI mode.",
+                        },
+                    )
+                )
+            self.refresh_interaction_state()
+        elif action_name == "code_clear":
+            self.on_code_clear()
+        else:
+            self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
+
+    def run_web(self, host: str = "127.0.0.1", port: int = 8787, ws_path: str = "/ws") -> int:
+        """Run Piper in Web UI bridge mode (no DearPyGui)."""
+        CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.agent_brain.cleanup_old_events()
+        self.load_memory_into_chat()
+        self.knowledge_mgr.set_logger(self.safe_log)
+
+        self.proactive_monitor.start()
+        self._boot_ui_min_visible_until = time.perf_counter() + float(
+            getattr(CFG, "BOOT_SCREEN_MIN_VISIBLE_S", 0.75)
+        )
+        self._pending_boot_ready = False
+        self._pending_boot_ready_payload = ""
+        boot_thread = threading.Thread(target=self.boot_mgr.run_sequence, daemon=True)
+        boot_thread.start()
+
+        action_queue: "queue.Queue[tuple[str, dict]]" = queue.Queue()
+        from web_ui.bridge.server import BridgeServer
+
+        bridge = BridgeServer(
+            ui_queue=self.ui_queue,
+            action_queue=action_queue,
+            host=host,
+            port=port,
+            ws_path=ws_path,
+        )
+        bridge.start()
+
+        try:
+            while not self.restart_requested:
+                try:
+                    action_name, payload = action_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                try:
+                    self._dispatch_web_action(action_name, payload)
+                except Exception as exc:
+                    _LOG.exception("Web action dispatch failed: %s", action_name)
+                    self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            bridge.stop()
+            self.proactive_monitor.stop()
+            self.agent_brain.shutdown()
+            self.code_session.shutdown()
+            if getattr(self, "searxng_service", None):
+                self.searxng_service.shutdown()
+
+        return RESTART_EXIT_CODE if self.restart_requested else 0
+
     def run(self) -> int:
         CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.agent_brain.cleanup_old_events()

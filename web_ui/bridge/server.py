@@ -148,6 +148,13 @@ class BridgeServer:
     async def _serve(self) -> None:
         """Main coroutine: start the WebSocket server and queue consumer."""
 
+        async def _process_request(
+            connection: websockets.ServerConnection, request: Any
+        ) -> Any:
+            if getattr(request, "path", "") != self._ws_path:
+                return connection.respond(404, "Not Found")
+            return None
+
         async def _ws_handler(connection: websockets.ServerConnection) -> None:
             with self._lock:
                 self._clients.add(connection)
@@ -161,6 +168,7 @@ class BridgeServer:
             _ws_handler,
             self._host,
             self._port,
+            process_request=_process_request,
         )
         self._startup_event.set()
 

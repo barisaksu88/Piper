@@ -837,6 +837,22 @@ class Config:
     SEARCH_DEEP_DIVE_LINKS_LIMIT: int = 6
     SEARCH_CONTENT_SLICE_LENGTH: int = 1500
 
+    # -----------------------------------------------------------------
+    # Web UI bridge (opt-in; DearPyGui remains the default)
+    # -----------------------------------------------------------------
+    WEB_UI_ENABLED: bool = field(
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_ENABLED", False)
+    )
+    WEB_UI_HOST: str = field(
+        default_factory=lambda: os.environ.get("PIPER_WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    )
+    WEB_UI_PORT: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_UI_PORT", "8787"))
+    )
+    WEB_UI_WS_PATH: str = field(
+        default_factory=lambda: os.environ.get("PIPER_WEB_UI_WS_PATH", "/ws").strip() or "/ws"
+    )
+
 
 class LiveConfig:
     """Mutable config holder wrapping a frozen Config.

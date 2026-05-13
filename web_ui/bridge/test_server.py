@@ -210,3 +210,26 @@ class TestDefaults:
             pass  # Expected — server is alive but has nothing to send.
         finally:
             server.stop()
+
+
+class TestWsPathEnforcement:
+    def test_ws_path_accepted(self) -> None:
+        server = BridgeServer(ui_queue=queue.Queue())
+        server.start()
+        try:
+            # Connecting to the default /ws should succeed (then time out waiting for data).
+            with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+                asyncio.run(_ws_connect_and_read(uri=_WS_URI, timeout=0.5))
+        finally:
+            server.stop()
+
+    def test_wrong_ws_path_rejected(self) -> None:
+        server = BridgeServer(ui_queue=queue.Queue())
+        server.start()
+        try:
+            import websockets
+
+            with pytest.raises(websockets.InvalidStatus):
+                asyncio.run(_ws_connect_and_read(uri="ws://127.0.0.1:8787/wrong", timeout=1.0))
+        finally:
+            server.stop()
