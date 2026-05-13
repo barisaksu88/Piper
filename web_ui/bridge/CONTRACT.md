@@ -718,3 +718,60 @@ All Web-dispatched actions were audited for DearPyGui safety:
   4. `code_session_launch` (None vs dict)
   5. `show_image` (path extraction from message)
   6. `vision_snapshot_note` (dict vs str)
+
+---
+
+## 11. PHASE 6 — PARITY BASELINE
+
+Phase 6 locks the Phase 5 live-smoke fixes into deterministic tests and maps the remaining gap between DearPyGui and Web UI. No new UI features were added.
+
+### 11.1 Regression Tests Added
+
+| # | Test Class | What it proves |
+|---|---|---|
+| 1 | `TestBootReadyWebState` | `pump_ui_queue_web` sets `controller.boot_ready=True` and forwards the event |
+| 2 | `TestStateSyncedDuplicatePrevention` | `_state_synced` chat_append is forwarded but not re-appended to `chat_state` |
+| 3 | `TestNonSyncedChatAppendWebState` | Non-synced chat_append is appended to `chat_state` exactly once |
+| 4 | `TestDpgHardExitGuardLifecycle` | `run_web` replaces `dpg.does_item_exist` during the loop and restores it on exit |
+| 5 | `TestBridgeQueueSeparation` | BridgeServer consumes `bridge_queue`, not `controller.ui_queue`; no double-consumption race |
+| 6 | `TestChatAppendBroadcastContract` | `chat_append()` emits `ui_queue` events with `_state_synced=True` |
+| 7 | `TestDpgPumpCompatibility` | `pump_ui_queue` still works without `forward_queue`; synced events don't re-append |
+
+**Test count:** 48 in `test_runtime_wiring.py`, 130 across all `web_ui/bridge/` tests.
+
+### 11.2 Parity Gap Map
+
+| Area | DearPyGui status | Web UI status | Gap | Proposed phase |
+|---|---|---|---|---|
+| Chat transcript | Full — renderable via `chat_state` + DPG widgets | Partial — `chat.append` events flow; frontend renders from WS events | No initial history sync on page load; no scroll-to-bottom automation | 7 |
+| Assistant streaming | Full — `stream.start/delta/end` with per-frame throttling | Partial — all stream events flow over WS; frontend builds text from deltas | No backpressure/coalescing if frontend render is slower than delta rate | 7 |
+| Boot/status/activity/logs | Full — boot log widget, status bar, activity panel, agent log | Partial — `boot.log`, `status.*`, `activity.append`, `log.agent` all flow | Boot log is ephemeral (client misses pre-connection events); no persistent log view | 7 |
+| Stop / New Session / Restart | Full | Full — all three actions dispatch correctly | — | — |
+| Event speech controls | Full — combo widget with TTS feedback | Partial — `event_speech_mode` action works; no TTS in browser yet | Browser TTS integration or mute indicator | 8 |
+| Live screen controls | Full — mode/interval combos, snapshot button | Partial — actions dispatch; `screen.refresh` events flow | No actual image display in browser (no image serving endpoint) | 8 |
+| Document picker / ingestion | Full — DPG file dialog, ingest button state | Partial — `open_document_picker` is frontend-owned; `document.ingest_active` flows | No native file picker integration; needs frontend `<input type="file">` | 8 |
+| Code session panel | Full — code tab, input, output, status, run/clear buttons | Partial — `code.*` events flow; actions dispatch | No dedicated code panel in frontend; output goes to generic log | 8 |
+| Image generation display | Full — `show_image` loads texture into Visual Cortex tab | Not implemented — no image serving endpoint; `image.show` frames not handled | Needs HTTP image endpoint + image viewer component | 9 |
+| Vision snapshot notes | Full — appended to dashboard activity log | Partial — `vision.note` events flow | Same as activity log (ephemeral) | 7 |
+| Stats dashboard | Full — plots + text stats updated in real time | Partial — `stats.refresh` events flow | No chart library; no stats data serialization | 9 |
+| Active user / voice identity | Full — top bar meta, voice identity disambiguation UI | Partial — `user.changed` flows; identity clarification suppressed per leakage rules | No voice input (STT) in browser; no voice enrollment | 8 |
+| Mic / STT | Full — push-to-talk button, waveform, voice match | Not implemented — mic is DPG-only | Needs Web Audio API + browser STT or stream to backend | 9 |
+| Config reload / settings visibility | Full — `config_reloaded` currently unhandled in DPG too | Same — event flows but no handler | Low priority; both UIs ignore it today | 9 |
+| Frontend-owned file picker | N/A (DPG native dialog) | Partial — placeholder action returns chat message | Needs real `<input type="file">` → `document_picker_selected` wiring | 8 |
+| Desktop wrapper | N/A (DPG is its own window) | Not started | Tauri (first choice) or pywebview (second) after parity | 10 |
+
+### 11.3 Phase 7 Recommended Target
+
+**Focus: Chat parity + basic frontend shell hardening**
+
+1. **Initial chat sync** — on WebSocket connect, backend should emit a `chat.sync` frame with the current visible transcript so the frontend doesn't start empty.
+2. **Scroll-to-bottom** — frontend should auto-scroll on new `chat.append` and `stream.delta` events.
+3. **Stream delta coalescing** — frontend should batch rapid `stream.delta` events (e.g., within 16 ms) into a single render frame to avoid layout thrashing.
+4. **Thinking placeholder lifecycle** — ensure `chat.clear_thinking` reliably removes the placeholder even if the client reconnects mid-stream.
+5. **Status bar wiring** — render `status.set`, `status.mode`, `status.step` in a persistent top bar.
+6. **Activity / log panels** — add scrollable panels for `activity.append` and `log.agent` events.
+
+### 11.4 Files Modified in Phase 6
+
+- `web_ui/bridge/test_runtime_wiring.py` — 7 new regression test classes
+- `web_ui/bridge/CONTRACT.md` — this parity baseline section

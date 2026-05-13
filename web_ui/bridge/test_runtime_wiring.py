@@ -560,3 +560,278 @@ class TestWebDispatchNeverCallsPumpUiQueue:
             ctrl._dispatch_web_action(action, payload)
 
         assert not pump_calls, f"pump_ui_queue called during dispatch of actions"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Regression lock tests (live smoke fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestBootReadyWebState:
+    def test_boot_ready_sets_controller_state_and_forwards(self) -> None:
+        """pump_ui_queue_web must set controller.boot_ready=True and forward
+        the event to bridge_queue when _boot_ui_min_visible_until has passed."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.boot_ready = False
+        ctrl._boot_ui_min_visible_until = time.perf_counter() - 0.1
+        ctrl._pending_boot_ready = False
+        ctrl._pending_boot_ready_payload = ""
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("boot_ready", "System Ready"))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        assert ctrl.boot_ready is True
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "boot_ready"
+        assert payload == "System Ready"
+
+    def test_boot_ready_deferred_until_min_visible(self) -> None:
+        """If _boot_ui_min_visible_until is in the future, boot_ready must be
+        deferred and the event still forwarded."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.boot_ready = False
+        ctrl._boot_ui_min_visible_until = time.perf_counter() + 10.0
+        ctrl._pending_boot_ready = False
+        ctrl._pending_boot_ready_payload = ""
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("boot_ready", "System Ready"))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        assert ctrl.boot_ready is False
+        assert ctrl._pending_boot_ready is True
+        assert ctrl._pending_boot_ready_payload == "System Ready"
+        assert bridge_q.qsize() == 1
+
+
+class TestStateSyncedDuplicatePrevention:
+    def test_state_synced_chat_append_not_re_appended(self) -> None:
+        """_state_synced chat_append must be forwarded but NOT duplicate chat_state."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+        ctrl.chat_state.get_messages_snapshot.return_value = [
+            {"role": "user", "content": "hello"}
+        ]
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("chat_append", {"role": "user", "content": "hello", "_state_synced": True}))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        ctrl.chat_state.append.assert_not_called()
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "chat_append"
+        assert payload["_state_synced"] is True
+
+
+class TestNonSyncedChatAppendWebState:
+    def test_non_synced_chat_append_appends_to_state(self) -> None:
+        """Non-synced chat_append must be appended to chat_state exactly once
+        and forwarded to bridge_queue."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("chat_append", {"role": "system", "content": "[UI] test"}))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        ctrl.chat_state.append.assert_called_once_with("system", "[UI] test")
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "chat_append"
+        assert payload["role"] == "system"
+
+
+class TestDpgHardExitGuardLifecycle:
+    def test_run_web_replaces_and_restores_dpg_exists(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """run_web must replace dpg.does_item_exist during the loop and restore
+        it on exit, even if an exception occurs."""
+        from ui.controller import PiperController
+        import dearpygui.dearpygui as dpg
+
+        original = dpg.does_item_exist
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_mgr = MagicMock()
+        ctrl.boot_mgr.run_sequence = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+
+        def _runner() -> None:
+            run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws")
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        time.sleep(0.3)
+
+        # During the loop, dpg.does_item_exist should be run_web's lambda (returns False)
+        assert dpg.does_item_exist is not original, "dpg.does_item_exist was not replaced"
+        assert dpg.does_item_exist("any_tag") is False, "run_web replacement did not return False"
+
+        # Trigger exit via restart action.
+        import asyncio
+        import websockets
+
+        async def _poke() -> None:
+            async with websockets.connect("ws://127.0.0.1:8787/ws") as ws:
+                await ws.send(
+                    json.dumps(
+                        {"frame": "action", "action": "restart_piper", "payload": {}}
+                    )
+                )
+
+        asyncio.run(_poke())
+        thread.join(timeout=5.0)
+
+        # After exit, the original must be restored.
+        assert dpg.does_item_exist is original, "dpg.does_item_exist was not restored after run_web"
+
+
+class TestBridgeQueueSeparation:
+    def test_bridge_server_uses_bridge_queue_not_ui_queue(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In Web mode BridgeServer must consume from bridge_queue, not
+        controller.ui_queue, so pump_ui_queue_web and BridgeServer do not
+        race on the same queue."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_mgr = MagicMock()
+        ctrl.boot_mgr.run_sequence = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+
+        # Track what queue BridgeServer receives via the real import path
+        server_init_calls: list[dict[str, Any]] = []
+
+        def _capture_server(*, ui_queue: queue.Queue, **kwargs: Any) -> MagicMock:
+            server_init_calls.append({"ui_queue": ui_queue, "kwargs": kwargs})
+            mock = MagicMock()
+            mock.start = MagicMock()
+            mock.stop = MagicMock()
+            return mock
+
+        monkeypatch.setattr("web_ui.bridge.server.BridgeServer", _capture_server)
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+
+        # Put an event on ui_queue before starting
+        ctrl.ui_queue.put(("chat_append", {"role": "user", "content": "pre"}))
+
+        def _runner() -> None:
+            run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws")
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        time.sleep(0.4)
+
+        # Trigger exit
+        ctrl.restart_requested = True
+        thread.join(timeout=3.0)
+
+        assert len(server_init_calls) == 1
+        bridge_queue = server_init_calls[0]["ui_queue"]
+        # BridgeServer must NOT receive controller.ui_queue directly
+        assert bridge_queue is not ctrl.ui_queue, "BridgeServer was wired directly to controller.ui_queue"
+
+        # The pre-queued event must have been consumed from ui_queue by pump_ui_queue_web,
+        # not left for BridgeServer (which would race).
+        assert ctrl.ui_queue.empty(), "controller.ui_queue was not drained by pump_ui_queue_web"
+
+
+class TestChatAppendBroadcastContract:
+    def test_chat_append_emits_state_synced_ui_queue_event(self) -> None:
+        """controller.chat_append must append to chat_state AND emit a
+        ui_queue chat_append event with _state_synced=True."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+        ctrl._chat_rendered_messages = []
+        ctrl._chat_rendered_tags = []
+        ctrl._chat_render_wrap_columns = None
+        ctrl._try_append_chat_ui = MagicMock(return_value=False)
+        ctrl._refresh_chat_ui = MagicMock()
+
+        PiperController.chat_append(ctrl, "user", "hello")
+
+        ctrl.chat_state.append.assert_called_once_with("user", "hello")
+        assert ctrl.ui_queue.qsize() == 1
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "chat_append"
+        assert payload["role"] == "user"
+        assert payload["content"] == "hello"
+        assert payload.get("_state_synced") is True
+
+
+class TestDpgPumpCompatibility:
+    def test_pump_ui_queue_accepts_no_forward_queue(self) -> None:
+        """pump_ui_queue must still work when called without forward_queue."""
+        from ui.controller_queue import pump_ui_queue
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+        # No exception expected
+        pump_ui_queue(ctrl)
+
+    def test_state_synced_chat_append_does_not_re_append_in_dpg_pump(self) -> None:
+        """In DPG mode, _state_synced chat_append must NOT call chat_append again
+        (which would add a duplicate to chat_state and re-emit to ui_queue)."""
+        from ui.controller_queue import pump_ui_queue
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+        ctrl.tags = MagicMock()
+
+        ctrl.ui_queue.put(("chat_append", {"role": "user", "content": "hello", "_state_synced": True}))
+        pump_ui_queue(ctrl)
+
+        ctrl.chat_append.assert_not_called()
+        ctrl._refresh_chat_ui.assert_called_once()
+
+    def test_non_synced_chat_append_still_calls_chat_append_in_dpg_pump(self) -> None:
+        """In DPG mode, non-synced chat_append must still call controller.chat_append
+        so backend-generated messages are added to chat_state."""
+        from ui.controller_queue import pump_ui_queue
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.chat_state = MagicMock()
+        ctrl.tags = MagicMock()
+
+        ctrl.ui_queue.put(("chat_append", {"role": "system", "content": "[UI] test"}))
+        pump_ui_queue(ctrl)
+
+        ctrl.chat_append.assert_called_once_with("system", "[UI] test")
