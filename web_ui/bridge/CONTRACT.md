@@ -633,6 +633,50 @@ This calls `renderable_chat_messages(controller.chat_state.get_messages_snapshot
   13. Height calculations based on line counts
   14. `dpg.does_item_exist()` guards everywhere
 
+---
+
+## 9. PHASE 2 — STANDALONE BRIDGE SERVER
+
+### Server Module
+
+- **File:** `web_ui/bridge/server.py`
+- **Class:** `BridgeServer`
+- **Runtime:** asyncio event loop in a daemon thread
+- **WebSocket:** `ws://127.0.0.1:8787/ws` (default)
+- **Library:** `websockets` 16.x
+
+### Lifecycle API
+
+- `__init__(ui_queue, action_queue=None, host="127.0.0.1", port=8787, ws_path="/ws", static_dir=None)`
+- `start()` — blocks until listening or startup failure
+- `stop(timeout_s=3.0)` — idempotent; closes clients and shuts down thread
+- `is_running()` — True when thread is alive and listening
+- `client_count()` — number of connected WebSocket clients
+
+### Responsibilities
+
+- **Outbound:** polls `ui_queue`, adapts tuples via `adapter.ui_tuple_to_ws_frame()`, broadcasts JSON to all connected clients using `websockets.broadcast`.
+- **Inbound:** reads action frames from each client, parses via `adapter.parse_action_frame()`, enqueues `(action_name, payload)` onto `action_queue`.
+- **Errors:** unknown outgoing events emit `error` frames instead of crashing; invalid incoming actions reply with `error` frames and keep the connection alive.
+
+### Security
+
+- Binds to `127.0.0.1` by default (no LAN exposure).
+- Does not serve static files, images, or arbitrary filesystem content in Phase 2.
+- Does not execute actions; only parses and enqueues them.
+
+### Deferred to Phase 3+
+
+- HTTP `/health` endpoint (WebSocket-only in Phase 2).
+- Static file serving for the frontend build.
+- Image file serving over HTTP/WebSocket.
+- Integration with `app.py` or `ui/controller.py`.
+
+### Files Added in Phase 2
+
+- `web_ui/bridge/server.py`
+- `web_ui/bridge/test_server.py`
+
 ### Ambiguous Event Payloads
 
 - 6 payloads identified in section 6.5 that need runtime confirmation during Phase 1:
