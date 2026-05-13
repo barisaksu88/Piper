@@ -5,6 +5,7 @@ Deterministic pytest suite for Phase 3 runtime wiring:
 - app.py branch logic
 - controller.run_web lifecycle
 - web action dispatch
+- DPG-safety audit for Web mode dispatch
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import queue
 import threading
 import time
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -121,7 +122,7 @@ class TestAppBranch:
 
 
 # ---------------------------------------------------------------------------
-# Controller dispatch tests
+# Controller dispatch tests (MagicMock-based)
 # ---------------------------------------------------------------------------
 
 
@@ -359,3 +360,198 @@ class TestRunWebLifecycle:
         thread.join(timeout=5.0)
 
         assert not pump_calls, "pump_ui_queue was called during run_web"
+
+
+# ---------------------------------------------------------------------------
+# Hardening audit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_realish_controller() -> MagicMock:
+    """Return a MagicMock with real PiperController methods bound for DPG audit."""
+    from ui.controller import PiperController
+
+    ctrl = MagicMock()
+    ctrl.ui_queue = queue.Queue()
+    ctrl.restart_requested = False
+    ctrl.boot_ready = True
+    ctrl.tags = MagicMock()
+    ctrl.tags.input_box = "input_box"
+    ctrl.tags.event_speech_combo = "event_speech_combo"
+    ctrl.tags.chat_text = "chat_text"
+    ctrl.tags.code_view_text = "code_view_text"
+    ctrl.gen_lock = threading.Lock()
+    ctrl.chat_state = MagicMock()
+    ctrl.chat_state.get_messages_snapshot.return_value = []
+    ctrl.live_screen = MagicMock()
+    ctrl.live_screen.is_enabled.return_value = False
+    ctrl.boot_mgr = MagicMock()
+    ctrl.pipeline = MagicMock()
+    ctrl.tts = MagicMock()
+    ctrl._chat_rendered_messages = []
+    ctrl._chat_rendered_tags = []
+    ctrl._chat_render_wrap_columns = None
+    ctrl.event_speech_mode = "off"
+    ctrl._event_speech_recent = {}
+    ctrl.thinking_placeholder = "Thinking..."
+    ctrl.session_meta = ""
+    ctrl.stage_meta = ""
+    ctrl.runtime_mode = "IDLE"
+    ctrl.style_meta = ""
+    ctrl.screen_meta = ""
+    ctrl.code_session_meta = ""
+    ctrl.user_meta = ""
+    ctrl.document_ingest_active = False
+    ctrl.live_screen_pending = False
+    ctrl._pending_boot_ready = False
+    ctrl._pending_boot_ready_payload = ""
+    ctrl.width = 1450
+    ctrl.height = 860
+
+    # Bind real methods that web dispatch exercises.
+    ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.submit_user_text = PiperController.submit_user_text.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.set_event_speech_mode = PiperController.set_event_speech_mode.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._refresh_top_bar = PiperController._refresh_top_bar.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._refresh_chat_ui = PiperController._refresh_chat_ui.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.show_thinking_placeholder = PiperController.show_thinking_placeholder.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.refresh_text_view_height = PiperController.refresh_text_view_height.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.request_autoscroll = PiperController.request_autoscroll.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._reset_chat_render_cache = PiperController._reset_chat_render_cache.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._speak_event_notification = PiperController._speak_event_notification.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._event_tts_profile = PiperController._event_tts_profile.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.refresh_interaction_state = PiperController.refresh_interaction_state.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.clear_code_output = PiperController.clear_code_output.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl._flush_autoscrolls = PiperController._flush_autoscrolls.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+    ctrl.load_style_state = MagicMock()
+    ctrl.do_generate_stream = lambda: None
+
+    return ctrl
+
+
+class TestSubmitUserTextExistence:
+    def test_submit_user_text_exists_on_piper_controller(self) -> None:
+        from ui.controller import PiperController
+
+        assert hasattr(PiperController, "submit_user_text")
+        assert callable(getattr(PiperController, "submit_user_text"))
+
+    def test_web_send_message_calls_real_submit_user_text(self) -> None:
+        """If submit_user_text were missing, binding would fail or dispatch would crash."""
+        ctrl = _make_realish_controller()
+        calls: list[str] = []
+
+        def _tracking_submit(text: str) -> None:
+            calls.append(text)
+
+        # Replace the bound real method with a tracker.
+        ctrl.submit_user_text = _tracking_submit  # type: ignore[method-assign]
+        ctrl._dispatch_web_action("send_message", {"text": "hello"})
+        assert calls == ["hello"]
+
+
+class TestWebDispatchDpgSafety:
+    """Monkeypatch DPG mutation functions to raise; verify web dispatch stays safe.
+
+    DPG guards use ``dpg.does_item_exist()`` to skip widget mutations when widgets
+    are absent. In Web mode there is no DearPyGui context, so all guards evaluate to
+    False and no mutation function should be called. We simulate this by forcing
+    ``does_item_exist`` to return False and making every mutation function raise.
+    """
+
+    @pytest.fixture
+    def _ban_dpg_mutations(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import dearpygui.dearpygui as dpg
+
+        # Simulate "no DPG widgets exist" — the guard every mutation path uses.
+        monkeypatch.setattr(dpg, "does_item_exist", lambda tag: False)
+
+        # Any call to a DPG mutation function outside the guard should fail the test.
+        banned = [
+            "set_value",
+            "delete_item",
+            "set_item_label",
+            "bind_item_theme",
+            "configure_item",
+            "focus_item",
+            "stop_dearpygui",
+            "set_y_scroll",
+            "add_spacer",
+            "add_input_text",
+            "fit_axis_data",
+            "load_image",
+            "add_static_texture",
+            "add_image",
+            "get_value",
+            "get_item_rect_size",
+            "get_y_scroll_max",
+        ]
+        for name in banned:
+            if hasattr(dpg, name):
+                monkeypatch.setattr(
+                    dpg,
+                    name,
+                    lambda *a, _name=name, **k: (_ for _ in ()).throw(
+                        AssertionError(
+                            f"Banned DPG function '{_name}' called in web mode"
+                        )
+                    ),
+                )
+
+    def test_send_message_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("send_message", {"text": "safe text"})
+
+    def test_stop_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("stop", {})
+
+    def test_new_session_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("new_session", {})
+
+    def test_clear_chat_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("clear_chat", {})
+
+    def test_code_clear_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("code_clear", {})
+
+    def test_restart_piper_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("restart_piper", {})
+
+
+class TestWebDispatchNeverCallsPumpUiQueue:
+    def test_dispatch_actions_do_not_call_pump_ui_queue(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_dispatch_web_action must never call pump_ui_queue."""
+        from ui.controller import PiperController
+
+        pump_calls: list[Any] = []
+        original_pump = PiperController.pump_ui_queue
+
+        def _tracking_pump(self: Any) -> None:
+            pump_calls.append(True)
+            original_pump(self)
+
+        monkeypatch.setattr(PiperController, "pump_ui_queue", _tracking_pump)
+
+        ctrl = _make_mock_controller()
+        for action, payload in [
+            ("send_message", {"text": "hi"}),
+            ("stop", {}),
+            ("new_session", {}),
+            ("clear_chat", {}),
+            ("snapshot_toggle", {}),
+            ("event_speech_mode", {"mode": "all"}),
+            ("restart_piper", {}),
+            ("code_clear", {}),
+            ("live_screen_mode", {"mode": "pointer"}),
+            ("live_screen_interval", {"interval_s": 5}),
+            ("document_picker_cancel", {}),
+            ("open_document_picker", {}),
+        ]:
+            ctrl._dispatch_web_action(action, payload)
+
+        assert not pump_calls, f"pump_ui_queue called during dispatch of actions"

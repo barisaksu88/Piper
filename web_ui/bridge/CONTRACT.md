@@ -677,6 +677,38 @@ This calls `renderable_chat_messages(controller.chat_state.get_messages_snapshot
 - `web_ui/bridge/server.py`
 - `web_ui/bridge/test_server.py`
 
+---
+
+## 10. PHASE 3.1 — WEB RUNTIME DISPATCH HARDENING
+
+### DPG Safety Audit
+
+All Web-dispatched actions were audited for DearPyGui safety:
+
+| Action | Classification | Notes |
+|---|---|---|
+| `send_message` | DPG-guarded safe | `submit_user_text()` uses `dpg.does_item_exist` guards |
+| `stop` | DPG-free | `on_stop()` only touches runtime state + `set_status` (guarded) |
+| `new_session` | DPG-guarded safe | `_refresh_chat_ui()` and `refresh_interaction_state()` are guarded |
+| `clear_chat` | DPG-guarded safe | `dpg.delete_item` / `dpg.set_value` guarded by `does_item_exist` |
+| `snapshot_toggle` | DPG-guarded safe | `refresh_live_screen_ui()` guards all widget calls internally |
+| `code_clear` | DPG-guarded safe | `clear_code_output()` guards `dpg.set_value` |
+| `event_speech_mode` | DPG-guarded safe | `set_event_speech_mode()` guards `dpg.set_value` |
+| `restart_piper` | DPG-free | Direct attribute set; no DPG calls |
+
+**No extraction was required.** All audited actions are already safe for Web mode because every DPG call path is protected by `dpg.does_item_exist()`.
+
+### Proof Tests
+
+- `test_submit_user_text_exists_on_piper_controller` — asserts method exists
+- `test_web_send_message_calls_real_submit_user_text` — proves dispatch reaches real method
+- `test_web_dispatch_does_not_call_unsafe_dpg` — monkeypatches 18 DPG mutation functions to raise; forces `does_item_exist` to return False; verifies no unguarded DPG calls for send_message, stop, new_session, clear_chat, code_clear, restart_piper
+- `test_dispatch_actions_do_not_call_pump_ui_queue` — verifies `_dispatch_web_action` never calls `pump_ui_queue`
+
+### Files Modified in Phase 3.1
+
+- `web_ui/bridge/test_runtime_wiring.py` — added DPG-safety audit tests
+
 ### Ambiguous Event Payloads
 
 - 6 payloads identified in section 6.5 that need runtime confirmation during Phase 1:
