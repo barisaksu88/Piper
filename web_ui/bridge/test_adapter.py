@@ -101,6 +101,29 @@ class TestChatEvents:
         assert frame["payload"]["role"] == "system"
         assert frame["payload"]["content"] == "[UI] Live screen enabled"
 
+    def test_chat_sync(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame(
+                "chat_sync",
+                [
+                    ("user", "hello"),
+                    ("assistant", "hi there"),
+                    {"role": "system", "content": "[UI] test"},
+                ],
+            )
+        )
+        assert frame["kind"] == "chat.sync"
+        assert frame["sourceKind"] == "chat_sync"
+        messages = frame["payload"]["messages"]
+        assert len(messages) == 3
+        assert messages[0] == {"role": "user", "content": "hello"}
+        assert messages[1] == {"role": "assistant", "content": "hi there"}
+        assert messages[2] == {"role": "system", "content": "[UI] test"}
+
+    def test_chat_sync_empty(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("chat_sync", []))
+        assert frame["payload"]["messages"] == []
+
     def test_clear_thinking(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("clear_thinking", ""))
         assert frame["kind"] == "chat.clear_thinking"

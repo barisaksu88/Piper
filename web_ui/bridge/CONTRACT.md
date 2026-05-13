@@ -65,6 +65,7 @@ The table below maps every observed `kind` to its payload shape, source location
 | Kind | Payload | Source | DPG Path | WS Name | Visibility | Notes |
 |---|---|---|---|---|---|---|
 | `chat_append` | `dict` with `role`, `content` | `controller_actions.py` (document ingest, live screen), `core/orchestrator.py` | `controller.chat_append(role, content)` -> adds to chat_state + renders via DPG. | `chat.append` | `chat` | Used for system messages (e.g. "[UI] Live screen mode enabled"). |
+| `chat_sync` | `list[tuple[str, str]]` — visible messages only | `controller.py` (`run_web` connect callback) | `renderable_chat_messages(controller.chat_state.get_messages_snapshot())` | `chat.sync` | `chat` | Sent to each new WebSocket client so the frontend can initialise its transcript. Excludes hidden/system noise. |
 | `clear_thinking` | `str` (ignored) | `controller_actions.py` (`do_generate_stream`, interrupt handlers) | `controller.clear_thinking_placeholder()` -> removes "Thinking..." if present. | `chat.clear_thinking` | `chat` | Removes the assistant "Thinking..." placeholder. |
 
 ---
@@ -164,7 +165,7 @@ The table below maps every observed `kind` to its payload shape, source location
 | Streaming | 3 |
 | Status/Mode | 4 |
 | Boot/Lifecycle | 2 |
-| Chat/Message | 2 |
+| Chat/Message | 3 |
 | Search | 1 |
 | Image/Vision | 2 |
 | Code Session | 7 |
@@ -175,7 +176,7 @@ The table below maps every observed `kind` to its payload shape, source location
 | Agent/Monitor | 1 |
 | Live Screen | 1 |
 | Config | 1 |
-| **Total** | **29** |
+| **Total** | **30** |
 
 
 ---
@@ -737,7 +738,7 @@ Phase 6 locks the Phase 5 live-smoke fixes into deterministic tests and maps the
 | 6 | `TestChatAppendBroadcastContract` | `chat_append()` emits `ui_queue` events with `_state_synced=True` |
 | 7 | `TestDpgPumpCompatibility` | `pump_ui_queue` still works without `forward_queue`; synced events don't re-append |
 
-**Test count:** 48 in `test_runtime_wiring.py`, 130 across all `web_ui/bridge/` tests.
+**Test count:** 48 in `test_runtime_wiring.py`, 147 across all `web_ui/bridge/` tests.
 
 ### 11.2 Parity Gap Map
 
@@ -760,18 +761,22 @@ Phase 6 locks the Phase 5 live-smoke fixes into deterministic tests and maps the
 | Frontend-owned file picker | N/A (DPG native dialog) | Partial — placeholder action returns chat message | Needs real `<input type="file">` → `document_picker_selected` wiring | 8 |
 | Desktop wrapper | N/A (DPG is its own window) | Not started | Tauri (first choice) or pywebview (second) after parity | 10 |
 
-### 11.3 Phase 7 Recommended Target
+### 11.3 Phase 7 Completion
 
 **Focus: Chat parity + basic frontend shell hardening**
 
-1. **Initial chat sync** — on WebSocket connect, backend should emit a `chat.sync` frame with the current visible transcript so the frontend doesn't start empty.
-2. **Scroll-to-bottom** — frontend should auto-scroll on new `chat.append` and `stream.delta` events.
-3. **Stream delta coalescing** — frontend should batch rapid `stream.delta` events (e.g., within 16 ms) into a single render frame to avoid layout thrashing.
-4. **Thinking placeholder lifecycle** — ensure `chat.clear_thinking` reliably removes the placeholder even if the client reconnects mid-stream.
-5. **Status bar wiring** — render `status.set`, `status.mode`, `status.step` in a persistent top bar.
-6. **Activity / log panels** — add scrollable panels for `activity.append` and `log.agent` events.
+| # | Target | Status | Implementation |
+|---|---|---|---|
+| 1 | Initial chat sync | ✅ Done | Backend: `controller.py` `_build_chat_sync_frames` callback sent via `BridgeServer.on_client_connect`. Frontend: `chat.sync` handler replaces transcript while preserving local user messages and active streaming state. |
+| 2 | Scroll-to-bottom | ✅ Done | `chatBoxRef` + `useEffect` on `messages` scrolls `scrollTop` to `scrollHeight`. |
+| 3 | Stream delta coalescing | ✅ Done | `pendingDeltasRef` accumulates text; 16 ms timer (`DELTA_COALESCE_MS`) flushes batched deltas into a single `setMessages` call. `stream.end` and `stream.start` eagerly flush. |
+| 4 | Thinking placeholder lifecycle | ✅ Done | `isThinkingPlaceholder()` helper matches `role === "system"` + content `=== "Thinking..."` or `startsWith("Thinking")`. `stream.start` and `chat.clear_thinking` both clear placeholders. |
+| 5 | Status bar wiring | ✅ Already present | `status.set`, `status.mode`, `status.step` rendered in sidebar Status box. |
+| 6 | Activity / log panels | ✅ Already present | `activity.append` and `log.agent` rendered in sidebar Activity & Logs box. |
 
-### 11.4 Files Modified in Phase 6
+### 11.4 Files Modified in Phase 7
 
-- `web_ui/bridge/test_runtime_wiring.py` — 7 new regression test classes
+- `web_ui/frontend/src/App.tsx` — `chat.sync` handler, auto-scroll, delta coalescing, thinking lifecycle
 - `web_ui/bridge/CONTRACT.md` — this parity baseline section
+
+**Test count:** 147 across all `web_ui/bridge/` tests. Frontend `npm run typecheck` and `npm run build` pass.

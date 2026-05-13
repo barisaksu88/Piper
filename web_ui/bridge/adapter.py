@@ -66,6 +66,24 @@ def _normalize_chat_append_payload(payload: object) -> dict[str, Any]:
     return {"role": role, "content": content}
 
 
+def _normalize_chat_sync_payload(payload: object) -> dict[str, Any]:
+    """Normalize a chat_sync payload into {"messages": [...]}.
+
+    Payload is expected to be a list of (role, content) tuples or dicts.
+    """
+    messages: list[dict[str, str]] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                messages.append({
+                    "role": str(item.get("role") or "system"),
+                    "content": str(item.get("content") or ""),
+                })
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                messages.append({"role": str(item[0]), "content": str(item[1])})
+    return {"messages": messages}
+
+
 def _normalize_show_image_payload(payload: object) -> dict[str, Any]:
     text = str(payload or "")
     # Extract path from "Image saved to: path" message.
@@ -178,6 +196,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "assistant_stream_start": _normalize_stream_start_payload,
     "assistant_stream_end": _normalize_stream_start_payload,
     "chat_append": _normalize_chat_append_payload,
+    "chat_sync": _normalize_chat_sync_payload,
     "show_image": _normalize_show_image_payload,
     "vision_snapshot_note": _normalize_vision_note_payload,
     "code_session_launch": _normalize_code_session_launch_payload,

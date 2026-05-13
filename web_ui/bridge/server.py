@@ -40,6 +40,7 @@ class BridgeServer:
         port: int = 8787,
         ws_path: str = "/ws",
         static_dir: str | None = None,
+        on_client_connect: Any | None = None,
     ) -> None:
         self._ui_queue = ui_queue
         self._action_queue = action_queue or queue.Queue()
@@ -47,6 +48,7 @@ class BridgeServer:
         self._port = port
         self._ws_path = ws_path
         self._static_dir = static_dir
+        self._on_client_connect = on_client_connect
 
         self._clients: set[websockets.ServerConnection] = set()
         self._lock = threading.Lock()
@@ -159,6 +161,13 @@ class BridgeServer:
             with self._lock:
                 self._clients.add(connection)
             try:
+                if self._on_client_connect is not None:
+                    try:
+                        frames = self._on_client_connect()
+                        for frame in frames:
+                            await connection.send(frame)
+                    except Exception:
+                        pass
                 await self._handle_connection(connection)
             finally:
                 with self._lock:

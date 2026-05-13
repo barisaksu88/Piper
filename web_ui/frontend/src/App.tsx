@@ -5,9 +5,18 @@ import type { BackendFrame, ChatMessage, ConnectionState, RawEvent } from "./typ
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
 const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
+const DELTA_COALESCE_MS = 16;
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isThinkingPlaceholder(m: ChatMessage): boolean {
+  return m.role === "system" && (m.content === "Thinking..." || m.content.startsWith("Thinking"));
+}
+
+function messageSignature(m: { role: string; content: string }): string {
+  return `${m.role}:${m.content}`;
 }
 
 export default function App() {
@@ -20,8 +29,55 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
   const [inputText, setInputText] = useState("");
+
   const streamingRef = useRef(false);
   const bridgeRef = useRef<PiperBridge | null>(null);
+  const chatBoxRef = useRef<HTMLDivElement | null>(null);
+  const pendingDeltasRef = useRef("");
+  const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-scroll chat to bottom when messages change
+  useEffect(() => {
+    const el = chatBoxRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages]);
+
+  const flushPendingDeltas = useCallback(() => {
+    const text = pendingDeltasRef.current;
+    pendingDeltasRef.current = "";
+    if (deltaFlushTimerRef.current) {
+      clearTimeout(deltaFlushTimerRef.current);
+      deltaFlushTimerRef.current = null;
+    }
+    if (!text) return;
+
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant" && last.streaming) {
+        next[next.length - 1] = { ...last, content: last.content + text };
+      } else {
+        next.push({ id: generateId(), role: "assistant", content: text, streaming: true });
+        streamingRef.current = true;
+      }
+      return next;
+    });
+  }, []);
+
+  const queueDelta = useCallback(
+    (text: string) => {
+      pendingDeltasRef.current += text;
+      if (deltaFlushTimerRef.current) {
+        clearTimeout(deltaFlushTimerRef.current);
+      }
+      deltaFlushTimerRef.current = setTimeout(() => {
+        flushPendingDeltas();
+      }, DELTA_COALESCE_MS);
+    },
+    [flushPendingDeltas]
+  );
 
   const appendActivity = useCallback((text: string) => {
     setActivities((prev) => [...prev.slice(-199), text]);
@@ -43,6 +99,10 @@ export default function App() {
     ]);
   }, []);
 
+  const clearThinkingPlaceholders = useCallback(() => {
+    setMessages((prev) => prev.filter((m) => !isThinkingPlaceholder(m)));
+  }, []);
+
   const handleFrame = useCallback(
     (frame: BackendFrame) => {
       if (frame.frame === "error") {
@@ -60,38 +120,65 @@ export default function App() {
       }
 
       switch (kind) {
+        case "chat.sync": {
+          const p = payload as { messages?: Array<{ role?: string; content?: string }> };
+          const syncMessages = (p.messages || []).map((m) => ({
+            role: String(m.role || "system"),
+            content: String(m.content || ""),
+          }));
+          const syncSigs = new Set(syncMessages.map(messageSignature));
+
+          setMessages((prev) => {
+            // Preserve:
+            // 1. Local user messages not yet in sync (e.g. sent during reconnect)
+            // 2. Currently streaming assistant message
+            const preserved = prev.filter((m) => {
+              if (m.streaming && m.role === "assistant") return true;
+              if (m.role === "user" && m.content && !syncSigs.has(messageSignature(m))) return true;
+              return false;
+            });
+            const built = [
+              ...preserved,
+              ...syncMessages.map((m) => ({
+                id: generateId(),
+                role: m.role as ChatMessage["role"],
+                content: m.content,
+                streaming: false,
+              })),
+            ];
+            return built;
+          });
+          break;
+        }
+
         case "stream.start": {
+          flushPendingDeltas();
           streamingRef.current = true;
+          clearThinkingPlaceholders();
           setMessages((prev) => [
             ...prev,
             { id: generateId(), role: "assistant", content: "", streaming: true },
           ]);
           break;
         }
+
         case "stream.delta": {
           const text = String((payload as { text?: string }).text || "");
+          if (!text) break;
           if (!streamingRef.current) {
-            // stray delta without start
+            streamingRef.current = true;
             setMessages((prev) => [
               ...prev,
               { id: generateId(), role: "assistant", content: text, streaming: true },
             ]);
-            streamingRef.current = true;
           } else {
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.role === "assistant" && last.streaming) {
-                next[next.length - 1] = { ...last, content: last.content + text };
-              } else {
-                next.push({ id: generateId(), role: "assistant", content: text, streaming: true });
-              }
-              return next;
-            });
+            queueDelta(text);
           }
           break;
         }
+
         case "stream.end": {
+          flushPendingDeltas();
           streamingRef.current = false;
           setMessages((prev) => {
             const next = [...prev];
@@ -103,6 +190,7 @@ export default function App() {
           });
           break;
         }
+
         case "chat.append": {
           const p = payload as { role?: string; content?: string };
           const role = String(p.role || "system") as ChatMessage["role"];
@@ -114,50 +202,60 @@ export default function App() {
           ]);
           break;
         }
+
         case "chat.clear_thinking": {
-          setMessages((prev) =>
-            prev.filter((m) => m.content !== "Thinking...")
-          );
+          clearThinkingPlaceholders();
           break;
         }
+
         case "status.set": {
           setStatusText(String((payload as { text?: string }).text || "IDLE"));
           break;
         }
+
         case "status.mode": {
           setModeText(String((payload as { text?: string }).text || ""));
           break;
         }
+
         case "status.step": {
           setStepText(String((payload as { text?: string }).text || ""));
           break;
         }
+
         case "activity.append": {
           appendActivity(String((payload as { text?: string }).text || ""));
           break;
         }
+
         case "boot.log": {
           appendLog(`[Boot] ${String((payload as { text?: string }).text || "")}`);
           break;
         }
+
         case "boot.ready": {
           appendLog("[Boot] Ready");
           break;
         }
+
         case "log.agent": {
           appendLog(`[Agent] ${String((payload as { text?: string }).text || "")}`);
           break;
         }
+
         case "error": {
-          appendActivity(`[Error] ${String((payload as { message?: string }).message || "Unknown error")}`);
+          appendActivity(
+            `[Error] ${String((payload as { message?: string }).message || "Unknown error")}`
+          );
           break;
         }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
       }
     },
-    [appendActivity, appendLog, addRawEvent]
+    [appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta]
   );
 
   useEffect(() => {
@@ -168,7 +266,12 @@ export default function App() {
     });
     bridgeRef.current = bridge;
     bridge.connect();
-    return () => bridge.disconnect();
+    return () => {
+      bridge.disconnect();
+      if (deltaFlushTimerRef.current) {
+        clearTimeout(deltaFlushTimerRef.current);
+      }
+    };
   }, [handleFrame, appendActivity]);
 
   const sendAction = useCallback((action: string, payload: Record<string, unknown> = {}) => {
@@ -179,10 +282,7 @@ export default function App() {
     const text = inputText.trim();
     if (!text) return;
     setInputText("");
-    setMessages((prev) => [
-      ...prev,
-      { id: generateId(), role: "user", content: text },
-    ]);
+    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: text }]);
     sendAction("send_message", { text });
   }, [inputText, sendAction]);
 
@@ -215,7 +315,7 @@ export default function App() {
       <main className="main">
         <section className="chat-panel">
           <h2>Chat</h2>
-          <div className="chat-messages">
+          <div className="chat-messages" ref={chatBoxRef}>
             {messages.map((m) => (
               <div
                 key={m.id}

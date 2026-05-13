@@ -32,6 +32,7 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     "boot_ready": "boot.ready",
     # Chat / message
     "chat_append": "chat.append",
+    "chat_sync": "chat.sync",
     "clear_thinking": "chat.clear_thinking",
     # Search
     "search_result": "search.result",

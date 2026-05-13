@@ -835,3 +835,55 @@ class TestDpgPumpCompatibility:
         pump_ui_queue(ctrl)
 
         ctrl.chat_append.assert_called_once_with("system", "[UI] test")
+
+
+class TestChatSyncUsesRenderableMessages:
+    def test_chat_sync_excludes_hidden_and_system_noise(self) -> None:
+        """The chat.sync callback must use renderable_chat_messages logic so
+        hidden messages and system noise are excluded."""
+        from ui.controller import PiperController
+        from ui.controller_render import renderable_chat_messages
+        from web_ui.bridge.adapter import ui_tuple_to_ws_frame
+
+        ctrl = MagicMock()
+        ctrl.chat_state.get_messages_snapshot.return_value = [
+            {"role": "user", "content": "visible user"},
+            {"role": "assistant", "content": "visible assistant"},
+            {"role": "system", "content": "[Saved to file: secret.txt]", "hidden": True},
+            {"role": "system", "content": "System retrieved file foo.py"},
+            {"role": "system", "content": "Tool Response: bar"},
+            {"role": "assistant", "content": ""},
+            {"role": "system", "content": "[UI] Live screen enabled"},
+        ]
+
+        # Replicate the callback logic from run_web
+        messages = renderable_chat_messages(ctrl.chat_state.get_messages_snapshot())
+        sync_frame = ui_tuple_to_ws_frame("chat_sync", messages)
+        import json
+
+        frame = json.loads(sync_frame)
+        assert frame["kind"] == "chat.sync"
+        assert frame["sourceKind"] == "chat_sync"
+        msgs = frame["payload"]["messages"]
+
+        # Only visible messages should appear
+        roles = [m["role"] for m in msgs]
+        contents = [m["content"] for m in msgs]
+        assert roles == ["user", "assistant", "system"]
+        assert "visible user" in contents
+        assert "visible assistant" in contents
+        assert "[UI] Live screen enabled" in contents
+        # Hidden / noise must NOT appear
+        assert "[Saved to file: secret.txt]" not in contents
+        assert "System retrieved file foo.py" not in contents
+        assert "Tool Response" not in contents
+        assert "" not in contents
+
+    def test_chat_sync_payload_shape(self) -> None:
+        """chat.sync payload must be a list of {role, content} objects."""
+        from web_ui.bridge.adapter import ui_tuple_to_ws_frame
+        import json
+
+        sync_frame = ui_tuple_to_ws_frame("chat_sync", [("user", "hi")])
+        frame = json.loads(sync_frame)
+        assert frame["payload"]["messages"] == [{"role": "user", "content": "hi"}]

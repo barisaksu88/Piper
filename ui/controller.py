@@ -1342,7 +1342,18 @@ class PiperController:
         action_queue: "queue.Queue[tuple[str, dict]]" = queue.Queue()
         bridge_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         from web_ui.bridge.server import BridgeServer
+        from web_ui.bridge.adapter import ui_tuple_to_ws_frame
         from ui.controller_queue import pump_ui_queue_web
+        from ui.controller_render import renderable_chat_messages
+
+        def _on_client_connect() -> list[str]:
+            """Return initial frames for a newly connected WebSocket client."""
+            try:
+                messages = renderable_chat_messages(self.chat_state.get_messages_snapshot())
+                sync_frame = ui_tuple_to_ws_frame("chat_sync", messages)
+                return [sync_frame]
+            except Exception:
+                return []
 
         bridge = BridgeServer(
             ui_queue=bridge_queue,
@@ -1350,6 +1361,7 @@ class PiperController:
             host=host,
             port=port,
             ws_path=ws_path,
+            on_client_connect=_on_client_connect,
         )
         bridge.start()
 

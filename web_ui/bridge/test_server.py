@@ -233,3 +233,69 @@ class TestWsPathEnforcement:
                 asyncio.run(_ws_connect_and_read(uri="ws://127.0.0.1:8787/wrong", timeout=1.0))
         finally:
             server.stop()
+
+
+class TestClientConnectCallback:
+    def test_on_client_connect_sends_sync_frame(self) -> None:
+        """A connect callback must send its frames to the new client before
+        queued live events."""
+        ui_q: queue.Queue = queue.Queue()
+        server = BridgeServer(
+            ui_queue=ui_q,
+            on_client_connect=lambda: ['{"frame":"event","kind":"chat.sync","payload":{"messages":[]}}'],
+        )
+        server.start()
+        try:
+            raw = asyncio.run(_ws_connect_and_read(timeout=1.0))
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.sync"
+            assert frame["payload"]["messages"] == []
+        finally:
+            server.stop()
+
+    def test_on_client_connect_failure_does_not_crash(self) -> None:
+        """A failing connect callback must not crash the server or the connection."""
+        ui_q: queue.Queue = queue.Queue()
+        server = BridgeServer(
+            ui_queue=ui_q,
+            on_client_connect=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        server.start()
+        try:
+            # If the callback fails, the connection should still be usable.
+            # We queue an event after connect and verify it arrives.
+            ui_q.put(("chat_append", {"role": "user", "content": "hi"}))
+            raw = asyncio.run(_ws_connect_and_read(timeout=1.0))
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.append"
+        finally:
+            server.stop()
+
+    def test_on_client_connect_per_client(self) -> None:
+        """Each connecting client must receive the connect callback frames."""
+        ui_q: queue.Queue = queue.Queue()
+        call_count = [0]
+
+        def _callback() -> list[str]:
+            call_count[0] += 1
+            return ['{"frame":"event","kind":"chat.sync","payload":{"messages":[]}}']
+
+        server = BridgeServer(ui_queue=ui_q, on_client_connect=_callback)
+        server.start()
+        try:
+
+            async def _two_clients() -> list[dict[str, Any]]:
+                import websockets
+
+                frames: list[dict[str, Any]] = []
+                async with websockets.connect(_WS_URI) as ws1:
+                    frames.append(json.loads(await asyncio.wait_for(ws1.recv(), timeout=1.0)))
+                    async with websockets.connect(_WS_URI) as ws2:
+                        frames.append(json.loads(await asyncio.wait_for(ws2.recv(), timeout=1.0)))
+                return frames
+
+            frames = asyncio.run(_two_clients())
+            assert call_count[0] == 2
+            assert all(f["kind"] == "chat.sync" for f in frames)
+        finally:
+            server.stop()
