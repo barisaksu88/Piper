@@ -5,6 +5,9 @@
 > Base: `fix/guest-voice-name-disambiguation`
 > Scope: Document only. No runtime changes.
 
+**High-level migration guide:** `docs/specs/piper-web-ui-migration-guide.md`
+(This CONTRACT.md is the low-level frame-format reference. The migration guide contains the phase history, roadmap, and architecture narrative.)
+
 ---
 
 ## 1. EVENT_KINDS
