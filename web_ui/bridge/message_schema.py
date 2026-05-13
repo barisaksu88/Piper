@@ -134,6 +134,7 @@ class EventFrame:
     timestamp: str = ""
     request_id: str = ""
     kind: str = ""
+    source_kind: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -142,6 +143,7 @@ class EventFrame:
             "timestamp": self.timestamp,
             "requestId": self.request_id,
             "kind": self.kind,
+            "sourceKind": self.source_kind,
             "payload": self.payload,
         }
 

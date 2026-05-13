@@ -158,8 +158,6 @@ def _normalize_empty_payload(_payload: object) -> dict[str, Any]:
 _SUPPRESSED_SYSTEM_PREFIXES: tuple[str, ...] = (
     "[VOICE IDENTITY CLARIFICATION]",
     "[VOICE IDENTITY EVENT]",
-    "[UI] Password required.",
-    "[UI] Admin sign-in failed.",
     "[UI] I need one more detail to identify who is speaking.",
 )
 
@@ -377,6 +375,7 @@ def ui_tuple_to_ws_frame(kind: str, payload: object) -> str:
     frame = EventFrame(
         timestamp=_utc_timestamp(),
         kind=frontend_kind,
+        source_kind=kind,
         payload=normalized_payload,
     )
     return json.dumps(frame.to_dict(), separators=(",", ":"))

@@ -273,6 +273,28 @@ class TestUnknownEventStrictness:
 # ---------------------------------------------------------------------------
 
 
+class TestSourceKindPresence:
+    def test_stream_delta_has_source_kind(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("assistant_stream_delta", {"text": "hi"}))
+        assert frame["sourceKind"] == "assistant_stream_delta"
+        assert frame["kind"] == "stream.delta"
+
+    def test_status_has_source_kind(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("status", "IDLE"))
+        assert frame["sourceKind"] == "status"
+        assert frame["kind"] == "status.set"
+
+    def test_chat_append_has_source_kind(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("chat_append", {"role": "user", "content": "hello"}))
+        assert frame["sourceKind"] == "chat_append"
+        assert frame["kind"] == "chat.append"
+
+    def test_error_has_source_kind(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("error", "oops"))
+        assert frame["sourceKind"] == "error"
+        assert frame["kind"] == "error"
+
+
 class TestActionParsing:
     def test_send_message(self):
         raw = json.dumps({"frame": "action", "requestId": "r1", "action": "send_message", "payload": {"text": "hello"}})
@@ -291,21 +313,65 @@ class TestActionParsing:
         name, payload = adapter.parse_action_frame(raw)
         assert name == "new_session"
 
+    def test_clear_chat(self):
+        raw = json.dumps({"frame": "action", "requestId": "r3b", "action": "clear_chat", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "clear_chat"
+
     def test_mic_toggle(self):
         raw = json.dumps({"frame": "action", "requestId": "r4", "action": "mic_toggle", "payload": {}})
         name, payload = adapter.parse_action_frame(raw)
         assert name == "mic_toggle"
 
+    def test_snapshot_toggle(self):
+        raw = json.dumps({"frame": "action", "requestId": "r4b", "action": "snapshot_toggle", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "snapshot_toggle"
+
+    def test_live_screen_mode(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5a", "action": "live_screen_mode", "payload": {"mode": "display"}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "live_screen_mode"
+        assert payload["mode"] == "display"
+
+    def test_live_screen_interval(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5b", "action": "live_screen_interval", "payload": {"interval_s": 5}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "live_screen_interval"
+        assert payload["interval_s"] == 5
+
+    def test_event_speech_mode(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5c", "action": "event_speech_mode", "payload": {"mode": "important"}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "event_speech_mode"
+        assert payload["mode"] == "important"
+
+    def test_restart_piper(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5d", "action": "restart_piper", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "restart_piper"
+
+    def test_open_document_picker(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5e", "action": "open_document_picker", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "open_document_picker"
+
     def test_document_picker_selected(self):
-        raw = json.dumps({"frame": "action", "requestId": "r5", "action": "document_picker_selected", "payload": {"paths": ["/docs/a.pdf"]}})
+        raw = json.dumps({"frame": "action", "requestId": "r5f", "action": "document_picker_selected", "payload": {"paths": ["C:/tmp/a.pdf"]}})
         name, payload = adapter.parse_action_frame(raw)
         assert name == "document_picker_selected"
-        assert payload["paths"] == ["/docs/a.pdf"]
+        assert payload["paths"] == ["C:/tmp/a.pdf"]
+
+    def test_document_picker_cancel(self):
+        raw = json.dumps({"frame": "action", "requestId": "r5g", "action": "document_picker_cancel", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "document_picker_cancel"
 
     def test_code_send(self):
         raw = json.dumps({"frame": "action", "requestId": "r6", "action": "code_send", "payload": {"text": "input"}})
         name, payload = adapter.parse_action_frame(raw)
         assert name == "code_send"
+        assert payload["text"] == "input"
 
     def test_code_run(self):
         raw = json.dumps({"frame": "action", "requestId": "r7", "action": "code_run", "payload": {}})
@@ -364,11 +430,12 @@ class TestLeakagePrevention:
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("chat_append", {"role": "system", "content": "[VOICE IDENTITY EVENT]\nSwitched to Baris."}))
         assert frame["payload"]["_suppressed"] is True
 
-    def test_ui_password_required_suppressed(self):
+    def test_ui_password_required_visible(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("chat_append", {"role": "system", "content": "[UI] Password required."}))
-        assert frame["payload"]["_suppressed"] is True
+        assert frame["payload"].get("_suppressed") is None
+        assert frame["payload"]["content"] == "[UI] Password required."
 
-    def test_ui_disambiguation_suppressed(self):
+    def test_ui_identity_disambiguation_suppressed(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("chat_append", {"role": "system", "content": "[UI] I need one more detail to identify who is speaking."}))
         assert frame["payload"]["_suppressed"] is True
 

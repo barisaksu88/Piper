@@ -276,7 +276,9 @@ Voice identity events use `_announce_voice_identity_event()` -> `_set_voice_iden
 
 Typed identity hints that require clarification return a message that gets `chat_append`ed as a **visible system message**.
 
-**Important (1414316 fix):** Ambiguous identity clarification is routed through an internal persona-facing `voice_identity_notice`, not through visible `chat_append`. The Web UI adapter must not surface raw `[VOICE IDENTITY CLARIFICATION]`, `[UI]` disambiguation text, or system identity-selection messages as chat-visible output. These are persona directive context only.
+**Important (1414316 fix):** Ambiguous identity clarification is routed through an internal persona-facing `voice_identity_notice`, not through visible `chat_append`. The Web UI adapter must not surface raw `[VOICE IDENTITY CLARIFICATION]`, `[VOICE IDENTITY EVENT]`, or raw `[UI]` identity disambiguation text (e.g. "I need one more detail to identify who is speaking") as chat-visible output. These are persona directive context only.
+
+**Note:** User-facing control messages such as `[UI] Password required.` and `[UI] Admin sign-in failed.` are legitimate UI messages and must remain visible. Only raw identity internals are suppressed.
 
 ### 3.5 Thinking Placeholder
 
@@ -384,6 +386,7 @@ This section defines the JSON contract for a future WebSocket transport. All tim
   "timestamp": "2026-05-09T22:24:56.740Z",
   "requestId": "",
   "kind": "stream.delta",
+  "sourceKind": "assistant_stream_delta",
   "payload": {
     "text": "Hello, this is a delta."
   }
@@ -397,7 +400,8 @@ This section defines the JSON contract for a future WebSocket transport. All tim
 | `frame` | `"event"` | Discriminator |
 | `timestamp` | `string` | Event emission time |
 | `requestId` | `string` | Correlates to an incoming action request. Empty for unsolicited events. |
-| `kind` | `string` | Event kind (see section 1 mapped names) |
+| `kind` | `string` | Frontend event name (see section 1 mapped names) |
+| `sourceKind` | `string` | Original ui_queue kind string (e.g. `assistant_stream_delta`) |
 | `payload` | `object` | Event-specific data |
 
 **Streaming batching recommendation:** `stream.delta` events should be batched by the bridge if they arrive faster than the frontend can render (e.g., coalesce deltas within 16 ms into a single frame).
