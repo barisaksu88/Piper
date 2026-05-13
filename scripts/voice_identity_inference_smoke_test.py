@@ -96,7 +96,7 @@ def _stt_hook_checks() -> dict[str, bool]:
                     second_score=0.681,
                     margin=0.184,
                     best_is_admin=True,
-                    threshold=0.82,
+                    threshold=0.80,
                     margin_threshold=0.14,
                     final_user="baris",
                     decision="accepted_admin",
@@ -221,7 +221,7 @@ def run_smoke(include_stt_hook: bool = False) -> VoiceIdentityInferenceReport:
 
         checks = {
             "thresholds_match_calibration": (
-                float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD) == 0.82
+                float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD) == 0.80
                 and float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD) == 0.14
                 and float(CFG.VOICE_SIMILARITY_THRESHOLD_HIGH) == 0.74
                 and float(CFG.VOICE_SIMILARITY_THRESHOLD_LOW) == 0.58

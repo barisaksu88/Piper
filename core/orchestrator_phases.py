@@ -750,6 +750,25 @@ def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index:
     return _build_remaining_route_decision(orc, start_stage_index=stage_index)
 
 
+def _strip_ui_prefix(message: str) -> str:
+    text = str(message or "").strip()
+    return re.sub(r"^\s*\[UI\]\s*", "", text).strip()
+
+
+def _identity_clarification_notice(message: str) -> str:
+    clean = _strip_ui_prefix(message)
+    if not clean:
+        clean = "I need one more detail before I can identify the current speaker."
+    return "\n".join(
+        [
+            "[VOICE IDENTITY CLARIFICATION]",
+            "The runtime could not safely choose a speaker profile.",
+            f"Ask the current speaker naturally: {clean}",
+            "Do not expose this as a system or UI message, and do not claim the identity was switched.",
+        ]
+    )
+
+
 def _maybe_pause_for_missing_file_target_confirmation(
     orc,
     executor: StageExecutor,
@@ -1114,6 +1133,8 @@ def _run_route_core(orc) -> None:
             '{"identity_intent":{"is_introduction":true,"name":"Max","relation_to_admin":"friend","confidence":"high"}}. '
             "Also emit identity_intent when the latest user message explicitly corrects the active speaker, "
             "such as \"I'm not Baris, I'm Max\" or \"I'm Jim\" while another user is active. "
+            "If the active speaker spells or corrects their own name, such as \"I will spell my name, e-k-i-n\", "
+            "emit identity_intent with the corrected display spelling, for example name \"Ekin\". "
             "For correction phrases like \"I'm not British, I'm Jim\", use the asserted speaker name after the correction, not the negated description. "
             "Do not emit identity_intent for ordinary replies or status phrases like 'not bad', 'fine', 'okay', 'sure', or 'I am tired'."
         )
@@ -1153,6 +1174,17 @@ def _run_route_core(orc) -> None:
             parsed = exc.fallback or RouterBoundary.fallback()
             orc.ui.put(("agent_log", f"   -> Router validation failed: {exc}. Applying CHAT fallback."))
         identity_intent = dict((parsed or {}).get("identity_intent") or {})
+        if not identity_intent and user_runtime is not None and hasattr(user_runtime, "extract_spelled_identity_name"):
+            try:
+                spelled_identity = str(user_runtime.extract_spelled_identity_name(orc.user_msg) or "").strip()
+            except Exception:
+                spelled_identity = ""
+            if spelled_identity:
+                identity_intent = {
+                    "is_introduction": True,
+                    "name": spelled_identity,
+                    "confidence": "high",
+                }
         if (
             bool(identity_intent.get("is_introduction"))
             and user_runtime is not None
@@ -1161,7 +1193,11 @@ def _run_route_core(orc) -> None:
             relation_hint = str(identity_intent.get("relation_to_admin") or "").strip()
             if identity_name:
                 try:
-                    result = user_runtime.apply_router_identity_intent(identity_name, relation_hint=relation_hint)
+                    result = user_runtime.apply_router_identity_intent(
+                        identity_name,
+                        relation_hint=relation_hint,
+                        source_text=orc.user_msg,
+                    )
                     if getattr(result, "switched", False):
                         switched_profile = getattr(result, "profile", None)
                         switched_name = str(getattr(switched_profile, "name", "") or identity_name).strip() or identity_name
@@ -1184,7 +1220,10 @@ def _run_route_core(orc) -> None:
                         orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Switched user."))
                         orc.ui.put(("active_user_changed", {"preserve_transcript": True}))
                     elif getattr(result, "requires_password", False) or getattr(result, "requires_identity_clarification", False):
-                        orc.ui.put(("chat_append", {"role": "system", "content": str(getattr(result, "message", "") or "")}))
+                        orc.identity_switch_notice = _identity_clarification_notice(
+                            str(getattr(result, "message", "") or "")
+                        )
+                        orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Clarification required."))
                 except Exception as exc:
                     orc.ui.put(("agent_log", f"   -> Identity switch from router failed: {exc}"))
         normalized = normalize_route_decision(parsed, orc.user_msg, router_history)
@@ -1281,7 +1320,7 @@ def _run_route_core(orc) -> None:
     # If Secretary produced a bare CHAT with no stage instructions for a very
     # short/vague message, wrap it so the Planner/Persona asks for clarification
     # instead of treating it as casual chat (which leads to snarky responses).
-    if decision == "CHAT":
+    if decision == "CHAT" and not str(getattr(orc, "identity_switch_notice", "") or "").startswith("[VOICE IDENTITY CLARIFICATION]"):
         card = dict(orc.route_decision.get("card") or {})
         has_clarify_stage = any(
             str(s.get("stage_type") or "").upper() == "CHAT"

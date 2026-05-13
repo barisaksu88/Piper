@@ -87,6 +87,7 @@ DOMAIN_RULES: list[tuple[tuple[str, ...], str]] = [
 # ---------------------------------------------------------------------------
 SMOKE_MAP: dict[str, list[str]] = {
     "voice identity": [
+        "scripts/voice_identity_name_smoke_test.py --json",
         "scripts/voice_identity_drift_smoke_test.py --json",
         "scripts/voice_identity_inference_smoke_test.py --json",
     ],

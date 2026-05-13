@@ -25,7 +25,10 @@ if str(ROOT_DIR) not in sys.path:
 from AGENTS.harness.session import PiperHarness
 from core.commands import handle_command
 from core.style import StyleManager
+import memory.brain as brain_module
 from memory.user_runtime import ActiveUserRuntime
+
+brain_module.PiperBrain._vector_backend_dependencies_available = staticmethod(lambda: False)
 
 
 @dataclass(frozen=True)
@@ -125,6 +128,30 @@ def _runtime_checks() -> dict[str, object]:
         resolved_friend_ekin = runtime.observe_typed_identity_hint("I'm Ekin, Baris's friend")
         active_after_resolved_friend_ekin = runtime.active_profile().user_id
         runtime.switch_active_user(standard_profile.user_id)
+
+        spelling_data_dir = Path(raw_tmp) / "spelling_case"
+        spelling_runtime = ActiveUserRuntime(
+            spelling_data_dir,
+            llm_client=None,
+            admin_user_id="admin_baris",
+            admin_name="Baris",
+            default_style_filename=style_mgr.active_filename,
+        )
+        spelling_akin_intro = spelling_runtime.observe_typed_identity_hint("I'm Akin")
+        spelling_akin_profile = spelling_runtime.active_profile()
+        spelling_correction = spelling_runtime.observe_typed_identity_hint("I will spell my name, e-k-i-n.")
+        spelling_corrected_profile = spelling_runtime.active_profile()
+        spelling_alias_matches = spelling_runtime.registry.matching_profiles("Akin")
+        spelling_duplicate_ekin_profile = spelling_runtime.registry.profile_for_id("ekin")
+        spelling_relation = spelling_runtime.observe_typed_identity_hint("I am his girlfriend. I am Turkish.")
+        spelling_admin_graph = spelling_runtime.knowledge_manager_for("admin_baris").load_graph()
+        spelling_partner_relation = any(
+            str(edge.get("source") or "") == "person:user"
+            and str(edge.get("target") or "") == f"person:{spelling_corrected_profile.user_id}"
+            and str(edge.get("relation") or "") == "partner"
+            for edge in (spelling_admin_graph.get("edges") or [])
+            if isinstance(edge, dict)
+        )
 
         standard_memory_path = runtime.current_memory_path()
         standard_summary_path = runtime.current_conversation_summary_path()
@@ -243,6 +270,17 @@ def _runtime_checks() -> dict[str, object]:
                 "manual_same_name_switch_requires_clarification": bool(getattr(manual_ekin_switch, "requires_identity_clarification", False)),
                 "manual_same_name_switch_keeps_unknown_active": active_after_manual_ekin_switch == "unknown",
                 "relation_hint_resolves_same_name_identity": bool(getattr(resolved_friend_ekin, "switched", False)) and active_after_resolved_friend_ekin == "ekin_friend",
+                "spelled_ekin_correction_keeps_same_profile": bool(getattr(spelling_akin_intro, "switched", False))
+                and spelling_akin_profile.user_id == spelling_corrected_profile.user_id,
+                "spelled_ekin_displays_corrected_name": bool(getattr(spelling_correction, "switched", False) or getattr(spelling_correction, "status", "") == "noop")
+                and spelling_corrected_profile.name == "Ekin",
+                "spelled_ekin_stores_akin_spoken_alias": "Akin" in set(spelling_corrected_profile.spoken_aliases),
+                "spoken_akin_matches_corrected_ekin": any(
+                    profile.user_id == spelling_corrected_profile.user_id and profile.name == "Ekin"
+                    for profile in spelling_alias_matches
+                ),
+                "spelled_ekin_does_not_create_plain_duplicate": spelling_duplicate_ekin_profile is None,
+                "generic_his_girlfriend_attaches_partner_relation": spelling_relation is None and bool(spelling_partner_relation),
                 "public_baris_privacy_guidance_present": "private memory is not surfaced in this public session" in public_active_user_block.lower(),
                 "admin_mirror_has_person_node": str(mirrored_max.get("label") or "").lower() == "max",
                 "admin_mirror_copies_stable_fact": "coffee" in [item.lower() for item in mirrored_drinks],
