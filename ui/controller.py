@@ -729,6 +729,7 @@ class PiperController:
 
     def chat_append(self, role: str, content: str) -> None:
         self.chat_state.append(role, content)
+        self.ui_queue.put(("chat_append", {"role": role, "content": content, "_state_synced": True}))
         if self._try_append_chat_ui(renderable_chat_messages(self.chat_state.get_messages_snapshot())):
             return
         self._refresh_chat_ui()
@@ -1339,10 +1340,12 @@ class PiperController:
         boot_thread.start()
 
         action_queue: "queue.Queue[tuple[str, dict]]" = queue.Queue()
+        bridge_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         from web_ui.bridge.server import BridgeServer
+        from ui.controller_queue import pump_ui_queue_web
 
         bridge = BridgeServer(
-            ui_queue=self.ui_queue,
+            ui_queue=bridge_queue,
             action_queue=action_queue,
             host=host,
             port=port,
@@ -1350,20 +1353,31 @@ class PiperController:
         )
         bridge.start()
 
+        # Guard DearPyGui calls: without a DPG context dpg.does_item_exist causes a
+        # native hard exit on Windows.  Every DPG mutation in the codebase is already
+        # guarded with ``if dpg.does_item_exist(tag):``; returning False safely skips
+        # all of them in Web mode.
+        _orig_dpg_exists = dpg.does_item_exist
+        dpg.does_item_exist = lambda _tag: False
+
         try:
             while not self.restart_requested:
                 try:
                     action_name, payload = action_queue.get(timeout=0.05)
                 except queue.Empty:
-                    continue
-                try:
-                    self._dispatch_web_action(action_name, payload)
-                except Exception as exc:
-                    _LOG.exception("Web action dispatch failed: %s", action_name)
-                    self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+                    pass
+                else:
+                    try:
+                        self._dispatch_web_action(action_name, payload)
+                    except Exception as exc:
+                        _LOG.exception("Web action dispatch failed: %s", action_name)
+                        self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+
+                pump_ui_queue_web(self, forward_queue=bridge_queue)
         except KeyboardInterrupt:
             pass
         finally:
+            dpg.does_item_exist = _orig_dpg_exists
             bridge.stop()
             self.proactive_monitor.stop()
             self.agent_brain.shutdown()

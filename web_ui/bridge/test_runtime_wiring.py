@@ -309,18 +309,20 @@ class TestRunWebLifecycle:
         ctrl.agent_brain.shutdown.assert_called_once()
         ctrl.code_session.shutdown.assert_called_once()
 
-    def test_run_web_does_not_call_pump_ui_queue(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """run_web must never call pump_ui_queue (BridgeServer consumes ui_queue)."""
+    def test_run_web_calls_pump_ui_queue_web_with_forward_queue(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """run_web must call pump_ui_queue_web with a forward_queue so state updates
+        happen and BridgeServer can broadcast events to WebSocket clients."""
         from ui.controller import PiperController
+        import ui.controller_queue
 
-        pump_calls: list[Any] = []
-        original_pump = PiperController.pump_ui_queue
+        pump_calls: list[dict[str, Any]] = []
+        original_pump = ui.controller_queue.pump_ui_queue_web
 
-        def _tracking_pump(self: Any) -> None:
-            pump_calls.append(True)
-            original_pump(self)
+        def _tracking_pump(controller: Any, *, forward_queue: Any = None) -> None:
+            pump_calls.append({"forward_queue": forward_queue})
+            original_pump(controller, forward_queue=forward_queue)
 
-        monkeypatch.setattr(PiperController, "pump_ui_queue", _tracking_pump)
+        monkeypatch.setattr(ui.controller_queue, "pump_ui_queue_web", _tracking_pump)
 
         ctrl = MagicMock()
         ctrl.ui_queue = queue.Queue()
@@ -359,7 +361,10 @@ class TestRunWebLifecycle:
         asyncio.run(_poke())
         thread.join(timeout=5.0)
 
-        assert not pump_calls, "pump_ui_queue was called during run_web"
+        assert pump_calls, "pump_ui_queue_web was never called during run_web"
+        assert any(
+            call.get("forward_queue") is not None for call in pump_calls
+        ), "pump_ui_queue_web was called but never with a forward_queue"
 
 
 # ---------------------------------------------------------------------------
