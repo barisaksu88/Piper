@@ -12,7 +12,11 @@ function generateId(): string {
 }
 
 function isThinkingPlaceholder(m: ChatMessage): boolean {
-  return m.role === "system" && (m.content === "Thinking..." || m.content.startsWith("Thinking"));
+  const text = m.content.trim();
+  return (
+    (m.role === "assistant" || m.role === "system") &&
+    (text === "Thinking..." || text === "Thinking…" || text.startsWith("Thinking"))
+  );
 }
 
 function messageSignature(m: { role: string; content: string }): string {
