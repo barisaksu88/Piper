@@ -442,6 +442,13 @@ class TestActionParsing:
         name, payload = adapter.parse_action_frame(raw)
         assert name == "code_clear"
 
+    def test_mic_audio_submit(self):
+        raw = json.dumps({"frame": "action", "requestId": "r9", "action": "mic_audio_submit", "payload": {"audio": "abc", "format": "webm"}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "mic_audio_submit"
+        assert payload["audio"] == "abc"
+        assert payload["format"] == "webm"
+
 
 # ---------------------------------------------------------------------------
 # Invalid action handling
@@ -551,6 +558,26 @@ class TestMessageSchema:
 # ---------------------------------------------------------------------------
 # Internal marker scrubbing — stream deltas must not leak control tags
 # ---------------------------------------------------------------------------
+
+
+class TestMicStatusEvent:
+    def test_mic_status(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("mic_status", {"state": "transcribing", "error": ""}))
+        assert frame["kind"] == "mic.status"
+        assert frame["payload"]["state"] == "transcribing"
+        assert frame["payload"]["error"] == ""
+
+    def test_mic_status_error(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("mic_status", {"state": "error", "error": "Piper is busy"}))
+        assert frame["kind"] == "mic.status"
+        assert frame["payload"]["state"] == "error"
+        assert frame["payload"]["error"] == "Piper is busy"
+
+    def test_mic_status_empty(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("mic_status", ""))
+        assert frame["kind"] == "mic.status"
+        assert frame["payload"]["state"] == "idle"
+        assert frame["payload"]["error"] == ""
 
 
 class TestStreamDeltaScrubbing:

@@ -174,6 +174,14 @@ def _normalize_config_reloaded_payload(payload: object) -> dict[str, Any]:
     return {"changed_keys": []}
 
 
+def _normalize_mic_status_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        state = str(payload.get("state") or "idle")
+        error = str(payload.get("error") or "")
+        return {"state": state, "error": error}
+    return {"state": "idle", "error": ""}
+
+
 def _normalize_code_session_active_payload(payload: object) -> dict[str, Any]:
     return {"active": bool(payload)}
 
@@ -244,6 +252,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "live_screen_refresh": _normalize_live_screen_refresh_payload,
     "document_ingest_active": _normalize_document_ingest_payload,
     "config_reloaded": _normalize_config_reloaded_payload,
+    "mic_status": _normalize_mic_status_payload,
     "error": _normalize_error_payload,
     # All remaining events default to generic string payload
     "status": _normalize_generic_string_payload,
@@ -389,6 +398,10 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
     "config_reloaded": {
         "payload_fields": {"changed_keys": "list[str]"},
         "visibility": ["internal"],
+    },
+    "mic_status": {
+        "payload_fields": {"state": "str", "error": "str"},
+        "visibility": ["status", "control"],
     },
 }
 

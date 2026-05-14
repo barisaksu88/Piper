@@ -62,6 +62,8 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     "live_screen_refresh": "screen.refresh",
     # Config
     "config_reloaded": "config.reloaded",
+    # Mic / STT
+    "mic_status": "mic.status",
 }
 
 # Set for O(1) membership checks.
@@ -89,6 +91,7 @@ KNOWN_ACTION_NAMES: set[str] = {
     "code_send",
     "code_run",
     "code_clear",
+    "mic_audio_submit",
 }
 
 # ---------------------------------------------------------------------------

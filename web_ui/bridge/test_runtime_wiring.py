@@ -19,6 +19,7 @@ import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from config import Config, CFG
@@ -421,6 +422,8 @@ def _make_realish_controller() -> MagicMock:
     ctrl.user_meta = ""
     ctrl.document_ingest_active = False
     ctrl.live_screen_pending = False
+    ctrl.has_active_operations = lambda: False  # type: ignore[method-assign]
+    ctrl.has_active_code_session = lambda: False  # type: ignore[method-assign]
     ctrl._pending_boot_ready = False
     ctrl._pending_boot_ready_payload = ""
     ctrl.width = 1450
@@ -443,6 +446,13 @@ def _make_realish_controller() -> MagicMock:
     ctrl._flush_autoscrolls = PiperController._flush_autoscrolls.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
     ctrl.load_style_state = MagicMock()
     ctrl.do_generate_stream = lambda: None
+
+    # Safe chat_append for Web mode: no DPG, just ui_queue.
+    def _chat_append(role: str, content: str) -> None:
+        ctrl.ui_queue.put(("chat_append", {"role": role, "content": content, "_state_synced": True}))
+
+    ctrl.chat_append = _chat_append  # type: ignore[method-assign]
+    ctrl._handle_web_mic_audio_submit = PiperController._handle_web_mic_audio_submit.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
 
     return ctrl
 
@@ -540,6 +550,10 @@ class TestWebDispatchDpgSafety:
         ctrl = _make_realish_controller()
         ctrl._dispatch_web_action("restart_piper", {})
 
+    def test_mic_audio_submit_no_unsafe_dpg(self, _ban_dpg_mutations: None) -> None:
+        ctrl = _make_realish_controller()
+        ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
 
 class TestWebDispatchNeverCallsPumpUiQueue:
     def test_dispatch_actions_do_not_call_pump_ui_queue(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -573,6 +587,183 @@ class TestWebDispatchNeverCallsPumpUiQueue:
             ctrl._dispatch_web_action(action, payload)
 
         assert not pump_calls, f"pump_ui_queue called during dispatch of actions"
+
+
+# ---------------------------------------------------------------------------
+# Phase 14A — Web mic audio submission backend foundation
+# ---------------------------------------------------------------------------
+
+
+class TestWebMicConfigDefaults:
+    def test_web_mic_max_decoded_bytes_default(self) -> None:
+        cfg = Config()
+        assert cfg.WEB_MIC_MAX_DECODED_BYTES == 10 * 1024 * 1024
+
+    def test_web_mic_max_seconds_default(self) -> None:
+        cfg = Config()
+        assert cfg.WEB_MIC_MAX_SECONDS == 60
+
+    def test_web_mic_max_decoded_bytes_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PIPER_WEB_MIC_MAX_DECODED_BYTES", "5242880")
+        cfg = Config()
+        assert cfg.WEB_MIC_MAX_DECODED_BYTES == 5242880
+
+    def test_web_mic_max_seconds_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PIPER_WEB_MIC_MAX_SECONDS", "30")
+        cfg = Config()
+        assert cfg.WEB_MIC_MAX_SECONDS == 30
+
+
+class TestWebMicAudioSubmitDispatch:
+    """Test backend dispatch of mic_audio_submit action."""
+
+    def test_empty_audio_emits_mic_status_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        # Run worker synchronously.
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl._dispatch_web_action("mic_audio_submit", {"audio": "", "format": "webm"})
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert len(status_events) == 1
+        assert status_events[0][1]["state"] == "error"
+        assert "Empty audio" in status_events[0][1]["error"]
+
+    def test_unsupported_format_emits_mic_status_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "mp3"})
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert len(status_events) == 1
+        assert status_events[0][1]["state"] == "error"
+        assert "Unsupported format" in status_events[0][1]["error"]
+
+    def test_busy_piper_emits_mic_status_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        ctrl.has_active_operations = lambda: True  # type: ignore[method-assign]
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert len(status_events) == 1
+        assert status_events[0][1]["state"] == "error"
+        assert "busy" in status_events[0][1]["error"].lower()
+
+    def test_valid_payload_calls_decode_and_submits_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        submitted_texts: list[str] = []
+        modality_calls: list[str] = []
+
+        def _tracking_submit(text: str) -> None:
+            submitted_texts.append(text)
+            modality_calls.append(str(getattr(ctrl, "_pending_input_modality", "")))
+
+        ctrl.submit_user_text = _tracking_submit  # type: ignore[method-assign]
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+
+        fake_audio = np.zeros(1600, dtype=np.float32)
+
+        with patch("tools.audio_decode.decode_web_audio", return_value=fake_audio):
+            with patch("tools.stt.get_stt_engine") as mock_get_engine:
+                mock_engine = MagicMock()
+                mock_engine.transcribe_buffer.return_value = "hello from mic"
+                mock_engine.consume_last_voice_match.return_value = None
+                mock_get_engine.return_value = mock_engine
+                ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
+        assert submitted_texts == ["hello from mic"]
+        assert modality_calls == ["voice"]
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert status_events[-1][1]["state"] == "idle"
+
+    def test_empty_transcript_no_submit_chat_no_speech(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        submitted_texts: list[str] = []
+
+        def _tracking_submit(text: str) -> None:
+            submitted_texts.append(text)
+
+        ctrl.submit_user_text = _tracking_submit  # type: ignore[method-assign]
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+
+        fake_audio = np.zeros(1600, dtype=np.float32)
+
+        with patch("tools.audio_decode.decode_web_audio", return_value=fake_audio):
+            with patch("tools.stt.get_stt_engine") as mock_get_engine:
+                mock_engine = MagicMock()
+                mock_engine.transcribe_buffer.return_value = ""
+                mock_engine.consume_last_voice_match.return_value = None
+                mock_get_engine.return_value = mock_engine
+                ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
+        assert submitted_texts == []
+        events = _drain_ui_queue(ctrl.ui_queue)
+        chat_events = [e for e in events if e[0] == "chat_append"]
+        assert any("No speech detected" in str(e[1].get("content", "")) for e in chat_events)
+
+    def test_decode_error_emits_mic_status_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+
+        from tools.audio_decode import AudioDecodeError
+
+        with patch("tools.audio_decode.decode_web_audio", side_effect=AudioDecodeError("bad audio")):
+            ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert any(e[1]["state"] == "error" and "bad audio" in e[1]["error"] for e in status_events)
+
+    def test_sets_active_voice_profile_on_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        # Avoid DPG crash through real submit_user_text.
+        ctrl.submit_user_text = lambda _text: None  # type: ignore[method-assign]
+
+        fake_audio = np.zeros(1600, dtype=np.float32)
+        profile_calls: list[tuple[str, bool]] = []
+
+        with patch("tools.audio_decode.decode_web_audio", return_value=fake_audio):
+            with patch("tools.stt.get_stt_engine") as mock_get_engine:
+                mock_engine = MagicMock()
+                mock_engine.transcribe_buffer.return_value = "hello"
+                mock_engine.consume_last_voice_match.return_value = None
+
+                def _capture_set_active(user_id, *, is_unknown=False):
+                    profile_calls.append((user_id, is_unknown))
+
+                mock_engine.set_active_voice_profile = _capture_set_active
+                mock_get_engine.return_value = mock_engine
+                ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
+        assert len(profile_calls) == 1
+        # The user_id comes from the mocked profile; just verify it was called.
+        assert profile_calls[0][0] is ctrl.user_runtime.active_profile().user_id
+
+
+class _SyncThread:
+    """Drop-in replacement for threading.Thread that runs target synchronously."""
+
+    def __init__(self, target, daemon=True):
+        self._target = target
+        self.daemon = daemon
+
+    def start(self):
+        self._target()
+
+    def join(self, timeout=None):
+        pass
+
+
+def _drain_ui_queue(q: "queue.Queue[tuple[str, Any]]") -> list[tuple[str, Any]]:
+    items: list[tuple[str, Any]] = []
+    while True:
+        try:
+            items.append(q.get_nowait())
+        except queue.Empty:
+            break
+    return items
 
 
 # ---------------------------------------------------------------------------

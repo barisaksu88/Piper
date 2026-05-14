@@ -1221,6 +1221,74 @@ class PiperController:
         if update_ui:
             self._refresh_top_bar()
 
+    def _handle_web_mic_audio_submit(self, payload: dict) -> None:
+        """Handle mic audio submission from Web UI / WebView.
+
+        Runs decode + STT + voice identity in a worker thread so the Web
+        dispatch loop is not blocked.
+        """
+        from tools.audio_decode import AudioDecodeError, decode_web_audio
+        from tools.stt import get_stt_engine
+        from ui.controller_actions import _apply_voice_identity_match
+
+        audio_b64 = str(payload.get("audio") or "").strip()
+        fmt = str(payload.get("format") or "").strip().lower()
+        sample_rate_hint = int(payload.get("sample_rate_hint") or 48000)
+
+        # Payload validation
+        if not audio_b64:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Empty audio payload"}))
+            return
+        if fmt not in ("webm", "wav"):
+            self.ui_queue.put(("mic_status", {"state": "error", "error": f"Unsupported format: {fmt}"}))
+            return
+
+        # Busy guard
+        if self.has_active_operations() or self.has_active_code_session() or self.document_ingest_active or self.live_screen_pending:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Piper is busy"}))
+            return
+
+        def _worker() -> None:
+            try:
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "error": ""}))
+
+                audio_np = decode_web_audio(
+                    audio_b64,
+                    fmt,  # type: ignore[arg-type]
+                    max_decoded_bytes=CFG.WEB_MIC_MAX_DECODED_BYTES,
+                )
+
+                engine = get_stt_engine()
+                try:
+                    profile = self.user_runtime.active_profile()
+                    if hasattr(engine, "set_active_voice_profile"):
+                        engine.set_active_voice_profile(
+                            profile.user_id,
+                            is_unknown=getattr(profile, "is_unknown", False),
+                        )
+                except Exception:
+                    pass
+
+                transcript = engine.transcribe_buffer(audio_np, sample_rate=16000)
+
+                _apply_voice_identity_match(self, engine)
+
+                if transcript:
+                    self._pending_input_modality = "voice"
+                    self.submit_user_text(transcript)
+                else:
+                    self.chat_append("system", "[No speech detected]")
+
+                self.ui_queue.put(("mic_status", {"state": "idle", "error": ""}))
+            except AudioDecodeError as exc:
+                _LOG.warning("Web mic audio decode failed: %s", exc)
+                self.ui_queue.put(("mic_status", {"state": "error", "error": str(exc)}))
+            except Exception as exc:
+                _LOG.exception("Web mic audio submission failed")
+                self.ui_queue.put(("mic_status", {"state": "error", "error": f"STT error: {exc}"}))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _dispatch_web_action(self, action_name: str, payload: dict) -> None:
         """Dispatch a Web UI action without touching DearPyGui widgets."""
         if action_name == "send_message":
@@ -1241,6 +1309,8 @@ class PiperController:
                     },
                 )
             )
+        elif action_name == "mic_audio_submit":
+            self._handle_web_mic_audio_submit(payload)
         elif action_name == "snapshot_toggle":
             self.on_snapshot()
         elif action_name == "live_screen_mode":

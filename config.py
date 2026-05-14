@@ -852,6 +852,12 @@ class Config:
     WEB_UI_WS_PATH: str = field(
         default_factory=lambda: os.environ.get("PIPER_WEB_UI_WS_PATH", "/ws").strip() or "/ws"
     )
+    WEB_MIC_MAX_DECODED_BYTES: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_MAX_DECODED_BYTES", "10485760"))  # 10 MiB
+    )
+    WEB_MIC_MAX_SECONDS: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_MAX_SECONDS", "60"))
+    )
 
 
 class LiveConfig:

@@ -161,7 +161,15 @@ The table below maps every observed `kind` to its payload shape, source location
 
 ---
 
-### 1.15 Event Count Summary
+### 1.15 Mic / STT Events
+
+| Kind | Payload | Source | DPG Path | WS Name | Visibility | Notes |
+|---|---|---|---|---|---|---|
+| `mic_status` | `dict` with `state: "idle" | "transcribing" | "error"`, `error: str` | `controller.py` (`_handle_web_mic_audio_submit`) | Not used in DPG mode. | `mic.status` | `status` + `control` | Reflects backend mic processing state for Web UI / WebView mic capture. |
+
+---
+
+### 1.16 Event Count Summary
 
 | Category | Count |
 |---|---|
@@ -179,7 +187,8 @@ The table below maps every observed `kind` to its payload shape, source location
 | Agent/Monitor | 1 |
 | Live Screen | 1 |
 | Config | 1 |
-| **Total** | **30** |
+| Mic / STT | 1 |
+| **Total** | **31** |
 
 
 ---
@@ -217,6 +226,7 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | `code_send` | `controller_actions.on_code_send()` | `layout.py` -> code send button / enter key | `text: str` | `state-changing` | Sends input to active embedded process. |
 | `code_run` | `controller_actions.on_code_run()` | `layout.py` -> code run button | none | `state-changing` | Launches `.py` file from code preview. |
 | `code_clear` | `controller_actions.on_code_clear()` | `layout.py` -> code clear button | none | `destructive` | Clears code console output. |
+| `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. |
 
 ---
 
@@ -228,7 +238,7 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | state-changing | 10 |
 | destructive | 4 |
 | restart | 1 |
-| **Total** | **17** |
+| **Total** | **18** |
 
 ---
 

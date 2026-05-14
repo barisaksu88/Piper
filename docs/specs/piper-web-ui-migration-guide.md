@@ -32,7 +32,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
 | Completed phase | **Phase 12** |
-| Python tests | **189 / 189 passing** |
+| Python tests | **213 / 213 passing** |
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
@@ -585,18 +585,56 @@ http://localhost:3000
 
 ---
 
-### Phase 13 — Mic / STT Browser Integration
+### Phase 14A — Backend Mic Audio Submission Foundation ✅ COMPLETE
+
+**Delivered:** Backend-only action `mic_audio_submit`, local audio decoder (`tools/audio_decode.py`), `STTEngine.transcribe_buffer()`, `mic.status` event, payload validation, config guards.
+
+**Not delivered:** Frontend MediaRecorder capture (Phase 14B). No Web UI mic button exists yet.
+
+**Architecture:**
+- Web UI / WebView records one complete utterance (future Phase 14B).
+- Frontend sends base64 audio via `mic_audio_submit` action.
+- Backend decodes with ffmpeg (WebM/Opus → 16 kHz mono WAV).
+- Backend runs existing offline Faster-Whisper STT via `transcribe_buffer()`.
+- Backend runs existing voice identity/auth path unchanged.
+- Final transcript enters Piper as a voice input via `submit_user_text()`.
+
+**Security:**
+- Max decoded size: `PIPER_WEB_MIC_MAX_DECODED_BYTES` (default 10 MiB).
+- Max duration: `PIPER_WEB_MIC_MAX_SECONDS` (default 60 s).
+- Temp files only; cleaned up in `finally`.
+- No base64 audio logged; only sizes and status.
+- Backend busy guard rejects audio while Piper is generating.
+
+**Files touched:**
+- `tools/audio_decode.py` — new local audio decoder
+- `tools/stt.py` — `transcribe_buffer()`, refactored shared helpers
+- `ui/controller.py` — `_handle_web_mic_audio_submit()`, dispatch branch
+- `web_ui/bridge/message_schema.py` — `mic_audio_submit`, `mic_status`
+- `web_ui/bridge/adapter.py` — `mic.status` normalizer
+- `config.py` — `WEB_MIC_MAX_DECODED_BYTES`, `WEB_MIC_MAX_SECONDS`
+
+**Tests added:** Action parsing, event normalization, audio decode (mock ffmpeg), controller dispatch (mock STT), config defaults.
+
+---
+
+### Phase 14B — Frontend MediaRecorder / WebView Mic Capture
 
 **Scope:**
-- Web Audio API capture OR backend stream path
-- Voice identity constraints (do not break existing enrollment)
-- Browser permission handling
+- Frontend MediaRecorder API for utterance capture (WebM/Opus).
+- Mic button UI state tied to `mic.status` events.
+- Future WebView wrapper will use the same `mic_audio_submit` backend.
 
 **Files likely touched:**
-- `web_ui/frontend/src/App.tsx` — mic button + audio handling
-- `ui/controller_actions.py` — may need Web-safe mic toggle
+- `web_ui/frontend/src/App.tsx` — mic button, recording lifecycle, base64 encode
 
-**Risk:** High. Voice identity is safety-critical. Defer until chat parity is proven stable.
+**Blocked by:** Phase 14A backend foundation (complete).
+
+---
+
+### Phase 13 — Mic / STT Browser Integration
+
+> **Superseded by Phase 14A + 14B.** The original Phase 13 planning doc recommended an utterance-based backend stream path. Phase 14A implements the backend half; Phase 14B will implement the frontend half.
 
 ---
 
@@ -676,7 +714,7 @@ npm run build
 
 ### Pre-push checklist
 - [ ] `python -m compileall` passes
-- [ ] All 189 bridge tests pass
+- [ ] All 213 bridge tests pass
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
 - [ ] No changes to `data/users.json` unless intentionally part of the PR
@@ -711,3 +749,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 12.6 — Fixed duplicate assistant replies and `[ROUTER]` / `[RECALL:...]` leak into visible chat |
 | 2026-05-09 | Phase 12.7 — Fixed backend router loopback after visible reply; pure router still routes |
 | 2026-05-09 | Phase 12.8 — Checkpoint 2 marked passed; docs updated; next: Phase 13 planning |
+| 2026-05-09 | Phase 14A — Backend mic audio submission foundation: decoder, transcribe_buffer, mic_audio_submit action, mic.status event, tests |
