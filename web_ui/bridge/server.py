@@ -217,7 +217,6 @@ class BridgeServer:
             self._host,
             self._port,
             process_request=_process_request,
-            reuse_address=True,
         )
         self._startup_event.set()
 
