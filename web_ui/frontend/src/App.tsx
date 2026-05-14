@@ -97,14 +97,35 @@ export default function App() {
   // Mic state
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState("");
+  const [micStageMessage, setMicStageMessage] = useState("");
   const micStateRef = useRef<MicState>("idle");
   const discardNextMicStopRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const micWatchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     micStateRef.current = micState;
+  }, [micState]);
+
+  // Mic watchdog: warn if transcribing hangs for too long
+  useEffect(() => {
+    if (micWatchdogTimerRef.current) {
+      clearTimeout(micWatchdogTimerRef.current);
+      micWatchdogTimerRef.current = null;
+    }
+    if (micState === "transcribing") {
+      micWatchdogTimerRef.current = setTimeout(() => {
+        setMicStageMessage("Transcription is taking too long. Check backend console.");
+      }, 90000);
+    }
+    return () => {
+      if (micWatchdogTimerRef.current) {
+        clearTimeout(micWatchdogTimerRef.current);
+        micWatchdogTimerRef.current = null;
+      }
+    };
   }, [micState]);
 
   const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
@@ -597,16 +618,21 @@ export default function App() {
         }
 
         case "mic.status": {
-          const p = payload as { state?: string; error?: string };
+          const p = payload as { state?: string; error?: string; stage?: string; message?: string };
           const state = String(p.state || "idle");
           if (state === "transcribing") {
             setMicState("transcribing");
+            setMicError("");
+            const msg = p.message || p.stage || "Transcribing...";
+            setMicStageMessage(msg);
           } else if (state === "error") {
             setMicState("error");
             setMicError(String(p.error || "Mic error"));
+            setMicStageMessage("");
           } else {
             setMicState("idle");
             setMicError("");
+            setMicStageMessage("");
           }
           break;
         }
@@ -770,7 +796,7 @@ export default function App() {
     micState === "listening"
       ? "Listening..."
       : micState === "transcribing"
-      ? "Transcribing..."
+      ? micStageMessage || "Transcribing..."
       : micState === "error"
       ? micError
       : "";

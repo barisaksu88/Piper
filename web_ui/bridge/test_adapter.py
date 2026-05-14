@@ -579,6 +579,18 @@ class TestMicStatusEvent:
         assert frame["payload"]["state"] == "idle"
         assert frame["payload"]["error"] == ""
 
+    def test_mic_status_stage_and_message(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame(
+                "mic_status",
+                {"state": "transcribing", "stage": "decoding", "message": "Decoding audio...", "error": ""},
+            )
+        )
+        assert frame["kind"] == "mic.status"
+        assert frame["payload"]["state"] == "transcribing"
+        assert frame["payload"]["stage"] == "decoding"
+        assert frame["payload"]["message"] == "Decoding audio..."
+
 
 class TestStreamDeltaScrubbing:
     def test_router_stripped_from_stream_delta(self) -> None:

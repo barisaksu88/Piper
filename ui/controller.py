@@ -1249,15 +1249,21 @@ class PiperController:
 
         def _worker() -> None:
             try:
-                self.ui_queue.put(("mic_status", {"state": "transcribing", "error": ""}))
+                _LOG.info("Web mic: received audio payload format=%s len=%d", fmt, len(audio_b64))
 
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "decoding", "message": "Decoding audio...", "error": ""}))
+                decode_start = time.perf_counter()
                 audio_np = decode_web_audio(
                     audio_b64,
                     fmt,  # type: ignore[arg-type]
                     max_decoded_bytes=CFG.WEB_MIC_MAX_DECODED_BYTES,
+                    ffmpeg_timeout_s=float(getattr(CFG, "WEB_MIC_FFMPEG_TIMEOUT_S", 30)),
                 )
+                decode_elapsed = time.perf_counter() - decode_start
+                _LOG.info("Web mic: decode complete samples=%d elapsed=%.3fs", len(audio_np), decode_elapsed)
 
                 duration_s = float(len(audio_np)) / 16000.0
+                _LOG.info("Web mic: audio duration=%.3fs", duration_s)
                 if duration_s > CFG.WEB_MIC_MAX_SECONDS:
                     self.ui_queue.put(("mic_status", {"state": "error", "error": "Audio duration exceeds limit"}))
                     return
@@ -1273,10 +1279,19 @@ class PiperController:
                 except Exception:
                     pass
 
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "stt", "message": "Running local STT...", "error": ""}))
+                stt_start = time.perf_counter()
                 transcript = engine.transcribe_buffer(audio_np, sample_rate=16000)
+                stt_elapsed = time.perf_counter() - stt_start
+                _LOG.info("Web mic: STT complete elapsed=%.3fs empty=%s", stt_elapsed, not transcript)
 
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "identity", "message": "Checking voice identity...", "error": ""}))
+                identity_start = time.perf_counter()
                 _apply_voice_identity_match(self, engine)
+                identity_elapsed = time.perf_counter() - identity_start
+                _LOG.info("Web mic: identity complete elapsed=%.3fs", identity_elapsed)
 
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "submitting", "message": "Submitting transcript...", "error": ""}))
                 if transcript:
                     self._pending_input_modality = "voice"
                     self.submit_user_text(transcript)

@@ -41,7 +41,7 @@ def _find_ffmpeg() -> str | None:
     return None
 
 
-def _ffmpeg_normalize(input_path: str, output_path: str, ffmpeg_exe: str) -> None:
+def _ffmpeg_normalize(input_path: str, output_path: str, ffmpeg_exe: str, timeout_s: float = 30.0) -> None:
     """Run ffmpeg to produce a 16 kHz mono WAV."""
     cmd = [
         ffmpeg_exe,
@@ -52,12 +52,18 @@ def _ffmpeg_normalize(input_path: str, output_path: str, ffmpeg_exe: str) -> Non
         "-f", "wav",
         output_path,
     ]
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AudioDecodeError(
+            "ffmpeg timed out while decoding Web UI mic audio"
+        ) from exc
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")[:500]
         raise AudioDecodeError(f"ffmpeg failed (code {result.returncode}): {stderr}")
@@ -98,6 +104,7 @@ def decode_web_audio(
     format: Literal["webm", "wav"],
     *,
     max_decoded_bytes: int = 10 * 1024 * 1024,
+    ffmpeg_timeout_s: float = 30.0,
 ) -> np.ndarray:
     """Decode a base64 audio payload into a float32 mono numpy array at 16 kHz.
 
@@ -146,7 +153,7 @@ def decode_web_audio(
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f_out:
             output_path = f_out.name
 
-        _ffmpeg_normalize(input_path, output_path, ffmpeg_exe)
+        _ffmpeg_normalize(input_path, output_path, ffmpeg_exe, timeout_s=ffmpeg_timeout_s)
         audio, _sr = _read_wav(output_path)
         return audio.astype(np.float32)
 

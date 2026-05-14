@@ -165,7 +165,7 @@ The table below maps every observed `kind` to its payload shape, source location
 
 | Kind | Payload | Source | DPG Path | WS Name | Visibility | Notes |
 |---|---|---|---|---|---|---|
-| `mic_status` | `dict` with `state: "idle" | "transcribing" | "error"`, `error: str` | `controller.py` (`_handle_web_mic_audio_submit`) | Not used in DPG mode. | `mic.status` | `status` + `control` | Reflects backend mic processing state for Web UI / WebView mic capture. |
+| `mic_status` | `dict` with `state: "idle" | "transcribing" | "error"`, `error: str`, optional `stage: str`, optional `message: str` | `controller.py` (`_handle_web_mic_audio_submit`) | Not used in DPG mode. | `mic.status` | `status` + `control` | Reflects backend mic processing state for Web UI / WebView mic capture. `stage` gives fine-grained progress (`decoding` → `stt` → `identity` → `submitting`). `message` is human-readable status text. |
 
 ---
 

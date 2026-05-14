@@ -178,7 +178,14 @@ def _normalize_mic_status_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
         state = str(payload.get("state") or "idle")
         error = str(payload.get("error") or "")
-        return {"state": state, "error": error}
+        result: dict[str, Any] = {"state": state, "error": error}
+        stage = payload.get("stage")
+        if stage is not None:
+            result["stage"] = str(stage)
+        message = payload.get("message")
+        if message is not None:
+            result["message"] = str(message)
+        return result
     return {"state": "idle", "error": ""}
 
 
