@@ -647,6 +647,72 @@ label {
   font-size: 11px;
 }
 
+/* System / identity panel */
+.sys-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.sys-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sys-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.sys-value {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sys-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.sys-list {
+  max-height: 80px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sys-list-item {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 2px 4px;
+  background: var(--bg);
+  border-radius: 3px;
+  word-break: break-word;
+}
+
+.sys-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.sys-controls button {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

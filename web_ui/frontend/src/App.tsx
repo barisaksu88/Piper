@@ -53,6 +53,15 @@ export default function App() {
   const [visionNotes, setVisionNotes] = useState<string[]>([]);
   const [imageLoadError, setImageLoadError] = useState(false);
 
+  // System / identity state
+  const [activeUserLabel, setActiveUserLabel] = useState("");
+  const [identityStatus, setIdentityStatus] = useState("");
+  const [statsText, setStatsText] = useState("");
+  const [configReloads, setConfigReloads] = useState<string[]>([]);
+  const [controlsRefreshCount, setControlsRefreshCount] = useState(0);
+  const [lastControlsRefreshAt, setLastControlsRefreshAt] = useState("");
+  const [lastStatsRefreshAt, setLastStatsRefreshAt] = useState("");
+
   const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
 
   const streamingRef = useRef(false);
@@ -381,6 +390,40 @@ export default function App() {
           break;
         }
 
+        // System / identity events
+        case "user.changed": {
+          const p = payload as { preserve_transcript?: boolean };
+          setActiveUserLabel("Active user changed");
+          setIdentityStatus(p.preserve_transcript ? "Transcript preserved" : "Transcript reset");
+          break;
+        }
+
+        case "stats.refresh": {
+          const p = payload as { text?: string };
+          setStatsText(String(p.text || "Stats refreshed"));
+          setLastStatsRefreshAt(new Date().toLocaleTimeString());
+          break;
+        }
+
+        case "config.reloaded": {
+          const p = payload as { changed_keys?: string[] };
+          const keys = p.changed_keys || [];
+          if (keys.length > 0) {
+            setConfigReloads((prev) => {
+              const entry = `${new Date().toLocaleTimeString()}: ${keys.join(", ")}`;
+              const next = [...prev, entry];
+              return next.slice(-50);
+            });
+          }
+          break;
+        }
+
+        case "controls.refresh": {
+          setControlsRefreshCount((c) => c + 1);
+          setLastControlsRefreshAt(new Date().toLocaleTimeString());
+          break;
+        }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
@@ -473,6 +516,15 @@ export default function App() {
 
   const handleClearVisionNotes = useCallback(() => {
     setVisionNotes([]);
+  }, []);
+
+  const handleClearConfigReloads = useCallback(() => {
+    setConfigReloads([]);
+  }, []);
+
+  const handleClearStats = useCallback(() => {
+    setStatsText("");
+    setLastStatsRefreshAt("");
   }, []);
 
   const connBadge =
@@ -622,6 +674,61 @@ export default function App() {
                   disabled={connState !== "connected" || visionNotes.length === 0}
                 >
                   Clear Notes
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>System / Identity</h3>
+            <div className="sys-panel">
+              <div className="sys-block">
+                <div className="sys-label">Identity</div>
+                <div className="sys-value">
+                  {activeUserLabel || "—"}
+                  {identityStatus && (
+                    <span className="sys-sub"> ({identityStatus})</span>
+                  )}
+                </div>
+              </div>
+              <div className="sys-block">
+                <div className="sys-label">Stats</div>
+                <div className="sys-value">{statsText || "—"}</div>
+                {lastStatsRefreshAt && (
+                  <div className="sys-sub">Refreshed: {lastStatsRefreshAt}</div>
+                )}
+              </div>
+              <div className="sys-block">
+                <div className="sys-label">Controls Refresh</div>
+                <div className="sys-value">{controlsRefreshCount} events</div>
+                {lastControlsRefreshAt && (
+                  <div className="sys-sub">Last: {lastControlsRefreshAt}</div>
+                )}
+              </div>
+              {configReloads.length > 0 && (
+                <div className="sys-block">
+                  <div className="sys-label">Config Reloads</div>
+                  <div className="sys-list">
+                    {configReloads.map((entry, i) => (
+                      <div key={`cr-${i}`} className="sys-list-item">
+                        {entry}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="sys-controls">
+                <button
+                  onClick={handleClearStats}
+                  disabled={!statsText && !lastStatsRefreshAt}
+                >
+                  Clear Stats
+                </button>
+                <button
+                  onClick={handleClearConfigReloads}
+                  disabled={configReloads.length === 0}
+                >
+                  Clear Config Log
                 </button>
               </div>
             </div>

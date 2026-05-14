@@ -41,20 +41,24 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
 - Adapter converts 30+ backend event kinds to JSON frames
 - Frontend receives and renders: chat, streaming, status, activity/logs, boot sequence, raw event inspector
-- Frontend sends actions: `send_message`, `stop`, `new_session`, `restart_piper`, `event_speech_mode`, `live_screen_mode`, `live_screen_interval`
+- Frontend sends actions: `send_message`, `stop`, `new_session`, `restart_piper`, `event_speech_mode`, `live_screen_mode`, `live_screen_interval`, `code_send`, `code_run`, `code_clear`, `document_picker_selected`, `document_picker_cancel`
 - `chat.sync` sends visible transcript to each new WebSocket client
 - Delta coalescing (~16 ms) and auto-scroll in chat panel
 - Thinking placeholder lifecycle (`assistant` and `system` roles)
 - DPG guard prevents native DearPyGui crash in Web mode
+- **Code Session panel** (Phase 9): output, status, preview, stdin, run, send, clear
+- **Document ingestion panel** (Phase 10): path input, selected paths list, ingest, cancel
+- **Image / Vision panel** (Phase 11): `<img>` preview via safe static HTTP serving from `CFG.WORKSPACE_DIR`, vision notes, caption/path fallback
+- **System / Identity panel** (Phase 12): user changed events, stats refresh, config reload log, controls refresh counter
+- Safe static file serving with path traversal guards, extension whitelist, CORS headers
 
 ### What does NOT work yet
-- Code session panel (no frontend component)
-- Document ingestion / file picker (placeholder only)
-- Image / vision display (no HTTP image endpoint)
-- Stats / settings surface
 - Browser mic/STT integration
+- TTS in browser
+- Search result display panel (raw inspector only)
 - Desktop wrapper (Tauri/pywebview)
 - DearPyGui retirement
+- Settings mutation UI (config reload is read-only)
 
 ---
 
