@@ -119,6 +119,15 @@ def renderable_chat_messages(messages_snapshot: Iterable[dict]) -> list[tuple[st
                 continue
         if role == "assistant" and not content.strip():
             continue
+        # Defensive: exclude messages that are clearly internal backend
+        # emissions rather than legitimate assistant replies.  Upstream
+        # scrubbing (TagScrubber + pump) is the primary defence; this is
+        # a last-line filter for chat.sync and DPG refresh.
+        content_strip = content.strip()
+        if content_strip.startswith("[ROUTER]"):
+            continue
+        if content_strip.startswith("[RECALL:"):
+            continue
         rendered.append((str(role), normalize_message_display_spacing(content)))
     return rendered
 

@@ -11,6 +11,7 @@ Constraints:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +43,9 @@ def _normalize_stream_delta_payload(payload: object) -> dict[str, Any]:
         text = str(payload.get("text") or "")
     else:
         text = str(payload or "")
+    # Defensive fallback: strip internal markers that should never reach visible chat.
+    text = re.sub(r"\[RECALL:\s*.*?\]", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = text.replace("[ROUTER]", "").replace("[router]", "")
     return {"text": text}
 
 

@@ -276,13 +276,18 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
         except queue.Empty:
             break
 
-        if forward_queue is not None:
-            forward_queue.put((kind, payload))
-
         if kind == "assistant_stream_delta":
             text = str(payload.get("text") or "") if isinstance(payload, dict) else str(payload or "")
+            prev_clean = controller.pipeline.clean_stream_buffer
             controller.pipeline.handle_event("delta", text)
+            new_clean = controller.pipeline.clean_stream_buffer
+            clean_delta = new_clean[len(prev_clean):]
+            if forward_queue is not None:
+                forward_queue.put((kind, {"text": clean_delta}))
             continue
+
+        if forward_queue is not None:
+            forward_queue.put((kind, payload))
 
         if kind == "boot_log":
             controller.maybe_speak_ui_event(kind, payload)

@@ -215,10 +215,29 @@ export default function App() {
           flushPendingDeltas();
           streamingRef.current = true;
           clearThinkingPlaceholders();
-          setMessages((prev) => [
-            ...prev,
-            { id: generateId(), role: "assistant", content: "", streaming: true },
-          ]);
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            // If we are already streaming, replace the existing streaming
+            // message instead of appending a new one. This matches DPG
+            // behaviour where a mid-turn recall overwrites the first pass.
+            if (last && last.role === "assistant" && last.streaming) {
+              next[next.length - 1] = {
+                ...last,
+                id: generateId(),
+                content: "",
+                streaming: true,
+              };
+            } else {
+              next.push({
+                id: generateId(),
+                role: "assistant",
+                content: "",
+                streaming: true,
+              });
+            }
+            return next;
+          });
           break;
         }
 

@@ -148,9 +148,8 @@ class TagScrubber:
                     return out
 
             if self._buf[i] == '[':
-                # Check for block tags (RUN_CODE)
+                # Check for block tags (RUN_CODE, RECALL)
                 is_block = False
-                # We only filter RUN_CODE now
                 if self._buf[i:].upper().startswith("[RUN_CODE]"):
                     close_tag = "[/RUN_CODE]"
                     end_idx = self._buf.upper().find(close_tag, i)
@@ -160,8 +159,21 @@ class TagScrubber:
                     else:
                         self._buf = self._buf[i:]
                         return out
+                elif self._buf[i:].upper().startswith("[RECALL:"):
+                    close_idx = self._buf.find(']', i)
+                    if close_idx != -1:
+                        i = close_idx + 1
+                        is_block = True
+                    else:
+                        self._buf = self._buf[i:]
+                        return out
                 
                 if is_block: continue
+
+                # Check for internal control markers that should not reach display
+                if self._buf[i:].upper().startswith("[ROUTER]"):
+                    i += len("[ROUTER]")
+                    continue
 
                 close_idx = self._buf.find(']', i)
                 
@@ -205,6 +217,8 @@ class TagScrubber:
     def _scrub(self, text: str) -> str:
         text = re.sub(r'</?think>', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\[RUN_CODE\].*?\[\/RUN_CODE\]', '', text, flags=re.DOTALL|re.IGNORECASE)
+        text = re.sub(r'\[RECALL:\s*.*?\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = text.replace("[ROUTER]", "").replace("[router]", "")
         return text.strip()
 
 
@@ -241,6 +255,10 @@ class ChatPipeline:
         self._stream_started_at: float | None = None
         self._tts_started_at: float | None = None
         self._completed_stream_metrics: List[dict[str, float | str]] = []
+
+    @property
+    def clean_stream_buffer(self) -> str:
+        return self._clean_stream_buffer
 
     def consume_completed_stream_metrics(self) -> List[dict[str, float | str]]:
         metrics = list(self._completed_stream_metrics)

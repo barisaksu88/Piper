@@ -1068,3 +1068,217 @@ class TestConversationSummaryReset:
 
         orc = Orchestrator(cfg)
         assert orc.conversation_summary == "file summary"
+
+
+# ---------------------------------------------------------------------------
+# TagScrubber — internal markers must not reach display text
+# ---------------------------------------------------------------------------
+
+
+class TestTagScrubberInternalMarkers:
+    def test_scrubs_router(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        assert scrubber.process_delta("Hello [ROUTER] world") == "Hello  world"
+
+    def test_scrubs_recall(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        assert scrubber.process_delta("See [RECALL: foo] bar") == "See  bar"
+
+    def test_scrubs_recall_multiline(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        assert scrubber.process_delta("A [RECALL: line1\nline2] B") == "A  B"
+
+    def test_scrubs_run_code_block(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        assert scrubber.process_delta("Run [RUN_CODE]x=1[/RUN_CODE] now") == "Run  now"
+
+    def test_normal_text_untouched(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        assert scrubber.process_delta("Normal reply.") == "Normal reply."
+
+    def test_process_delta_scrubs_router_and_recall_across_calls(self) -> None:
+        from core.pipeline import TagScrubber
+
+        scrubber = TagScrubber()
+        out1 = scrubber.process_delta("Hello [ROUTER]")
+        out2 = scrubber.process_delta(" world [RECALL: x] end")
+        assert out1 == "Hello "
+        assert out2 == " world  end"
+
+
+# ---------------------------------------------------------------------------
+# ChatPipeline.clean_stream_buffer — exposes scrubbed text for Web pump
+# ---------------------------------------------------------------------------
+
+
+class TestChatPipelineCleanStreamBuffer:
+    def test_clean_buffer_empty_before_start(self) -> None:
+        from core.pipeline import ChatPipeline
+
+        pipeline = ChatPipeline(
+            tts=MagicMock(),
+            chat_append_fn=MagicMock(),
+            chat_upsert_fn=MagicMock(),
+            persist_turn_fn=MagicMock(),
+            set_status_fn=MagicMock(),
+        )
+        assert pipeline.clean_stream_buffer == ""
+
+    def test_clean_buffer_accumulates_scrubbed_text(self) -> None:
+        from core.pipeline import ChatPipeline
+
+        pipeline = ChatPipeline(
+            tts=MagicMock(),
+            chat_append_fn=MagicMock(),
+            chat_upsert_fn=MagicMock(),
+            persist_turn_fn=MagicMock(),
+            set_status_fn=MagicMock(),
+        )
+        pipeline.handle_event("start", "")
+        pipeline.handle_event("delta", "Hello [ROUTER] world")
+        assert pipeline.clean_stream_buffer == "Hello  world"
+
+    def test_clean_buffer_resets_on_start(self) -> None:
+        from core.pipeline import ChatPipeline
+
+        pipeline = ChatPipeline(
+            tts=MagicMock(),
+            chat_append_fn=MagicMock(),
+            chat_upsert_fn=MagicMock(),
+            persist_turn_fn=MagicMock(),
+            set_status_fn=MagicMock(),
+        )
+        pipeline.handle_event("start", "")
+        pipeline.handle_event("delta", "first")
+        pipeline.handle_event("start", "")
+        assert pipeline.clean_stream_buffer == ""
+
+
+# ---------------------------------------------------------------------------
+# pump_ui_queue_web forwards clean deltas, not raw text
+# ---------------------------------------------------------------------------
+
+
+class TestPumpWebForwardsCleanDeltas:
+    def test_stream_delta_forwards_scrubbed_text(self) -> None:
+        from ui.controller_queue import pump_ui_queue_web
+        from core.pipeline import ChatPipeline
+
+        ui_q: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        fwd_q: "queue.Queue[tuple[str, object]]" = queue.Queue()
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = ui_q
+        pipeline = ChatPipeline(
+            tts=MagicMock(),
+            chat_append_fn=MagicMock(),
+            chat_upsert_fn=MagicMock(),
+            persist_turn_fn=MagicMock(),
+            set_status_fn=MagicMock(),
+        )
+        ctrl.pipeline = pipeline
+
+        ui_q.put(("assistant_stream_start", ""))
+        ui_q.put(("assistant_stream_delta", {"text": "Hello [ROUTER]"}))
+        ui_q.put(("assistant_stream_delta", {"text": " world"}))
+        ui_q.put(("assistant_stream_end", ""))
+
+        pump_ui_queue_web(ctrl, forward_queue=fwd_q)
+
+        # start, delta, delta, end
+        assert fwd_q.qsize() == 4
+        kinds = [fwd_q.get()[0] for _ in range(4)]
+        assert kinds == [
+            "assistant_stream_start",
+            "assistant_stream_delta",
+            "assistant_stream_delta",
+            "assistant_stream_end",
+        ]
+
+    def test_clean_delta_excludes_internal_markers(self) -> None:
+        from ui.controller_queue import pump_ui_queue_web
+        from core.pipeline import ChatPipeline
+
+        ui_q: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        fwd_q: "queue.Queue[tuple[str, object]]" = queue.Queue()
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = ui_q
+        pipeline = ChatPipeline(
+            tts=MagicMock(),
+            chat_append_fn=MagicMock(),
+            chat_upsert_fn=MagicMock(),
+            persist_turn_fn=MagicMock(),
+            set_status_fn=MagicMock(),
+        )
+        ctrl.pipeline = pipeline
+
+        ui_q.put(("assistant_stream_start", ""))
+        ui_q.put(("assistant_stream_delta", {"text": "A [ROUTER] B"}))
+        ui_q.put(("assistant_stream_end", ""))
+
+        pump_ui_queue_web(ctrl, forward_queue=fwd_q)
+
+        # Skip start
+        fwd_q.get()
+        delta_kind, delta_payload = fwd_q.get()
+        assert delta_kind == "assistant_stream_delta"
+        assert delta_payload["text"] == "A  B"
+
+
+# ---------------------------------------------------------------------------
+# renderable_chat_messages — defensive exclusion of internal markers
+# ---------------------------------------------------------------------------
+
+
+class TestRenderableChatMessagesInternalMarkers:
+    def test_excludes_router_text(self) -> None:
+        from ui.controller_render import renderable_chat_messages
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "[ROUTER] rerouting..."},
+        ]
+        rendered = renderable_chat_messages(messages)
+        assert not any("[ROUTER]" in content for _role, content in rendered)
+        assert rendered == [("user", "hi")]
+
+    def test_includes_normal_assistant_text(self) -> None:
+        from ui.controller_render import renderable_chat_messages
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+        rendered = renderable_chat_messages(messages)
+        assert rendered == [("user", "hi"), ("assistant", "Hello!")]
+
+    def test_excludes_hidden_messages(self) -> None:
+        from ui.controller_render import renderable_chat_messages
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": "secret", "hidden": True},
+        ]
+        rendered = renderable_chat_messages(messages)
+        assert rendered == [("user", "hi")]
+
+    def test_excludes_empty_assistant(self) -> None:
+        from ui.controller_render import renderable_chat_messages
+
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "   "},
+        ]
+        rendered = renderable_chat_messages(messages)
+        assert rendered == [("user", "hi")]

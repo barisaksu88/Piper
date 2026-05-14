@@ -546,3 +546,36 @@ class TestMessageSchema:
         d = frame.to_dict()
         assert d["frame"] == "error"
         assert d["message"] == "bad"
+
+
+# ---------------------------------------------------------------------------
+# Internal marker scrubbing — stream deltas must not leak control tags
+# ---------------------------------------------------------------------------
+
+
+class TestStreamDeltaScrubbing:
+    def test_router_stripped_from_stream_delta(self) -> None:
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame("assistant_stream_delta", {"text": "Hello [ROUTER] world"})
+        )
+        assert frame["payload"]["text"] == "Hello  world"
+
+    def test_recall_stripped_from_stream_delta(self) -> None:
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame("assistant_stream_delta", {"text": "See [RECALL: foo] bar"})
+        )
+        assert frame["payload"]["text"] == "See  bar"
+
+    def test_recall_multiline_stripped_from_stream_delta(self) -> None:
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame(
+                "assistant_stream_delta", {"text": "A [RECALL: line1\nline2] B"}
+            )
+        )
+        assert frame["payload"]["text"] == "A  B"
+
+    def test_normal_text_untouched(self) -> None:
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame("assistant_stream_delta", {"text": "Normal assistant reply."})
+        )
+        assert frame["payload"]["text"] == "Normal assistant reply."
