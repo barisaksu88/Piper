@@ -39,11 +39,19 @@ export default function App() {
   const [codePathInput, setCodePathInput] = useState("");
   const [codeInputText, setCodeInputText] = useState("");
 
+  // Document ingestion state
+  const [documentsView, setDocumentsView] = useState("");
+  const [documentIngestActive, setDocumentIngestActive] = useState(false);
+  const [documentPathInput, setDocumentPathInput] = useState("");
+  const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
+  const [documentStatus] = useState("");
+
   const streamingRef = useRef(false);
   const bridgeRef = useRef<PiperBridge | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const codeOutputRef = useRef<HTMLDivElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
+  const documentsViewRef = useRef<HTMLDivElement | null>(null);
   const pendingDeltasRef = useRef("");
   const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -62,6 +70,14 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [codeOutput]);
+
+  // Auto-scroll documents view to bottom
+  useEffect(() => {
+    const el = documentsViewRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [documentsView]);
 
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
@@ -309,6 +325,18 @@ export default function App() {
           break;
         }
 
+        // Document ingestion events
+        case "document.view": {
+          const text = String((payload as { text?: string }).text || "");
+          setDocumentsView(text);
+          break;
+        }
+
+        case "document.ingest_active": {
+          setDocumentIngestActive(Boolean((payload as { active?: boolean }).active));
+          break;
+        }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
@@ -378,6 +406,26 @@ export default function App() {
     if (!path) return;
     sendAction("code_run", { path });
   }, [codePathInput, sendAction]);
+
+  const handleAddDocumentPaths = useCallback(() => {
+    const input = documentPathInput.trim();
+    if (!input) return;
+    const paths = input
+      .split(/[;\n]+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+    setSelectedDocumentPaths((prev) => [...prev, ...paths]);
+    setDocumentPathInput("");
+  }, [documentPathInput]);
+
+  const handleIngestSelected = useCallback(() => {
+    if (selectedDocumentPaths.length === 0 || documentIngestActive) return;
+    sendAction("document_picker_selected", { paths: selectedDocumentPaths });
+  }, [selectedDocumentPaths, documentIngestActive, sendAction]);
+
+  const handleClearDocumentSelection = useCallback(() => {
+    setSelectedDocumentPaths([]);
+  }, []);
 
   const connBadge =
     connState === "connected"
@@ -479,6 +527,83 @@ export default function App() {
                     disabled={connState !== "connected"}
                   >
                     Clear
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>Documents</h3>
+            <div className="doc-panel">
+              <div
+                className={
+                  documentIngestActive
+                    ? "doc-status active"
+                    : "doc-status"
+                }
+              >
+                {documentIngestActive ? "Ingesting..." : documentStatus || "Idle"}
+              </div>
+              <div className="doc-view" ref={documentsViewRef}>
+                {documentsView && (
+                  <pre className="doc-view-content">{documentsView}</pre>
+                )}
+              </div>
+              {selectedDocumentPaths.length > 0 && (
+                <div className="doc-selected-list">
+                  {selectedDocumentPaths.map((p, i) => (
+                    <div key={`dp-${i}`} className="doc-selected-item">
+                      {p}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="doc-controls">
+                <div className="doc-control-row">
+                  <input
+                    className="input-text doc-path"
+                    type="text"
+                    value={documentPathInput}
+                    onChange={(e) => setDocumentPathInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddDocumentPaths();
+                      }
+                    }}
+                    placeholder="Path(s) separated by ; or newline..."
+                    disabled={connState !== "connected"}
+                  />
+                  <button
+                    onClick={handleAddDocumentPaths}
+                    disabled={connState !== "connected" || !documentPathInput.trim()}
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="doc-control-row">
+                  <button
+                    onClick={handleIngestSelected}
+                    disabled={
+                      connState !== "connected" ||
+                      documentIngestActive ||
+                      selectedDocumentPaths.length === 0
+                    }
+                  >
+                    Ingest Selected
+                  </button>
+                  <button
+                    onClick={handleClearDocumentSelection}
+                    disabled={connState !== "connected"}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => sendAction("document_picker_cancel")}
+                    disabled={connState !== "connected" || !documentIngestActive}
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -601,7 +726,6 @@ export default function App() {
           </label>
 
           <span className="placeholder">Mic: deferred</span>
-          <span className="placeholder">Docs: deferred</span>
           <span className="placeholder">Image: placeholder</span>
         </div>
       </footer>
