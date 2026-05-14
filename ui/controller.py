@@ -1233,7 +1233,6 @@ class PiperController:
 
         audio_b64 = str(payload.get("audio") or "").strip()
         fmt = str(payload.get("format") or "").strip().lower()
-        sample_rate_hint = int(payload.get("sample_rate_hint") or 48000)
 
         # Payload validation
         if not audio_b64:
@@ -1257,6 +1256,11 @@ class PiperController:
                     fmt,  # type: ignore[arg-type]
                     max_decoded_bytes=CFG.WEB_MIC_MAX_DECODED_BYTES,
                 )
+
+                duration_s = float(len(audio_np)) / 16000.0
+                if duration_s > CFG.WEB_MIC_MAX_SECONDS:
+                    self.ui_queue.put(("mic_status", {"state": "error", "error": "Audio duration exceeds limit"}))
+                    return
 
                 engine = get_stt_engine()
                 try:

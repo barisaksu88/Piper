@@ -741,6 +741,44 @@ class TestWebMicAudioSubmitDispatch:
         # The user_id comes from the mocked profile; just verify it was called.
         assert profile_calls[0][0] is ctrl.user_runtime.active_profile().user_id
 
+    def test_oversized_duration_emits_mic_status_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl.submit_user_text = lambda _text: None  # type: ignore[method-assign]
+
+        # 70 seconds of audio at 16 kHz (exceeds default 60 s limit).
+        fake_audio = np.zeros(16000 * 70, dtype=np.float32)
+
+        with patch("tools.audio_decode.decode_web_audio", return_value=fake_audio):
+            ctrl._dispatch_web_action("mic_audio_submit", {"audio": "abc", "format": "webm"})
+
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert any(e[1]["state"] == "error" and "duration exceeds limit" in e[1]["error"].lower() for e in status_events)
+
+    def test_malformed_sample_rate_hint_does_not_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_realish_controller()
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl.submit_user_text = lambda _text: None  # type: ignore[method-assign]
+
+        fake_audio = np.zeros(1600, dtype=np.float32)
+
+        with patch("tools.audio_decode.decode_web_audio", return_value=fake_audio):
+            with patch("tools.stt.get_stt_engine") as mock_get_engine:
+                mock_engine = MagicMock()
+                mock_engine.transcribe_buffer.return_value = "hello"
+                mock_engine.consume_last_voice_match.return_value = None
+                mock_get_engine.return_value = mock_engine
+                # sample_rate_hint is no longer parsed; payload should be ignored safely.
+                ctrl._dispatch_web_action(
+                    "mic_audio_submit",
+                    {"audio": "abc", "format": "webm", "sample_rate_hint": "not_a_number"},
+                )
+
+        events = _drain_ui_queue(ctrl.ui_queue)
+        status_events = [e for e in events if e[0] == "mic_status"]
+        assert status_events[-1][1]["state"] == "idle"
+
 
 class _SyncThread:
     """Drop-in replacement for threading.Thread that runs target synchronously."""
