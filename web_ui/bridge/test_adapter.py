@@ -148,11 +148,47 @@ class TestImageVisionEvents:
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: workspace/out.png"))
         assert frame["kind"] == "image.show"
         assert frame["payload"]["path"] == "workspace/out.png"
+        assert frame["payload"]["url"] == "/workspace/out.png"
         assert "caption" in frame["payload"]
 
     def test_show_image_raw_path(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "out.png"))
         assert frame["payload"]["path"] == "out.png"
+        assert frame["payload"]["url"] == "/workspace/out.png"
+
+    def test_show_image_subdir(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "images/sub/test.png"))
+        assert frame["payload"]["path"] == "images/sub/test.png"
+        assert frame["payload"]["url"] == "/workspace/images/sub/test.png"
+
+    def test_show_image_windows_absolute_workspace(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: C:\\Projects\\Piper\\data\\workspace\\foo.png")
+        )
+        assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\foo.png"
+        assert frame["payload"]["url"] == "/workspace/foo.png"
+
+    def test_show_image_windows_absolute_workspace_subdir(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame("show_image", "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg")
+        )
+        assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg"
+        assert frame["payload"]["url"] == "/workspace/images/bar.jpg"
+
+    def test_show_image_unsafe_extension_no_url(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "evil.exe"))
+        assert frame["payload"]["path"] == "evil.exe"
+        assert "url" not in frame["payload"]
+
+    def test_show_image_traversal_no_url(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "../secret.png"))
+        assert frame["payload"]["path"] == "../secret.png"
+        assert "url" not in frame["payload"]
+
+    def test_show_image_absolute_no_url(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "/etc/passwd"))
+        assert frame["payload"]["path"] == "/etc/passwd"
+        assert "url" not in frame["payload"]
 
     def test_vision_snapshot_note_dict(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("vision_snapshot_note", {"text": "Screen shows IDE", "speak": True}))

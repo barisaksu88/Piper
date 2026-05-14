@@ -84,6 +84,9 @@ def _normalize_chat_sync_payload(payload: object) -> dict[str, Any]:
     return {"messages": messages}
 
 
+_SAFE_IMAGE_EXTS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+
 def _normalize_show_image_payload(payload: object) -> dict[str, Any]:
     text = str(payload or "")
     # Extract path from "Image saved to: path" message.
@@ -91,9 +94,31 @@ def _normalize_show_image_payload(payload: object) -> dict[str, Any]:
     if "Image saved to:" in text:
         path = text.split("Image saved to:")[-1].strip()
     result: dict[str, Any] = {"caption": text, "path": path}
-    # Build a safe workspace URL from the basename if it looks like a file.
-    if path and "/" not in path and "\\" not in path and path != text:
-        result["url"] = f"/workspace/{path}"
+
+    # Build a safe workspace URL.
+    norm = path.replace("\\", "/")
+
+    # Safety: reject empty, traversal, absolute, or hidden paths.
+    if not norm or ".." in norm or norm.startswith("/") or "/." in norm:
+        return result
+
+    # Determine the relative path under workspace.
+    relative = norm
+    lower_norm = norm.lower()
+    if "workspace/" in lower_norm:
+        idx = lower_norm.rfind("workspace/") + len("workspace/")
+        relative = norm[idx:]
+
+    # After extraction, reject any remaining traversal or empty result.
+    if not relative or ".." in relative or relative.startswith("/"):
+        return result
+
+    # Extension safety check.
+    lower_rel = relative.lower()
+    if not any(lower_rel.endswith(ext) for ext in _SAFE_IMAGE_EXTS):
+        return result
+
+    result["url"] = f"/workspace/{relative}"
     return result
 
 
