@@ -1,9 +1,9 @@
 # Piper Web UI Migration Guide
 
-> **Version:** 1.1 (post-Phase 12.5)  
+> **Version:** 1.2 (post-Phase 12.8)  
 > **Branch:** `feature/web-ui-bridge`  
 > **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
-> **Status:** Phase 12 complete. Manual checkpoint 2 ready.
+> **Status:** Phase 12 complete. Manual checkpoint 2 passed.
 
 ---
 
@@ -32,11 +32,11 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
 | Completed phase | **Phase 12** |
-| Python tests | **165 / 165 passing** |
+| Python tests | **189 / 189 passing** |
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
-| Manual tested by Baris | **Checkpoint 1 complete** — chat, streaming, status, New Session, Restart verified |
-| Next checkpoint | **Checkpoint 2** — after this guide (all panels through Phase 12) |
+| Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
+| Next phase | **Phase 13 planning** — mic/STT browser integration (not implementation) |
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -430,15 +430,16 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 
 **Result:** Chat, streaming, status, New Session, Restart verified by Baris.
 
-### Manual test checkpoint 2
-**Trigger:** After Phase 12.5 (this document). All sidebar panels are now wired.
+### Manual test checkpoint 2 (passed)
+**Trigger:** After Phase 12.5–12.8 (this document). All sidebar panels are now wired.
 
-**What Baris should test:**
+**Retest coverage:**
 - Chat basics (connect, send, stream, stop, New Session, Restart)
-- Code Session panel (launch, run, output, clear)
-- Document Ingestion panel (add paths, ingest, cancel)
-- Image / Vision panel (if image generation is triggered)
-- System / Identity panel (observe stats, config reloads, controls refresh)
+- Turkish character rendering correct
+- Single assistant reply for normal chat prompts (no double bubble)
+- No visible `[ROUTER]` or `[RECALL:...]` in chat
+- Code Session, Document Ingestion, Image/Vision, System/Identity panels functional
+- Sidebar layout acceptable
 
 **What NOT to test yet:**
 - Browser mic / STT
@@ -446,6 +447,16 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 - Desktop wrapper (Tauri/pywebview)
 - Settings mutation (config is read-only in Web UI)
 - File picker native dialog (document panel uses path text input)
+
+### Regression notes
+
+**Phase 12.6 — Web stream lifecycle & internal marker scrubbing**
+- Bug: Web UI showed raw `assistant_stream_delta` text while DPG showed scrubbed text from `chat_state`. `[ROUTER]` and `[RECALL:...]` leaked into visible chat.
+- Fix: `TagScrubber` strips `[ROUTER]` / `[RECALL:...]`; `pump_ui_queue_web` forwards **clean** deltas; `App.tsx` `stream.start` replaces existing streaming bubble; `renderable_chat_messages` last-line filter excludes internal markers.
+
+**Phase 12.7 — Router loopback after visible reply**
+- Bug: Persona emitted visible answer + hidden `[ROUTER]` → backend looped to `ROUTE` → second assistant reply for same user turn.
+- Fix: `_should_ignore_router_after_visible_reply(clean_answer, router_requested)` guard in `_run_persona_core`. If `clean_answer.strip()` is truthy, `[ROUTER]` is ignored and turn finishes. Pure `[ROUTER]` / empty visible answer still allows loopback.
 
 ### Manual test checklist — Checkpoint 2
 
@@ -665,7 +676,7 @@ npm run build
 
 ### Pre-push checklist
 - [ ] `python -m compileall` passes
-- [ ] All 165 bridge tests pass
+- [ ] All 189 bridge tests pass
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
 - [ ] No changes to `data/users.json` unless intentionally part of the PR
@@ -697,3 +708,6 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 8 — This migration guide created to reconcile original plan with modified phase history |
 | 2026-05-09 | Phase 12 complete — System/Identity panel, image serving, document ingestion, code session |
 | 2026-05-09 | Phase 12.5 — Manual checkpoint 2 prep: layout audit, CSS safety fix, updated checklist |
+| 2026-05-09 | Phase 12.6 — Fixed duplicate assistant replies and `[ROUTER]` / `[RECALL:...]` leak into visible chat |
+| 2026-05-09 | Phase 12.7 — Fixed backend router loopback after visible reply; pure router still routes |
+| 2026-05-09 | Phase 12.8 — Checkpoint 2 marked passed; docs updated; next: Phase 13 planning |
