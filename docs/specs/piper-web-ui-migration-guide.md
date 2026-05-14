@@ -52,7 +52,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - **Image / Vision panel** (Phase 11): `<img>` preview via safe static HTTP serving from `CFG.WORKSPACE_DIR`, vision notes, caption/path fallback
 - **System / Identity panel** (Phase 12): user changed events, stats refresh, config reload log, controls refresh counter
 - Safe static file serving with path traversal guards, extension whitelist, CORS headers
-- **Web UI / WebView mic capture** (Phase 14B) — MediaRecorder, permission handling, abort/discard, backend STT + voice identity
+- **Web UI / WebView mic capture** (Phase 14B) — **Experimental / quarantined.** MediaRecorder upload path built but manual smoke failed. Disabled by default; available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`.
 
 ### What does NOT work yet
 - TTS in browser
@@ -617,15 +617,17 @@ http://localhost:3000
 
 ---
 
-### Phase 14B — Frontend MediaRecorder / WebView Mic Capture ✅ COMPLETE
+### Phase 14B — Frontend MediaRecorder / WebView Mic Capture ⚠️ EXPERIMENTAL / QUARANTINED
 
-**Delivered:** Frontend MediaRecorder API for utterance capture (WebM/Opus), mic button with state machine, abort/discard behavior, `mic.status` event handling.
+**Delivered:** Frontend MediaRecorder API for utterance capture (WebM/Opus), mic button with state machine, abort/discard behavior, `mic.status` event handling, per-stage progress, ffmpeg timeout, frontend watchdog, and large-frame WS handling.
+
+**Status:** Manual smoke testing failed. The base64 JSON → WebSocket → backend path is unreliable in real browser testing (oversized frames, silent failures, backend worker hangs). The code is preserved for future experiments but is **disabled by default** in the frontend.
 
 **Files touched:**
 - `web_ui/frontend/src/App.tsx` — mic state machine, MediaRecorder lifecycle, base64 encode, abort helpers
 - `web_ui/frontend/src/styles.css` — mic button pulse animation, error state, status text
 
-**Behavior:**
+**Behavior when enabled (`VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`):**
 - MIC button: idle → requesting_permission → listening (STOP) → transcribing → idle/error
 - Permission denied: shows user-safe error message
 - Global Stop / New Session / Restart / disconnect: aborts active recording and discards audio
@@ -635,9 +637,28 @@ http://localhost:3000
 
 ---
 
-### Phase 13 — Mic / STT Browser Integration
+### Phase 14C — Mic Upload Quarantine Decision ✅ COMPLETE
 
-> **Superseded by Phase 14A + 14B.** The original Phase 13 planning doc recommended an utterance-based backend stream path. Phase 14A implements the backend half; Phase 14B will implement the frontend half.
+**Decision:** Do not present the MediaRecorder upload path as the accepted mic solution.
+
+**Reasoning:**
+- Browser audio upload (base64 JSON over WebSocket) is fragile at production scale
+- Manual smoke tests repeatedly failed at the submit/transcribing boundary
+- Debugging browser ↔ backend audio pipelines is low ROI compared to reusing the existing native mic stack
+
+**What changed:**
+- Frontend MIC button is disabled by default
+- Status text explains: "Mic upload experimental; native mic bridge planned"
+- MediaRecorder path remains available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` for future experiments
+- All backend code (`mic_audio_submit`, `tools/audio_decode.py`, STT worker) is preserved
+- All 220+ backend tests are preserved
+
+**Preferred future direction:**
+Web UI / WebView should control Piper's existing native/backend mic pipeline:
+- Web UI button → `mic_toggle` / `mic_start` / `mic_stop` action
+- Backend runs existing native mic capture → STT → voice identity
+- Transcript enters Piper through normal `submit_user_text()` path
+- No browser audio upload; no base64 encoding; no WebSocket frame size issues
 
 ---
 
@@ -656,13 +677,32 @@ http://localhost:3000
 
 ---
 
-### Phase 15 — DearPyGui Retirement Decision
+### Phase 15 — Native Mic Bridge + DearPyGui Retirement Decision
 
-**Criteria for retirement:**
+**Phase 15 has two parallel tracks:**
+
+#### Track A — Native Mic Bridge (higher priority)
+**Goal:** Replace the experimental MediaRecorder upload path with a Web UI → native mic control bridge.
+
+**Approach:**
+- Web UI sends `mic_toggle` / `mic_start` / `mic_stop` actions over WebSocket
+- Backend uses existing native mic capture (same pipeline DearPyGui uses today)
+- STT + voice identity run unchanged on the backend
+- Transcript enters Piper through normal `submit_user_text()` path
+- No browser audio encoding, no base64, no oversized WebSocket frames
+
+**Why this is preferred:**
+- Reuses proven, tested native mic code instead of fighting browser audio APIs
+- Eliminates WebSocket frame size concerns entirely
+- Voice identity and STT logic require zero changes
+- Aligns with Piper's offline-first philosophy
+
+#### Track B — DearPyGui Retirement Criteria
 1. All Phase 9–12 features work without regressions
 2. 1+ week of daily use by Baris without issues
 3. Manual test checklist passes 100%
 4. Windows desktop wrapper (Phase 14) produces stable `.exe`
+5. Native mic bridge (Track A) proven reliable
 
 **Transition plan:**
 1. Change `WEB_UI_ENABLED` default from `False` to `True`
@@ -670,7 +710,7 @@ http://localhost:3000
 3. Document `PIPER_WEB_UI_ENABLED=false` for legacy mode
 4. Archive DPG retirement plan in `docs/archive/`
 
-**Do not retire DearPyGui before Phase 15.**
+**Do not retire DearPyGui before Track A is proven and Track B criteria are met.**
 
 ---
 
@@ -686,7 +726,7 @@ The following are explicitly out of scope until their respective phases:
 | TTS port 8765 conflict | Already reserved; bridge uses 8787 | N/A |
 | DearPyGui removal | Fallback must remain until parity proven | 15 |
 | Web UI as default | Must be opt-in until Baris accepts it | 15 |
-| Browser mic/STT | Implemented via backend STT + voice identity (Phases 14A–14B) | 14B |
+| Browser mic/STT | Experimental upload path quarantined; native mic bridge preferred (Phase 15 Track A) | 15 |
 | File picker native dialog | Needs Web-safe path handling | 10 |
 | WebGL / canvas animations | Visual polish, not functional | Post-15 |
 
@@ -755,3 +795,7 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 14A — Backend mic audio submission foundation: decoder, transcribe_buffer, mic_audio_submit action, mic.status event, tests |
 | 2026-05-09 | Phase 14A.1 — Enforce WEB_MIC_MAX_SECONDS duration guard; remove unused sample_rate_hint parsing |
 | 2026-05-09 | Phase 14B — Frontend MediaRecorder mic capture: idle/listening/transcribing/error state machine, abort/discard, mic.status wired |
+| 2026-05-09 | Phase 14B.1 — Fixed abort/discard race with discardNextMicStopRef |
+| 2026-05-09 | Phase 14B.2 — Added per-stage mic progress, ffmpeg timeout, frontend watchdog |
+| 2026-05-09 | Phase 14B.3 — Added large-frame WS handling, sendAction return value, 10s local timeout, receive failure logging |
+| 2026-05-09 | Phase 14C — Quarantined MediaRecorder upload path; disabled by default; documented native mic bridge as preferred direction |

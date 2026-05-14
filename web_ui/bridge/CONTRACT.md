@@ -226,7 +226,7 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | `code_send` | `controller_actions.on_code_send()` | `layout.py` -> code send button / enter key | `text: str` | `state-changing` | Sends input to active embedded process. |
 | `code_run` | `controller_actions.on_code_run()` | `layout.py` -> code run button | none | `state-changing` | Launches `.py` file from code preview. |
 | `code_clear` | `controller_actions.on_code_clear()` | `layout.py` -> code clear button | none | `destructive` | Clears code console output. |
-| `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. |
+| `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | **Experimental / quarantined.** Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. Disabled by default in frontend unless `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. Preferred production path is Web UI controlling native backend mic (Phase 15). |
 
 ---
 

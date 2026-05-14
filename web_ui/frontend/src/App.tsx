@@ -129,6 +129,8 @@ export default function App() {
     };
   }, [micState]);
 
+  const experimentalMicUpload = import.meta.env.VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD === "true";
+
   const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
 
   const streamingRef = useRef(false);
@@ -810,6 +812,7 @@ export default function App() {
       : "";
 
   const micDisabled =
+    !experimentalMicUpload ||
     connState !== "connected" ||
     streamingRef.current ||
     micState === "requesting_permission" ||
@@ -822,6 +825,8 @@ export default function App() {
       ? micStageMessage || "Transcribing..."
       : micState === "error"
       ? micError
+      : !experimentalMicUpload
+      ? "Mic upload experimental; native mic bridge planned"
       : "";
 
   return (
