@@ -1010,6 +1010,7 @@ def on_new_session(controller) -> None:
     except Exception:
         pass
     _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
+    controller._conversation_summary_override = ""
     controller.chat_state.new_session()
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
@@ -1022,6 +1023,7 @@ def on_new_session(controller) -> None:
 
 def on_clear(controller) -> None:
     _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
+    controller._conversation_summary_override = ""
     controller.chat_state.clear()
     controller.session_meta = "Session: active"
     controller.stage_meta = ""

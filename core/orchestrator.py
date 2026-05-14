@@ -74,6 +74,7 @@ class OrchestratorConfig:
 
     # -- Paths --
     conversation_summary_path: Path | None = None
+    conversation_summary: str | None = None
 
     # -- LangGraph Recovery --
     langgraph_resume_thread_id: str = ""
@@ -130,7 +131,10 @@ class Orchestrator:
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.conversation_compressor = ConversationCompressor()
-        self.conversation_summary = self._load_conversation_summary()
+        if cfg.conversation_summary is not None:
+            self.conversation_summary = cfg.conversation_summary
+        else:
+            self.conversation_summary = self._load_conversation_summary()
         self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
         self.stats_collector.startup_check_once()
         self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)

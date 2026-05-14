@@ -262,6 +262,7 @@ class PiperController:
         self.live_screen_pending = False
         self.thinking_placeholder = "Thinking..."
         self.code_session_active = False
+        self._conversation_summary_override: str | None = None
         self.document_ingest_active = False
         self.event_speech_mode = normalize_event_speech_mode(EVENT_SPEECH_OFF)
         self._chat_rendered_messages: List[Tuple[str, str]] = []
@@ -796,6 +797,10 @@ class PiperController:
         voice_identity_notice = str(getattr(self, "_pending_voice_identity_notice", "") or "").strip()
         self._pending_voice_identity_notice = ""
         voice_identity_state = self._build_voice_identity_state()
+        # Consume one-shot conversation summary override (set by on_new_session / on_clear).
+        summary_override = getattr(self, "_conversation_summary_override", None)
+        if summary_override is not None:
+            self._conversation_summary_override = None
         return OrchestratorConfig(
             llm=self.llm,
             brain=self.agent_brain,
@@ -817,6 +822,7 @@ class PiperController:
             release_search_in_flight=self.release_search_in_flight,
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
+            conversation_summary=summary_override,
             user_runtime=self.user_runtime,
             input_modality=input_modality,
             voice_identity_notice=voice_identity_notice,

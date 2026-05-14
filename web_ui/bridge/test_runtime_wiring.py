@@ -887,3 +887,167 @@ class TestChatSyncUsesRenderableMessages:
         sync_frame = ui_tuple_to_ws_frame("chat_sync", [("user", "hi")])
         frame = json.loads(sync_frame)
         assert frame["payload"]["messages"] == [{"role": "user", "content": "hi"}]
+
+
+# ---------------------------------------------------------------------------
+# Conversation summary reset on new_session / clear_chat
+# ---------------------------------------------------------------------------
+
+
+class TestConversationSummaryReset:
+    """New Session and Clear Chat must reset both persisted file and in-memory
+    conversation_summary so the next orchestrator turn starts fresh."""
+
+    def test_new_session_deletes_persisted_summary(self, tmp_path: pytest.TestPath, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ui.controller_actions import on_new_session
+
+        summary_path = tmp_path / "conversation_summary.json"
+        summary_path.write_text('{"summary": "old summary"}', encoding="utf-8")
+
+        ctrl = MagicMock()
+        ctrl.user_runtime.current_conversation_summary_path.return_value = summary_path
+        ctrl.chat_state.new_session = MagicMock()
+        ctrl.tts.stop = MagicMock()
+
+        on_new_session(ctrl)
+
+        assert not summary_path.exists()
+
+    def test_new_session_sets_in_memory_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ui.controller_actions import on_new_session
+
+        ctrl = MagicMock()
+        ctrl.user_runtime.current_conversation_summary_path.return_value = __import__("pathlib").Path("/dev/null")
+        ctrl.chat_state.new_session = MagicMock()
+        ctrl.tts.stop = MagicMock()
+
+        on_new_session(ctrl)
+
+        assert ctrl._conversation_summary_override == ""
+
+    def test_clear_chat_sets_in_memory_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ui.controller_actions import on_clear
+        import dearpygui.dearpygui as dpg
+
+        monkeypatch.setattr(dpg, "does_item_exist", lambda _tag: False)
+        monkeypatch.setattr(dpg, "delete_item", lambda _tag, **kwargs: None)
+        monkeypatch.setattr(dpg, "set_value", lambda _tag, _val: None)
+
+        ctrl = MagicMock()
+        ctrl.user_runtime.current_conversation_summary_path.return_value = __import__("pathlib").Path("/dev/null")
+        ctrl.chat_state.clear = MagicMock()
+
+        on_clear(ctrl)
+
+        assert ctrl._conversation_summary_override == ""
+
+    def test_build_orchestrator_config_consumes_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """build_orchestrator_config must pass the override to OrchestratorConfig
+        and then clear it so subsequent turns load from file normally."""
+        from ui.controller import PiperController
+        from core.orchestrator import OrchestratorConfig
+
+        ctrl = MagicMock()
+        ctrl._conversation_summary_override = ""
+        ctrl.llm = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl.prompt_context_service = MagicMock()
+        ctrl.chat_state = MagicMock()
+        ctrl.style_mgr = MagicMock()
+        ctrl.pipeline = MagicMock()
+        ctrl.ui_queue = MagicMock()
+        ctrl.boot_mgr = MagicMock()
+        ctrl.img_gen = MagicMock()
+        ctrl.live_screen = MagicMock()
+        ctrl.user_runtime = MagicMock()
+        ctrl.user_runtime.current_conversation_summary_path.return_value = __import__("pathlib").Path("/tmp/summary.json")
+        ctrl._pending_input_modality = "typed"
+        ctrl._pending_voice_identity_notice = ""
+
+        # Bind the real method
+        bound = PiperController.build_orchestrator_config.__get__(ctrl, MagicMock)
+        cfg: OrchestratorConfig = bound()
+
+        assert cfg.conversation_summary == ""
+        assert ctrl._conversation_summary_override is None
+
+    def test_build_orchestrator_config_passes_none_when_no_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ui.controller import PiperController
+        from core.orchestrator import OrchestratorConfig
+
+        ctrl = MagicMock()
+        ctrl._conversation_summary_override = None
+        ctrl.llm = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl.prompt_context_service = MagicMock()
+        ctrl.chat_state = MagicMock()
+        ctrl.style_mgr = MagicMock()
+        ctrl.pipeline = MagicMock()
+        ctrl.ui_queue = MagicMock()
+        ctrl.boot_mgr = MagicMock()
+        ctrl.img_gen = MagicMock()
+        ctrl.live_screen = MagicMock()
+        ctrl.user_runtime = MagicMock()
+        ctrl.user_runtime.current_conversation_summary_path.return_value = __import__("pathlib").Path("/tmp/summary.json")
+        ctrl._pending_input_modality = "typed"
+        ctrl._pending_voice_identity_notice = ""
+
+        bound = PiperController.build_orchestrator_config.__get__(ctrl, MagicMock)
+        cfg: OrchestratorConfig = bound()
+
+        assert cfg.conversation_summary is None
+
+    def test_orchestrator_uses_override_when_provided(self, tmp_path: pytest.TestPath) -> None:
+        """If OrchestratorConfig.conversation_summary is set, the orchestrator must
+        use it instead of loading from the file."""
+        from core.orchestrator import Orchestrator, OrchestratorConfig
+
+        summary_path = tmp_path / "conversation_summary.json"
+        summary_path.write_text('{"summary": "stale summary"}', encoding="utf-8")
+
+        cfg = OrchestratorConfig(
+            llm=MagicMock(),
+            brain=MagicMock(),
+            knowledge=MagicMock(),
+            prompt_context=MagicMock(),
+            chat=MagicMock(),
+            styles=MagicMock(),
+            pipeline=MagicMock(),
+            ui=MagicMock(),
+            get_context=MagicMock(),
+            boot=MagicMock(),
+            img_gen=MagicMock(),
+            conversation_summary_path=summary_path,
+            conversation_summary="",
+        )
+
+        orc = Orchestrator(cfg)
+        assert orc.conversation_summary == ""
+
+    def test_orchestrator_loads_from_file_when_no_override(self, tmp_path: pytest.TestPath) -> None:
+        """If OrchestratorConfig.conversation_summary is None, the orchestrator must
+        load from the file as before."""
+        from core.orchestrator import Orchestrator, OrchestratorConfig
+
+        summary_path = tmp_path / "conversation_summary.json"
+        summary_path.write_text('{"summary": "file summary"}', encoding="utf-8")
+
+        cfg = OrchestratorConfig(
+            llm=MagicMock(),
+            brain=MagicMock(),
+            knowledge=MagicMock(),
+            prompt_context=MagicMock(),
+            chat=MagicMock(),
+            styles=MagicMock(),
+            pipeline=MagicMock(),
+            ui=MagicMock(),
+            get_context=MagicMock(),
+            boot=MagicMock(),
+            img_gen=MagicMock(),
+            conversation_summary_path=summary_path,
+        )
+
+        orc = Orchestrator(cfg)
+        assert orc.conversation_summary == "file summary"
