@@ -653,7 +653,7 @@ label {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 8px 10px;
   gap: 8px;
 }

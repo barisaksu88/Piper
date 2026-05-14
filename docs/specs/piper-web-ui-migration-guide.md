@@ -1,9 +1,9 @@
 # Piper Web UI Migration Guide
 
-> **Version:** 1.0 (post-Phase 7.1)  
+> **Version:** 1.1 (post-Phase 12.5)  
 > **Branch:** `feature/web-ui-bridge`  
 > **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
-> **Status:** Phase 7.1 complete. Implementation paused for Baris manual-test checkpoint.
+> **Status:** Phase 12 complete. Manual checkpoint 2 ready.
 
 ---
 
@@ -31,11 +31,12 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 |---|---|
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
-| Completed phase | **Phase 7.1** |
-| Python tests | **147 / 147 passing** |
+| Completed phase | **Phase 12** |
+| Python tests | **165 / 165 passing** |
 | Frontend typecheck | **Passing** |
-| Frontend build | **Passing** (203 kB JS + 5 kB CSS) |
-| Manual tested by Baris | **Not yet** — first checkpoint is after this guide (Phase 8) |
+| Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
+| Manual tested by Baris | **Checkpoint 1 complete** — chat, streaming, status, New Session, Restart verified |
+| Next checkpoint | **Checkpoint 2** — after this guide (all panels through Phase 12) |
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -403,14 +404,20 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 - **Status:** `status.set`, `status.mode`, `status.step`
 - **Activity/Log:** `activity.append`, `boot.log`, `boot.ready`, `log.agent`
 - **System:** `error`, `ui_controls_refresh`, `config_reloaded`
-- **Future (not wired to frontend yet):** `code_session_*`, `documents_view`, `show_image`, `search_result`, `vision_snapshot_note`, `stats_view_refresh`, `live_screen_refresh`
+- **Code:** `code.launch`, `code.reset`, `code.output`, `code.status`, `code.active`, `code.focus`, `code.preview`
+- **Documents:** `document.view`, `document.ingest_active`
+- **Image/Vision:** `image.show`, `vision.note`
+- **System/Identity:** `stats_view_refresh`, `active_user_changed`, `config_reloaded`, `ui_controls_refresh`
+- **Future (not wired to frontend yet):** `search_result`, `live_screen_refresh`
 
 ### Action categories
 
 - **Chat controls:** `send_message`, `stop`, `new_session`, `clear_chat`
 - **System:** `restart_piper`, `event_speech_mode`
 - **Screen:** `live_screen_mode`, `live_screen_interval`
-- **Future (not wired):** `mic_toggle`, `snapshot`, `document_picker_selected`, `code_send`, `code_run`, `code_clear`
+- **Code:** `code_send`, `code_run`, `code_clear`
+- **Documents:** `document_picker_selected`, `document_picker_cancel`
+- **Future (not wired):** `mic_toggle`, `snapshot`
 
 ---
 
@@ -418,10 +425,29 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 
 **Baris should not manually test every phase.** Manual testing begins only when instructed after a stable checkpoint.
 
-### Manual test checkpoint 1
-**Trigger:** After Phase 8 guide consolidation (this document).
+### Manual test checkpoint 1 (completed)
+**Trigger:** After Phase 8 guide consolidation.
 
-### Manual test checklist
+**Result:** Chat, streaming, status, New Session, Restart verified by Baris.
+
+### Manual test checkpoint 2
+**Trigger:** After Phase 12.5 (this document). All sidebar panels are now wired.
+
+**What Baris should test:**
+- Chat basics (connect, send, stream, stop, New Session, Restart)
+- Code Session panel (launch, run, output, clear)
+- Document Ingestion panel (add paths, ingest, cancel)
+- Image / Vision panel (if image generation is triggered)
+- System / Identity panel (observe stats, config reloads, controls refresh)
+
+**What NOT to test yet:**
+- Browser mic / STT
+- TTS in browser
+- Desktop wrapper (Tauri/pywebview)
+- Settings mutation (config is read-only in Web UI)
+- File picker native dialog (document panel uses path text input)
+
+### Manual test checklist — Checkpoint 2
 
 **1. Start backend:**
 ```powershell
@@ -440,26 +466,62 @@ npm run dev
 http://localhost:3000
 ```
 
-**4. Verify:**
+**4. Chat test:**
 - [ ] DearPyGui does **not** open
 - [ ] Web UI connects (badge shows "connected")
-- [ ] Boot logs appear in sidebar
+- [ ] Boot logs appear in sidebar Activity & Logs panel
 - [ ] `boot.ready` appears, status shows "IDLE"
-- [ ] Send one simple message
+- [ ] Send one simple message (e.g., "hello")
 - [ ] Response streams character-by-character
 - [ ] "Thinking..." placeholder appears then disappears
 - [ ] Browser refresh restores transcript through `chat.sync`
 - [ ] Stop button interrupts generation
 - [ ] New Session clears chat
-- [ ] Restart exits cleanly (no orphan llama-server)
+- [ ] Restart exits cleanly (no orphan llama-server processes)
 
-**Do not test yet unless explicitly instructed:**
-- Code panel / code console
-- Document picker / file ingestion
-- Image generation / vision
-- Mic / STT
-- Stats / settings
-- Desktop wrapper
+**5. New Session summary reset test:**
+- [ ] Have a conversation (3+ turns)
+- [ ] Click New Session
+- [ ] Chat clears
+- [ ] Send a new message
+- [ ] Piper should not hallucinate context from the previous session
+
+**6. Code Session panel (light test):**
+- [ ] Panel shows "idle" status
+- [ ] Enter a Python script path in the path input
+- [ ] Click Run
+- [ ] Output appears in the panel
+- [ ] Click Clear resets output
+
+**7. Document Ingestion panel (light test):**
+- [ ] Enter a file path in the path input (e.g., `C:\temp\test.txt`)
+- [ ] Click Add
+- [ ] Path appears in the selected list
+- [ ] Click Ingest Selected
+- [ ] Status shows "Ingesting..." then returns to "Idle"
+- [ ] Click Clear empties the selected list
+
+**8. Image / Vision panel (test if image exists):**
+- [ ] If Piper generates an image, the panel shows the image preview
+- [ ] If the image fails to load, caption and path are shown as fallback
+- [ ] Vision notes appear below the image when live screen is active
+- [ ] Click Clear Notes empties vision notes
+
+**9. System / Identity panel (observation only):**
+- [ ] Panel shows Identity, Stats, Controls Refresh, Config Reloads
+- [ ] When config changes, a new entry appears in Config Reloads with timestamp
+- [ ] Controls Refresh counter increments when UI controls change
+- [ ] Click Clear Stats and Clear Config Log work
+
+**10. Raw Events inspector:**
+- [ ] Every backend event appears in the Raw Events panel
+- [ ] Events are collapsible (click to expand payload JSON)
+
+**11. Cleanup:**
+- [ ] Close browser tab
+- [ ] Stop frontend dev server (Ctrl+C in frontend terminal)
+- [ ] Stop backend (Ctrl+C in backend terminal)
+- [ ] Verify no lingering `python.exe` or `llama-server.exe` processes
 
 **If any checklist item fails:**
 1. Capture the symptom
@@ -470,60 +532,45 @@ http://localhost:3000
 
 ## 8. Remaining Roadmap
 
-### Phase 9 — Code Session Panel
-**Recommended next implementation target.**
+### Phase 9 — Code Session Panel ✅ COMPLETE
 
-**Scope:**
-- Dedicated frontend code panel (collapsible or tab)
-- Handle `code.output`, `code.status`, `code.active`, `code.preview` events
-- Wire `code_send`, `code_run`, `code_clear` actions from frontend controls
-- No file picker yet unless needed for `code_run` with path
+**Delivered:** Frontend-only panel with output, status, preview, stdin, run/send/clear controls.
 
-**Files likely touched:**
-- `web_ui/frontend/src/App.tsx` — add code panel component
-- `web_ui/bridge/adapter.py` — may need code event normalizers (already exist)
-- `web_ui/bridge/test_adapter.py` — tests already exist for code events
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
 
 ---
 
-### Phase 10 — Document Ingestion
+### Phase 10 — Document Ingestion ✅ COMPLETE
 
-**Scope:**
-- Frontend-owned file/path picker (`<input type="file">` or path text input)
-- `document_picker_selected` action with normalized payload
-- `document.ingest_active` spinner/indicator
-- `document.view` rendering (simple text/list panel)
+**Delivered:** Path text input, Add/Ingest/Cancel controls, selected paths list, ingest status.
 
-**Files likely touched:**
-- `web_ui/frontend/src/App.tsx` — document panel + picker
-- `ui/controller_actions.py` — may need Web-safe document handler
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
 
 ---
 
-### Phase 11 — Image / Vision Display
+### Phase 11 — Image / Vision Display ✅ COMPLETE
 
-**Scope:**
-- HTTP image endpoint (serve from workspace or temp paths)
-- `image.show` URL payload handling
-- Image viewer component (lightweight modal or inline)
-- `vision.note` panel for snapshot commentary
+**Delivered:** Safe static file serving (`GET /workspace/<filename>`) with traversal guards, extension whitelist, CORS. `<img>` preview with caption/path fallback. Vision notes panel.
 
-**Files likely touched:**
-- `web_ui/bridge/server.py` — add image file route
-- `web_ui/frontend/src/App.tsx` — image viewer component
+**Files touched:**
+- `web_ui/bridge/server.py`
+- `web_ui/bridge/adapter.py`
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
 
 ---
 
-### Phase 12 — Stats / Settings / Identity Surface
+### Phase 12 — Stats / Settings / Identity Surface ✅ COMPLETE
 
-**Scope:**
-- Stats rendering (`stats.view_refresh`)
-- Config visibility (`config_reloaded` toast)
-- Active user / voice identity status display
-- Identity disambiguation UI (if needed)
+**Delivered:** Identity status, stats refresh, config reload log with timestamps, controls refresh counter. All read-only observation.
 
-**Files likely touched:**
-- `web_ui/frontend/src/App.tsx` — stats/settings sidebar section
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
 
 ---
 
@@ -618,7 +665,7 @@ npm run build
 
 ### Pre-push checklist
 - [ ] `python -m compileall` passes
-- [ ] All 147 bridge tests pass
+- [ ] All 165 bridge tests pass
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
 - [ ] No changes to `data/users.json` unless intentionally part of the PR
@@ -648,3 +695,5 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-14 | v2.0 original architecture plan (`docs/archive/piper-ui-architecture-plan.md`) |
 | 2026-05-14 | v2.1 corrected plan (`docs/specs/piper-ui-architecture-plan-v2.md`) — port 8787, alternate consumer, adapter-first order |
 | 2026-05-09 | Phase 8 — This migration guide created to reconcile original plan with modified phase history |
+| 2026-05-09 | Phase 12 complete — System/Identity panel, image serving, document ingestion, code session |
+| 2026-05-09 | Phase 12.5 — Manual checkpoint 2 prep: layout audit, CSS safety fix, updated checklist |
