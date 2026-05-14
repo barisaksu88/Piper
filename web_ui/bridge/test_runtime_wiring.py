@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import socket
 import threading
 import time
 from typing import Any
@@ -21,6 +22,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from config import Config, CFG
+
+
+
+def _get_free_port() -> int:
+    """Return an ephemeral localhost port that is free at call time."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 # ---------------------------------------------------------------------------
@@ -276,8 +285,10 @@ class TestRunWebLifecycle:
         # Start run_web in a background thread; stop it shortly after.
         result: list[int] = []
 
+        port = _get_free_port()
+
         def _runner() -> None:
-            result.append(run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws"))
+            result.append(run_web_bound(host="127.0.0.1", port=port, ws_path="/ws"))
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -290,7 +301,7 @@ class TestRunWebLifecycle:
         import websockets
 
         async def _poke() -> None:
-            async with websockets.connect("ws://127.0.0.1:8787/ws") as ws:
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as ws:
                 await ws.send(
                     json.dumps(
                         {"frame": "action", "action": "restart_piper", "payload": {}}
@@ -339,8 +350,10 @@ class TestRunWebLifecycle:
 
         run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
 
+        port = _get_free_port()
+
         def _runner() -> None:
-            run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws")
+            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws")
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -351,7 +364,7 @@ class TestRunWebLifecycle:
         import websockets
 
         async def _poke() -> None:
-            async with websockets.connect("ws://127.0.0.1:8787/ws") as ws:
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as ws:
                 await ws.send(
                     json.dumps(
                         {"frame": "action", "action": "restart_piper", "payload": {}}
@@ -680,8 +693,10 @@ class TestDpgHardExitGuardLifecycle:
 
         run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
 
+        port = _get_free_port()
+
         def _runner() -> None:
-            run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws")
+            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws")
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -696,7 +711,7 @@ class TestDpgHardExitGuardLifecycle:
         import websockets
 
         async def _poke() -> None:
-            async with websockets.connect("ws://127.0.0.1:8787/ws") as ws:
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as ws:
                 await ws.send(
                     json.dumps(
                         {"frame": "action", "action": "restart_piper", "payload": {}}
@@ -747,8 +762,10 @@ class TestBridgeQueueSeparation:
         # Put an event on ui_queue before starting
         ctrl.ui_queue.put(("chat_append", {"role": "user", "content": "pre"}))
 
+        port = _get_free_port()
+
         def _runner() -> None:
-            run_web_bound(host="127.0.0.1", port=8787, ws_path="/ws")
+            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws")
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()

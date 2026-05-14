@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import socket
 import time
 from typing import Any
 
@@ -23,8 +24,18 @@ from web_ui.bridge.server import BridgeServer
 # Helpers
 # ---------------------------------------------------------------------------
 
-_WS_URI = "ws://127.0.0.1:8787/ws"
 _DEFAULT_TIMEOUT = 3.0
+
+
+def get_free_port() -> int:
+    """Return an ephemeral localhost port that is free at call time."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _ws_uri(port: int, ws_path: str = "/ws") -> str:
+    return f"ws://127.0.0.1:{port}{ws_path}"
 
 
 def _wait_for_condition(condition: callable, timeout: float = _DEFAULT_TIMEOUT) -> bool:
@@ -37,7 +48,7 @@ def _wait_for_condition(condition: callable, timeout: float = _DEFAULT_TIMEOUT) 
     return False
 
 
-async def _ws_connect_and_read(uri: str = _WS_URI, timeout: float = _DEFAULT_TIMEOUT) -> str:
+async def _ws_connect_and_read(uri: str, timeout: float = _DEFAULT_TIMEOUT) -> str:
     """Connect, read one text message, close, and return the message."""
     import websockets
 
@@ -45,7 +56,7 @@ async def _ws_connect_and_read(uri: str = _WS_URI, timeout: float = _DEFAULT_TIM
         return await asyncio.wait_for(ws.recv(), timeout=timeout)
 
 
-async def _ws_connect_and_send(message: str, uri: str = _WS_URI) -> None:
+async def _ws_connect_and_send(message: str, uri: str) -> None:
     """Connect, send a text message, and close."""
     import websockets
 
@@ -54,7 +65,7 @@ async def _ws_connect_and_send(message: str, uri: str = _WS_URI) -> None:
 
 
 async def _ws_connect_send_and_read_response(
-    message: str, uri: str = _WS_URI, timeout: float = _DEFAULT_TIMEOUT
+    message: str, uri: str, timeout: float = _DEFAULT_TIMEOUT
 ) -> str:
     """Connect, send a message, read the response, and close."""
     import websockets
@@ -81,7 +92,8 @@ class TestConstruction:
 
 class TestLifecycle:
     def test_start_stop_without_hanging(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         try:
             server.start()
             assert server.is_running()
@@ -90,7 +102,8 @@ class TestLifecycle:
         assert not server.is_running()
 
     def test_is_running_reflects_state(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         assert not server.is_running()
         server.start()
         try:
@@ -100,7 +113,8 @@ class TestLifecycle:
         assert not server.is_running()
 
     def test_client_count_starts_at_zero(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         server.start()
         try:
             assert server.client_count() == 0
@@ -108,7 +122,8 @@ class TestLifecycle:
             server.stop()
 
     def test_stop_is_idempotent(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         server.start()
         server.stop()
         assert not server.is_running()
@@ -119,13 +134,14 @@ class TestLifecycle:
 
 class TestBroadcast:
     def test_known_ui_queue_event_reaches_client(self) -> None:
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
-        server = BridgeServer(ui_queue=ui_q)
+        server = BridgeServer(ui_queue=ui_q, port=port)
         server.start()
         try:
             ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
 
-            raw = asyncio.run(_ws_connect_and_read())
+            raw = asyncio.run(_ws_connect_and_read(_ws_uri(port)))
             frame = json.loads(raw)
             assert frame["frame"] == "event"
             assert frame["kind"] == "chat.append"
@@ -138,13 +154,14 @@ class TestBroadcast:
 
 class TestIncomingActions:
     def test_valid_action_frame_placed_on_action_queue(self) -> None:
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
         action_q: queue.Queue = queue.Queue()
-        server = BridgeServer(ui_queue=ui_q, action_queue=action_q)
+        server = BridgeServer(ui_queue=ui_q, action_queue=action_q, port=port)
         server.start()
         try:
             msg = json.dumps({"frame": "action", "action": "send_message", "payload": {"text": "hi"}})
-            asyncio.run(_ws_connect_and_send(msg))
+            asyncio.run(_ws_connect_and_send(msg, _ws_uri(port)))
 
             ok = _wait_for_condition(lambda: not action_q.empty(), timeout=2.0)
             assert ok, "action_queue should receive the parsed action"
@@ -156,14 +173,15 @@ class TestIncomingActions:
             server.stop()
 
     def test_invalid_action_frame_does_not_crash_server(self) -> None:
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
         action_q: queue.Queue = queue.Queue()
-        server = BridgeServer(ui_queue=ui_q, action_queue=action_q)
+        server = BridgeServer(ui_queue=ui_q, action_queue=action_q, port=port)
         server.start()
         try:
             # Missing "action" field -> adapter raises ValueError
             msg = json.dumps({"frame": "action", "payload": {}})
-            raw = asyncio.run(_ws_connect_send_and_read_response(msg))
+            raw = asyncio.run(_ws_connect_send_and_read_response(msg, _ws_uri(port)))
 
             frame = json.loads(raw)
             assert frame["frame"] == "error"
@@ -178,13 +196,14 @@ class TestIncomingActions:
 
 class TestOutgoingErrors:
     def test_unknown_outgoing_event_does_not_crash_server(self) -> None:
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
-        server = BridgeServer(ui_queue=ui_q)
+        server = BridgeServer(ui_queue=ui_q, port=port)
         server.start()
         try:
             ui_q.put(("totally_unknown_event_kind", {"foo": "bar"}))
 
-            raw = asyncio.run(_ws_connect_and_read())
+            raw = asyncio.run(_ws_connect_and_read(_ws_uri(port)))
             frame = json.loads(raw)
             assert frame["frame"] == "error"
             assert "adapter error" in frame["message"].lower()
@@ -196,41 +215,35 @@ class TestOutgoingErrors:
 
 class TestDefaults:
     def test_default_host_and_port(self) -> None:
+        """BridgeServer defaults must remain localhost-only and on the
+        production port (8787).  We verify constructor defaults without
+        starting the server so the test never binds a fixed port."""
         server = BridgeServer(ui_queue=queue.Queue())
-        # The constructor stores defaults; we verify they are localhost-only.
         assert server._host == "127.0.0.1"
         assert server._port == 8787
-
-        server.start()
-        try:
-            # A connection attempt proves the server is listening on the expected endpoint.
-            asyncio.run(_ws_connect_and_read(timeout=0.5))
-            pytest.fail("Expected timeout because no ui_queue event was queued")
-        except (TimeoutError, asyncio.TimeoutError):
-            pass  # Expected — server is alive but has nothing to send.
-        finally:
-            server.stop()
 
 
 class TestWsPathEnforcement:
     def test_ws_path_accepted(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         server.start()
         try:
             # Connecting to the default /ws should succeed (then time out waiting for data).
             with pytest.raises((TimeoutError, asyncio.TimeoutError)):
-                asyncio.run(_ws_connect_and_read(uri=_WS_URI, timeout=0.5))
+                asyncio.run(_ws_connect_and_read(_ws_uri(port), timeout=0.5))
         finally:
             server.stop()
 
     def test_wrong_ws_path_rejected(self) -> None:
-        server = BridgeServer(ui_queue=queue.Queue())
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
         server.start()
         try:
             import websockets
 
             with pytest.raises(websockets.InvalidStatus):
-                asyncio.run(_ws_connect_and_read(uri="ws://127.0.0.1:8787/wrong", timeout=1.0))
+                asyncio.run(_ws_connect_and_read(f"ws://127.0.0.1:{port}/wrong", timeout=1.0))
         finally:
             server.stop()
 
@@ -239,14 +252,16 @@ class TestClientConnectCallback:
     def test_on_client_connect_sends_sync_frame(self) -> None:
         """A connect callback must send its frames to the new client before
         queued live events."""
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
         server = BridgeServer(
             ui_queue=ui_q,
+            port=port,
             on_client_connect=lambda: ['{"frame":"event","kind":"chat.sync","payload":{"messages":[]}}'],
         )
         server.start()
         try:
-            raw = asyncio.run(_ws_connect_and_read(timeout=1.0))
+            raw = asyncio.run(_ws_connect_and_read(_ws_uri(port), timeout=1.0))
             frame = json.loads(raw)
             assert frame["kind"] == "chat.sync"
             assert frame["payload"]["messages"] == []
@@ -255,9 +270,11 @@ class TestClientConnectCallback:
 
     def test_on_client_connect_failure_does_not_crash(self) -> None:
         """A failing connect callback must not crash the server or the connection."""
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
         server = BridgeServer(
             ui_queue=ui_q,
+            port=port,
             on_client_connect=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         server.start()
@@ -265,7 +282,7 @@ class TestClientConnectCallback:
             # If the callback fails, the connection should still be usable.
             # We queue an event after connect and verify it arrives.
             ui_q.put(("chat_append", {"role": "user", "content": "hi"}))
-            raw = asyncio.run(_ws_connect_and_read(timeout=1.0))
+            raw = asyncio.run(_ws_connect_and_read(_ws_uri(port), timeout=1.0))
             frame = json.loads(raw)
             assert frame["kind"] == "chat.append"
         finally:
@@ -273,6 +290,7 @@ class TestClientConnectCallback:
 
     def test_on_client_connect_per_client(self) -> None:
         """Each connecting client must receive the connect callback frames."""
+        port = get_free_port()
         ui_q: queue.Queue = queue.Queue()
         call_count = [0]
 
@@ -280,7 +298,7 @@ class TestClientConnectCallback:
             call_count[0] += 1
             return ['{"frame":"event","kind":"chat.sync","payload":{"messages":[]}}']
 
-        server = BridgeServer(ui_queue=ui_q, on_client_connect=_callback)
+        server = BridgeServer(ui_queue=ui_q, port=port, on_client_connect=_callback)
         server.start()
         try:
 
@@ -288,9 +306,9 @@ class TestClientConnectCallback:
                 import websockets
 
                 frames: list[dict[str, Any]] = []
-                async with websockets.connect(_WS_URI) as ws1:
+                async with websockets.connect(_ws_uri(port)) as ws1:
                     frames.append(json.loads(await asyncio.wait_for(ws1.recv(), timeout=1.0)))
-                    async with websockets.connect(_WS_URI) as ws2:
+                    async with websockets.connect(_ws_uri(port)) as ws2:
                         frames.append(json.loads(await asyncio.wait_for(ws2.recv(), timeout=1.0)))
                 return frames
 
