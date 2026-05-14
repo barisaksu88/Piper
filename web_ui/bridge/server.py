@@ -148,8 +148,11 @@ class BridgeServer:
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._serve())
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger("web_ui.bridge.server").error(
+                "Bridge server loop crashed: %s", exc, exc_info=True
+            )
         finally:
             try:
                 self._loop.run_until_complete(self._loop.shutdown_asyncgens())
