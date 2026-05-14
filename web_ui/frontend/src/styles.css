@@ -184,6 +184,13 @@ body,
   flex-direction: column;
   border-bottom: 1px solid var(--border);
   min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+/* Status section: fixed height, don't steal space from scrollable panels */
+.sidebar-section:first-child {
+  flex: 0 0 auto;
 }
 
 .sidebar-section h3 {
@@ -200,7 +207,7 @@ body,
 }
 
 .sidebar-section.inspector {
-  flex: 1;
+  flex: 1 1 0;
 }
 
 .status-box {
