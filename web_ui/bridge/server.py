@@ -94,6 +94,7 @@ class BridgeServer:
         """Start the server in a daemon thread.
 
         Blocks until the server is listening or a startup failure is detected.
+        Retries up to 3 times to handle Windows TIME_WAIT port reuse.
         Raises RuntimeError on startup timeout.
         """
         if self.is_running():
@@ -101,13 +102,24 @@ class BridgeServer:
         if self._thread is not None and self._thread.is_alive():
             self.stop()
 
-        self._startup_event.clear()
-        self._shutdown_event.clear()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
+        import time as _time
 
-        if not self._startup_event.wait(timeout=5.0):
-            raise RuntimeError("Bridge server failed to start within timeout")
+        for attempt in range(1, 4):
+            self._startup_event.clear()
+            self._shutdown_event.clear()
+            self._thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._thread.start()
+
+            if self._startup_event.wait(timeout=5.0):
+                return
+
+            # Startup failed — clean up the dead thread before retrying.
+            self._shutdown_event.set()
+            self._thread.join(timeout=2.0)
+            if attempt < 3:
+                _time.sleep(0.5)
+
+        raise RuntimeError("Bridge server failed to start within timeout")
 
     def stop(self, timeout_s: float = 3.0) -> None:
         """Stop the server and clean up the daemon thread.
@@ -205,6 +217,7 @@ class BridgeServer:
             self._host,
             self._port,
             process_request=_process_request,
+            reuse_address=True,
         )
         self._startup_event.set()
 
