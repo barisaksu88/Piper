@@ -2208,6 +2208,12 @@ def _strip_persona_control_tags(text: str) -> str:
     return cleaned.strip()
 
 
+def _should_ignore_router_after_visible_reply(clean_answer: str, router_requested: bool) -> bool:
+    """Return True if the persona already produced a visible reply and the
+    [ROUTER] marker should be ignored for this turn."""
+    return router_requested and bool(clean_answer.strip())
+
+
 def _render_recall_block(query: str, hits: list[dict]) -> str:
     lines = [f"[RECALL RESULT FOR '{query}']"]
     if not hits:
@@ -2878,7 +2884,10 @@ def _run_persona_core(orc) -> None:
         orc.chat.replace_last_assistant_content(clean_answer)
 
     if router_requested:
-        if latest_route_error:
+        if _should_ignore_router_after_visible_reply(clean_answer, router_requested):
+            orc.ui.put(("agent_log", "   -> ROUTER marker ignored because persona already produced visible reply."))
+            orc.next_stage = "FINISHED"
+        elif latest_route_error:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored because the latest secretary pass errored."))
             orc.next_stage = "FINISHED"
         elif reporter_just_ran:

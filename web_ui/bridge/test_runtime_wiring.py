@@ -1282,3 +1282,46 @@ class TestRenderableChatMessagesInternalMarkers:
         ]
         rendered = renderable_chat_messages(messages)
         assert rendered == [("user", "hi")]
+
+
+# ---------------------------------------------------------------------------
+# Router ignore after visible reply — _should_ignore_router_after_visible_reply
+# ---------------------------------------------------------------------------
+
+
+class TestRouterIgnoreAfterVisibleReply:
+    def test_visible_reply_plus_router_is_ignored(self) -> None:
+        from core.orchestrator_phases import _should_ignore_router_after_visible_reply
+
+        assert _should_ignore_router_after_visible_reply("Hello!", True) is True
+
+    def test_empty_reply_plus_router_is_not_ignored(self) -> None:
+        from core.orchestrator_phases import _should_ignore_router_after_visible_reply
+
+        assert _should_ignore_router_after_visible_reply("", True) is False
+        assert _should_ignore_router_after_visible_reply("   ", True) is False
+
+    def test_visible_reply_without_router_is_not_ignored(self) -> None:
+        from core.orchestrator_phases import _should_ignore_router_after_visible_reply
+
+        assert _should_ignore_router_after_visible_reply("Hello!", False) is False
+
+    def test_pure_router_marker_is_not_ignored(self) -> None:
+        from core.orchestrator_phases import (
+            _should_ignore_router_after_visible_reply,
+            _strip_persona_control_tags,
+        )
+
+        # In real code clean_answer has already been stripped of [ROUTER].
+        clean = _strip_persona_control_tags("[ROUTER]")
+        assert _should_ignore_router_after_visible_reply(clean, True) is False
+
+    def test_stripped_control_tags_still_count_as_visible(self) -> None:
+        from core.orchestrator_phases import (
+            _should_ignore_router_after_visible_reply,
+            _strip_persona_control_tags,
+        )
+
+        # In real code clean_answer has already been stripped of [ROUTER].
+        clean = _strip_persona_control_tags("Sure! [ROUTER]")
+        assert _should_ignore_router_after_visible_reply(clean, True) is True
