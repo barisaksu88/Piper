@@ -143,6 +143,11 @@ class BootManager:
 
     def _wait_for_server(self):
         self.log("Starting LLM Server...")
+        # Kill any managed orphans from prior sessions BEFORE trusting an
+        # existing /health response.  A zombie server may still answer 200
+        # while being unable to serve real requests.
+        self._kill_orphans()
+
         try:
             req = urllib.request.Request(f"{CFG.LLAMA_SERVER_URL}/health", method='GET')
             with urllib.request.urlopen(req, timeout=1) as resp:
@@ -152,8 +157,6 @@ class BootManager:
                     return True
         except Exception:
             pass
-
-        self._kill_orphans()
 
         if not hasattr(CFG, 'LLAMA_SERVER_EXE') or not CFG.LLAMA_SERVER_EXE.exists():
             self.log(f"FATAL: Server binary not found at {CFG.LLAMA_SERVER_EXE}")

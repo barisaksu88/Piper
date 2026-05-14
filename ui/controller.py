@@ -1401,6 +1401,7 @@ class PiperController:
             self.proactive_monitor.stop()
             self.agent_brain.shutdown()
             self.code_session.shutdown()
+            self.boot_mgr.shutdown()
             if getattr(self, "searxng_service", None):
                 self.searxng_service.shutdown()
 
