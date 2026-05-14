@@ -98,6 +98,7 @@ export default function App() {
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState("");
   const micStateRef = useRef<MicState>("idle");
+  const discardNextMicStopRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -220,6 +221,9 @@ export default function App() {
   }, []);
 
   const abortMicRecording = useCallback((discard = true) => {
+    if (discard) {
+      discardNextMicStopRef.current = true;
+    }
     const recorder = mediaRecorderRef.current;
     const stream = mediaStreamRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -265,8 +269,8 @@ export default function App() {
       };
 
       recorder.onstop = async () => {
-        if (micStateRef.current === "idle") {
-          // Aborted/discarded — do not send.
+        if (discardNextMicStopRef.current) {
+          discardNextMicStopRef.current = false;
           audioChunksRef.current = [];
           return;
         }
@@ -295,6 +299,7 @@ export default function App() {
       };
 
       recorder.onerror = () => {
+        discardNextMicStopRef.current = true;
         abortMicRecording(true);
         setMicState("error");
         setMicError("Recording error");
