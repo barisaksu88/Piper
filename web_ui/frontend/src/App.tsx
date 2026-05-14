@@ -19,10 +19,6 @@ function isThinkingPlaceholder(m: ChatMessage): boolean {
   );
 }
 
-function messageSignature(m: { role: string; content: string }): string {
-  return `${m.role}:${m.content}`;
-}
-
 export default function App() {
   const [connState, setConnState] = useState<ConnectionState>("disconnected");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -130,28 +126,16 @@ export default function App() {
             role: String(m.role || "system"),
             content: String(m.content || ""),
           }));
-          const syncSigs = new Set(syncMessages.map(messageSignature));
-
-          setMessages((prev) => {
-            // Preserve:
-            // 1. Local user messages not yet in sync (e.g. sent during reconnect)
-            // 2. Currently streaming assistant message
-            const preserved = prev.filter((m) => {
-              if (m.streaming && m.role === "assistant") return true;
-              if (m.role === "user" && m.content && !syncSigs.has(messageSignature(m))) return true;
-              return false;
-            });
-            const built = [
-              ...preserved,
-              ...syncMessages.map((m) => ({
-                id: generateId(),
-                role: m.role as ChatMessage["role"],
-                content: m.content,
-                streaming: false,
-              })),
-            ];
-            return built;
-          });
+          // Full replacement — backend is the source of truth.
+          // Do not preserve local state; it may be stale after restart or new_session.
+          setMessages(
+            syncMessages.map((m) => ({
+              id: generateId(),
+              role: m.role as ChatMessage["role"],
+              content: m.content,
+              streaming: false,
+            }))
+          );
           break;
         }
 
@@ -286,7 +270,8 @@ export default function App() {
     const text = inputText.trim();
     if (!text) return;
     setInputText("");
-    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: text }]);
+    // Do NOT add locally — backend chat_append is the single source of truth.
+    // This prevents duplicate user bubbles when the backend echoes the message.
     sendAction("send_message", { text });
   }, [inputText, sendAction]);
 
@@ -391,7 +376,13 @@ export default function App() {
           <button onClick={() => sendAction("stop")} disabled={connState !== "connected"}>
             Stop
           </button>
-          <button onClick={() => sendAction("new_session")} disabled={connState !== "connected"}>
+          <button
+            onClick={() => {
+              setMessages([]);
+              sendAction("new_session");
+            }}
+            disabled={connState !== "connected"}
+          >
             New Session
           </button>
           <button
