@@ -28,6 +28,21 @@ from typing import Any
 import websockets
 
 from web_ui.bridge.adapter import parse_action_frame, ui_tuple_to_ws_frame
+
+# Suppress noisy "opening handshake failed" ERROR logs from the websockets
+# library. These are usually caused by browsers refreshing or closing tabs
+# before the WebSocket handshake completes, and they spam the terminal.
+# We keep INFO-level "connection open/close" logs.
+import logging as _logging
+
+
+class _SuppressWebsocketHandshakeFilter(_logging.Filter):
+    def filter(self, record: _logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "opening handshake failed" not in msg
+
+_websockets_server_logger = _logging.getLogger("websockets.server")
+_websockets_server_logger.addFilter(_SuppressWebsocketHandshakeFilter())
 from web_ui.bridge.message_schema import ErrorFrame
 
 
