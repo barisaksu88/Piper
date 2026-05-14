@@ -8,6 +8,8 @@ const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
 const DELTA_COALESCE_MS = 16;
 const MAX_CODE_OUTPUT_LINES = 500;
 
+type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
+
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -18,6 +20,36 @@ function isThinkingPlaceholder(m: ChatMessage): boolean {
     (m.role === "assistant" || m.role === "system") &&
     (text === "Thinking..." || text === "Thinking…" || text.startsWith("Thinking"))
   );
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      // Strip data URI prefix if present
+      const commaIdx = result.indexOf(",");
+      resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function chooseMimeType(): string {
+  const prefs = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+  ];
+  for (const t of prefs) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
+
+function formatFromMimeType(mime: string): "webm" | "wav" {
+  if (mime.includes("wav")) return "wav";
+  return "webm";
 }
 
 export default function App() {
@@ -61,6 +93,18 @@ export default function App() {
   const [controlsRefreshCount, setControlsRefreshCount] = useState(0);
   const [lastControlsRefreshAt, setLastControlsRefreshAt] = useState("");
   const [lastStatsRefreshAt, setLastStatsRefreshAt] = useState("");
+
+  // Mic state
+  const [micState, setMicState] = useState<MicState>("idle");
+  const [micError, setMicError] = useState("");
+  const micStateRef = useRef<MicState>("idle");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    micStateRef.current = micState;
+  }, [micState]);
 
   const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
 
@@ -175,6 +219,115 @@ export default function App() {
     });
   }, []);
 
+  const abortMicRecording = useCallback((discard = true) => {
+    const recorder = mediaRecorderRef.current;
+    const stream = mediaStreamRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore
+      }
+    }
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current = null;
+    if (discard) {
+      audioChunksRef.current = [];
+    }
+    if (micStateRef.current === "listening" || micStateRef.current === "requesting_permission") {
+      setMicState("idle");
+      setMicError("");
+    }
+  }, []);
+
+  const startMicRecording = useCallback(async () => {
+    if (micStateRef.current !== "idle" && micStateRef.current !== "error") return;
+    setMicState("requesting_permission");
+    setMicError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const chosenMime = chooseMimeType();
+      const recorder = chosenMime
+        ? new MediaRecorder(stream, { mimeType: chosenMime })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) {
+          audioChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (micStateRef.current === "idle") {
+          // Aborted/discarded — do not send.
+          audioChunksRef.current = [];
+          return;
+        }
+        const chunks = audioChunksRef.current;
+        audioChunksRef.current = [];
+        if (chunks.length === 0) {
+          setMicState("error");
+          setMicError("No audio captured");
+          return;
+        }
+        setMicState("transcribing");
+        try {
+          const blobType = chosenMime || recorder.mimeType || "audio/webm";
+          const blob = new Blob(chunks, { type: blobType });
+          const base64 = await blobToBase64(blob);
+          const format = formatFromMimeType(blobType);
+          bridgeRef.current?.sendAction("mic_audio_submit", {
+            audio: base64,
+            format,
+            sample_rate_hint: 48000,
+          });
+        } catch {
+          setMicState("error");
+          setMicError("Failed to encode audio");
+        }
+      };
+
+      recorder.onerror = () => {
+        abortMicRecording(true);
+        setMicState("error");
+        setMicError("Recording error");
+      };
+
+      recorder.start();
+      setMicState("listening");
+    } catch {
+      abortMicRecording(true);
+      setMicState("error");
+      setMicError("Microphone permission denied or unavailable");
+    }
+  }, [abortMicRecording]);
+
+  const stopMicRecording = useCallback(() => {
+    if (micStateRef.current !== "listening") return;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      try {
+        recorder.stop();
+      } catch {
+        // ignore
+      }
+    }
+    const stream = mediaStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    mediaStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    setMicState("transcribing");
+  }, []);
+
   const handleFrame = useCallback(
     (frame: BackendFrame) => {
       if (frame.frame === "error") {
@@ -198,8 +351,6 @@ export default function App() {
             role: String(m.role || "system"),
             content: String(m.content || ""),
           }));
-          // Full replacement — backend is the source of truth.
-          // Do not preserve local state; it may be stale after restart or new_session.
           setMessages(
             syncMessages.map((m) => ({
               id: generateId(),
@@ -218,9 +369,6 @@ export default function App() {
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
-            // If we are already streaming, replace the existing streaming
-            // message instead of appending a new one. This matches DPG
-            // behaviour where a mid-turn recall overwrites the first pass.
             if (last && last.role === "assistant" && last.streaming) {
               next[next.length - 1] = {
                 ...last,
@@ -443,6 +591,21 @@ export default function App() {
           break;
         }
 
+        case "mic.status": {
+          const p = payload as { state?: string; error?: string };
+          const state = String(p.state || "idle");
+          if (state === "transcribing") {
+            setMicState("transcribing");
+          } else if (state === "error") {
+            setMicState("error");
+            setMicError(String(p.error || "Mic error"));
+          } else {
+            setMicState("idle");
+            setMicError("");
+          }
+          break;
+        }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
@@ -453,19 +616,25 @@ export default function App() {
 
   useEffect(() => {
     const bridge = new PiperBridge({
-      onStateChange: setConnState,
+      onStateChange: (state) => {
+        setConnState(state);
+        if (state === "disconnected" || state === "error") {
+          abortMicRecording(true);
+        }
+      },
       onFrame: handleFrame,
       onError: (msg) => appendActivity(`[Bridge Error] ${msg}`),
     });
     bridgeRef.current = bridge;
     bridge.connect();
     return () => {
+      abortMicRecording(true);
       bridge.disconnect();
       if (deltaFlushTimerRef.current) {
         clearTimeout(deltaFlushTimerRef.current);
       }
     };
-  }, [handleFrame, appendActivity]);
+  }, [handleFrame, appendActivity, abortMicRecording]);
 
   const sendAction = useCallback((action: string, payload: Record<string, unknown> = {}) => {
     bridgeRef.current?.sendAction(action, payload);
@@ -475,8 +644,6 @@ export default function App() {
     const text = inputText.trim();
     if (!text) return;
     setInputText("");
-    // Do NOT add locally — backend chat_append is the single source of truth.
-    // This prevents duplicate user bubbles when the backend echoes the message.
     sendAction("send_message", { text });
   }, [inputText, sendAction]);
 
@@ -546,6 +713,22 @@ export default function App() {
     setLastStatsRefreshAt("");
   }, []);
 
+  const handleStop = useCallback(() => {
+    abortMicRecording(true);
+    sendAction("stop");
+  }, [abortMicRecording, sendAction]);
+
+  const handleNewSession = useCallback(() => {
+    abortMicRecording(true);
+    setMessages([]);
+    sendAction("new_session");
+  }, [abortMicRecording, sendAction]);
+
+  const handleRestart = useCallback(() => {
+    abortMicRecording(true);
+    sendAction("restart_piper");
+  }, [abortMicRecording, sendAction]);
+
   const connBadge =
     connState === "connected"
       ? "badge connected"
@@ -557,6 +740,35 @@ export default function App() {
 
   const codeStatusClass =
     codeActive ? "code-status active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "code-status error" : "code-status";
+
+  const micButtonLabel =
+    micState === "listening"
+      ? "STOP"
+      : micState === "requesting_permission" || micState === "transcribing"
+      ? "..."
+      : "MIC";
+
+  const micButtonClass =
+    micState === "listening"
+      ? "danger mic-listening"
+      : micState === "error"
+      ? "mic-error"
+      : "";
+
+  const micDisabled =
+    connState !== "connected" ||
+    streamingRef.current ||
+    micState === "requesting_permission" ||
+    micState === "transcribing";
+
+  const micStatusText =
+    micState === "listening"
+      ? "Listening..."
+      : micState === "transcribing"
+      ? "Transcribing..."
+      : micState === "error"
+      ? micError
+      : "";
 
   return (
     <div className="app">
@@ -876,21 +1088,18 @@ export default function App() {
           <button onClick={handleSend} disabled={connState !== "connected"}>
             Send
           </button>
-          <button onClick={() => sendAction("stop")} disabled={connState !== "connected"}>
+          <button onClick={handleStop} disabled={connState !== "connected"}>
             Stop
           </button>
           <button
-            onClick={() => {
-              setMessages([]);
-              sendAction("new_session");
-            }}
+            onClick={handleNewSession}
             disabled={connState !== "connected"}
           >
             New Session
           </button>
           <button
             className="danger"
-            onClick={() => sendAction("restart_piper")}
+            onClick={handleRestart}
             disabled={connState !== "connected"}
           >
             Restart
@@ -945,7 +1154,22 @@ export default function App() {
             </select>
           </label>
 
-          <span className="placeholder">Mic: deferred</span>
+          <button
+            className={micButtonClass}
+            onClick={() => {
+              if (micState === "listening") {
+                stopMicRecording();
+              } else {
+                startMicRecording();
+              }
+            }}
+            disabled={micDisabled}
+          >
+            {micButtonLabel}
+          </button>
+          {micStatusText && (
+            <span className="mic-status-text">{micStatusText}</span>
+          )}
           <span className="placeholder">Image: placeholder</span>
         </div>
       </footer>

@@ -36,7 +36,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
-| Next phase | **Phase 13 planning** — mic/STT browser integration (not implementation) |
+| Next phase | **Phase 15 planning** — DearPyGui retirement criteria evaluation |
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -52,9 +52,9 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - **Image / Vision panel** (Phase 11): `<img>` preview via safe static HTTP serving from `CFG.WORKSPACE_DIR`, vision notes, caption/path fallback
 - **System / Identity panel** (Phase 12): user changed events, stats refresh, config reload log, controls refresh counter
 - Safe static file serving with path traversal guards, extension whitelist, CORS headers
+- **Web UI / WebView mic capture** (Phase 14B) — MediaRecorder, permission handling, abort/discard, backend STT + voice identity
 
 ### What does NOT work yet
-- Browser mic/STT integration
 - TTS in browser
 - Search result display panel (raw inspector only)
 - Desktop wrapper (Tauri/pywebview)
@@ -442,7 +442,6 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 - Sidebar layout acceptable
 
 **What NOT to test yet:**
-- Browser mic / STT
 - TTS in browser
 - Desktop wrapper (Tauri/pywebview)
 - Settings mutation (config is read-only in Web UI)
@@ -618,17 +617,21 @@ http://localhost:3000
 
 ---
 
-### Phase 14B — Frontend MediaRecorder / WebView Mic Capture
+### Phase 14B — Frontend MediaRecorder / WebView Mic Capture ✅ COMPLETE
 
-**Scope:**
-- Frontend MediaRecorder API for utterance capture (WebM/Opus).
-- Mic button UI state tied to `mic.status` events.
-- Future WebView wrapper will use the same `mic_audio_submit` backend.
+**Delivered:** Frontend MediaRecorder API for utterance capture (WebM/Opus), mic button with state machine, abort/discard behavior, `mic.status` event handling.
 
-**Files likely touched:**
-- `web_ui/frontend/src/App.tsx` — mic button, recording lifecycle, base64 encode
+**Files touched:**
+- `web_ui/frontend/src/App.tsx` — mic state machine, MediaRecorder lifecycle, base64 encode, abort helpers
+- `web_ui/frontend/src/styles.css` — mic button pulse animation, error state, status text
 
-**Blocked by:** Phase 14A backend foundation (complete).
+**Behavior:**
+- MIC button: idle → requesting_permission → listening (STOP) → transcribing → idle/error
+- Permission denied: shows user-safe error message
+- Global Stop / New Session / Restart / disconnect: aborts active recording and discards audio
+- Backend `mic.status` drives frontend mic state (transcribing → idle/error)
+- Transcript appears through normal backend `chat.append` path (no duplicate frontend injection)
+- No Web Speech API or cloud STT used
 
 ---
 
@@ -683,7 +686,7 @@ The following are explicitly out of scope until their respective phases:
 | TTS port 8765 conflict | Already reserved; bridge uses 8787 | N/A |
 | DearPyGui removal | Fallback must remain until parity proven | 15 |
 | Web UI as default | Must be opt-in until Baris accepts it | 15 |
-| Browser mic/STT | High risk to voice identity; defer | 13 |
+| Browser mic/STT | Implemented via backend STT + voice identity (Phases 14A–14B) | 14B |
 | File picker native dialog | Needs Web-safe path handling | 10 |
 | WebGL / canvas animations | Visual polish, not functional | Post-15 |
 
@@ -750,3 +753,5 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 12.7 — Fixed backend router loopback after visible reply; pure router still routes |
 | 2026-05-09 | Phase 12.8 — Checkpoint 2 marked passed; docs updated; next: Phase 13 planning |
 | 2026-05-09 | Phase 14A — Backend mic audio submission foundation: decoder, transcribe_buffer, mic_audio_submit action, mic.status event, tests |
+| 2026-05-09 | Phase 14A.1 — Enforce WEB_MIC_MAX_SECONDS duration guard; remove unused sample_rate_hint parsing |
+| 2026-05-09 | Phase 14B — Frontend MediaRecorder mic capture: idle/listening/transcribing/error state machine, abort/discard, mic.status wired |
