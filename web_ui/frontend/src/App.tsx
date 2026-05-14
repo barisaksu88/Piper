@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PiperBridge } from "./bridge";
+import { PiperBridge, WS_URL } from "./bridge";
 import type { BackendFrame, ChatMessage, ConnectionState, RawEvent } from "./types";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
@@ -46,12 +46,22 @@ export default function App() {
   const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
   const [documentStatus] = useState("");
 
+  // Image / vision state
+  const [imageCaption, setImageCaption] = useState("");
+  const [imagePath, setImagePath] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [visionNotes, setVisionNotes] = useState<string[]>([]);
+  const [imageLoadError, setImageLoadError] = useState(false);
+
+  const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
+
   const streamingRef = useRef(false);
   const bridgeRef = useRef<PiperBridge | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const codeOutputRef = useRef<HTMLDivElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
   const documentsViewRef = useRef<HTMLDivElement | null>(null);
+  const visionNotesRef = useRef<HTMLDivElement | null>(null);
   const pendingDeltasRef = useRef("");
   const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -78,6 +88,14 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [documentsView]);
+
+  // Auto-scroll vision notes to bottom
+  useEffect(() => {
+    const el = visionNotesRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [visionNotes]);
 
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
@@ -337,6 +355,32 @@ export default function App() {
           break;
         }
 
+        // Image / vision events
+        case "image.show": {
+          const p = payload as { caption?: string; path?: string; url?: string };
+          setImageCaption(String(p.caption || ""));
+          setImagePath(String(p.path || ""));
+          setImageLoadError(false);
+          if (p.url) {
+            setImageUrl(`${IMAGE_BASE_URL}${p.url}`);
+          } else {
+            setImageUrl("");
+          }
+          break;
+        }
+
+        case "vision.note": {
+          const p = payload as { text?: string; speak?: boolean };
+          const note = String(p.text || "");
+          if (note) {
+            setVisionNotes((prev) => {
+              const next = [...prev, note];
+              return next.slice(-100);
+            });
+          }
+          break;
+        }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
@@ -425,6 +469,10 @@ export default function App() {
 
   const handleClearDocumentSelection = useCallback(() => {
     setSelectedDocumentPaths([]);
+  }, []);
+
+  const handleClearVisionNotes = useCallback(() => {
+    setVisionNotes([]);
   }, []);
 
   const connBadge =
@@ -529,6 +577,52 @@ export default function App() {
                     Clear
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>Image / Vision</h3>
+            <div className="image-panel">
+              <div className="image-preview-area">
+                {imageUrl && !imageLoadError ? (
+                  <img
+                    src={imageUrl}
+                    alt={imageCaption || "Generated image"}
+                    className="image-preview-img"
+                    onError={() => setImageLoadError(true)}
+                    onLoad={() => setImageLoadError(false)}
+                  />
+                ) : imagePath ? (
+                  <div className="image-meta">
+                    <div className="image-meta-caption">{imageCaption}</div>
+                    <div className="image-meta-path">{imagePath}</div>
+                    {imageLoadError && (
+                      <div className="image-meta-hint">
+                        Image preview unavailable. Ensure the backend is serving static files.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="image-meta">
+                    <div className="image-meta-hint">No image yet.</div>
+                  </div>
+                )}
+              </div>
+              <div className="vision-notes" ref={visionNotesRef}>
+                {visionNotes.map((note, i) => (
+                  <div key={`v-${i}`} className="vision-note">
+                    {note}
+                  </div>
+                ))}
+              </div>
+              <div className="image-controls">
+                <button
+                  onClick={handleClearVisionNotes}
+                  disabled={connState !== "connected" || visionNotes.length === 0}
+                >
+                  Clear Notes
+                </button>
               </div>
             </div>
           </div>

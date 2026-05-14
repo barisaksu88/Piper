@@ -1,6 +1,6 @@
 import type { BackendFrame, ActionFrame, ConnectionState } from "./types";
 
-const WS_URL =
+export const WS_URL =
   import.meta.env.VITE_PIPER_WS_URL || "ws://127.0.0.1:8787/ws";
 
 let requestIdCounter = 0;

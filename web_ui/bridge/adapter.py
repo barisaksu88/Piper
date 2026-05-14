@@ -90,7 +90,11 @@ def _normalize_show_image_payload(payload: object) -> dict[str, Any]:
     path = text
     if "Image saved to:" in text:
         path = text.split("Image saved to:")[-1].strip()
-    return {"caption": text, "path": path}
+    result: dict[str, Any] = {"caption": text, "path": path}
+    # Build a safe workspace URL from the basename if it looks like a file.
+    if path and "/" not in path and "\\" not in path and path != text:
+        result["url"] = f"/workspace/{path}"
+    return result
 
 
 def _normalize_vision_note_payload(payload: object) -> dict[str, Any]:

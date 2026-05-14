@@ -1367,6 +1367,7 @@ class PiperController:
             host=host,
             port=port,
             ws_path=ws_path,
+            static_dir=str(CFG.WORKSPACE_DIR),
             on_client_connect=_on_client_connect,
         )
         bridge.start()

@@ -317,3 +317,98 @@ class TestClientConnectCallback:
             assert all(f["kind"] == "chat.sync" for f in frames)
         finally:
             server.stop()
+
+
+class TestStaticFileServing:
+    """Safe static file serving from configured static_dir."""
+
+    def test_serves_safe_image_file(self, tmp_path) -> None:
+        port = get_free_port()
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, static_dir=str(tmp_path))
+        server.start()
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/test.png")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read() == img.read_bytes()
+                assert resp.headers.get("Content-Type") == "image/png"
+                assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+        finally:
+            server.stop()
+
+    def test_rejects_path_traversal(self, tmp_path) -> None:
+        port = get_free_port()
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "secret.png").write_bytes(b"secret")
+
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, static_dir=str(tmp_path))
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/../secret.png")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_rejects_unsafe_extension(self, tmp_path) -> None:
+        port = get_free_port()
+        (tmp_path / "evil.exe").write_bytes(b"evil")
+
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, static_dir=str(tmp_path))
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/evil.exe")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_rejects_file_outside_static_dir(self, tmp_path) -> None:
+        port = get_free_port()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "image.png").write_bytes(b"outside")
+
+        inner = tmp_path / "inner"
+        inner.mkdir()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, static_dir=str(inner))
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/../outside/image.png")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_returns_404_when_no_static_dir(self) -> None:
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/anything.png")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()

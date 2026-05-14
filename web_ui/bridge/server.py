@@ -7,11 +7,11 @@ Responsibilities:
 - Parse incoming WebSocket action frames and enqueue (action_name, payload) on action_queue.
 - Run in a daemon thread with an asyncio event loop.
 - Bind to localhost only (127.0.0.1:8787 /ws by default).
+- Optionally serve safe static files (images) from a configured directory.
 
 Constraints:
 - Does not import from ui/, core/, memory/, tools/, or app.py.
 - Does not execute actions; only parses and enqueues them.
-- Does not serve static files or images in Phase 2.
 - Does not call sys.exit() on failures.
 """
 
@@ -19,14 +19,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import queue
 import threading
+from pathlib import Path
 from typing import Any
 
 import websockets
 
 from web_ui.bridge.adapter import parse_action_frame, ui_tuple_to_ws_frame
 from web_ui.bridge.message_schema import ErrorFrame
+
+
+# Safe image extensions for static file serving.
+_SAFE_IMAGE_EXTENSIONS: set[str] = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+}
 
 
 class BridgeServer:
@@ -153,9 +166,20 @@ class BridgeServer:
         async def _process_request(
             connection: websockets.ServerConnection, request: Any
         ) -> Any:
-            if getattr(request, "path", "") != self._ws_path:
-                return connection.respond(404, "Not Found")
-            return None
+            path = getattr(request, "path", "")
+            method = getattr(request, "method", "GET")
+
+            # WebSocket upgrade path
+            if path == self._ws_path:
+                return None
+
+            # Static file serving (GET only, safe image extensions)
+            if method == "GET" and path.startswith("/workspace/"):
+                response = await self._serve_static_file(path)
+                if response is not None:
+                    return response
+
+            return connection.respond(404, "Not Found")
 
         async def _ws_handler(connection: websockets.ServerConnection) -> None:
             with self._lock:
@@ -199,6 +223,58 @@ class BridgeServer:
             self._ws_server.close()
             await self._ws_server.wait_closed()
             self._ws_server = None
+
+    async def _serve_static_file(
+        self, path: str
+    ) -> websockets.Response | None:
+        """Serve a safe static file from ``self._static_dir``.
+
+        Returns a Response on success, None to fall through to 404.
+        Guards against directory traversal and unsafe extensions.
+        """
+        if not self._static_dir:
+            return None
+
+        # Strip prefix and reject empty or suspicious paths
+        raw = path[len("/workspace/") :]
+        if not raw or raw.startswith(".") or ".." in raw or "\\" in raw:
+            return None
+
+        # Only allow safe image extensions
+        suffix = Path(raw).suffix.lower()
+        if suffix not in _SAFE_IMAGE_EXTENSIONS:
+            return None
+
+        base_dir = Path(self._static_dir).resolve()
+        try:
+            target = (base_dir / raw).resolve()
+        except (OSError, ValueError):
+            return None
+
+        # Containment check: target must be inside base_dir
+        try:
+            target.relative_to(base_dir)
+        except ValueError:
+            return None
+
+        if not target.is_file():
+            return None
+
+        try:
+            data = target.read_bytes()
+        except (OSError, PermissionError):
+            return None
+
+        content_type, _ = mimetypes.guess_type(str(target))
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        headers = websockets.Headers()
+        headers["Content-Type"] = content_type
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cache-Control"] = "no-cache"
+
+        return websockets.Response(200, "OK", headers, body=data)
 
     async def _do_close_clients(self) -> None:
         """Close all connected WebSocket clients."""
