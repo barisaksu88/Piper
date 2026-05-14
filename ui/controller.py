@@ -1329,6 +1329,7 @@ class PiperController:
                 )
             )
         elif action_name == "mic_audio_submit":
+            _LOG.info("Web mic: action received")
             self._handle_web_mic_audio_submit(payload)
         elif action_name == "snapshot_toggle":
             self.on_snapshot()
@@ -1458,6 +1459,7 @@ class PiperController:
             ws_path=ws_path,
             static_dir=str(CFG.WORKSPACE_DIR),
             on_client_connect=_on_client_connect,
+            max_message_size=int(getattr(CFG, "WEB_UI_MAX_WS_MESSAGE_BYTES", 20 * 1024 * 1024)),
         )
         bridge.start()
 

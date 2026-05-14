@@ -613,6 +613,15 @@ class TestWebMicConfigDefaults:
         cfg = Config()
         assert cfg.WEB_MIC_MAX_SECONDS == 30
 
+    def test_web_ui_max_ws_message_bytes_default(self) -> None:
+        cfg = Config()
+        assert cfg.WEB_UI_MAX_WS_MESSAGE_BYTES == 20 * 1024 * 1024
+
+    def test_web_ui_max_ws_message_bytes_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PIPER_WEB_UI_MAX_WS_MESSAGE_BYTES", "10485760")
+        cfg = Config()
+        assert cfg.WEB_UI_MAX_WS_MESSAGE_BYTES == 10485760
+
 
 class TestWebMicAudioSubmitDispatch:
     """Test backend dispatch of mic_audio_submit action."""

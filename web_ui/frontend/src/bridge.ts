@@ -81,10 +81,10 @@ export class PiperBridge {
     this.setState("disconnected");
   }
 
-  sendAction(action: string, payload: Record<string, unknown> = {}): void {
+  sendAction(action: string, payload: Record<string, unknown> = {}): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.callbacks.onError?.("WebSocket is not open");
-      return;
+      return false;
     }
     const frame: ActionFrame = {
       frame: "action",
@@ -93,7 +93,14 @@ export class PiperBridge {
       action,
       payload,
     };
-    this.ws.send(JSON.stringify(frame));
+    try {
+      this.ws.send(JSON.stringify(frame));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.callbacks.onError?.(`Failed to send action: ${msg}`);
+      return false;
+    }
+    return true;
   }
 
   getState(): ConnectionState {

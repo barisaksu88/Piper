@@ -861,6 +861,9 @@ class Config:
     WEB_MIC_FFMPEG_TIMEOUT_S: int = field(
         default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_FFMPEG_TIMEOUT_S", "30"))
     )
+    WEB_UI_MAX_WS_MESSAGE_BYTES: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_UI_MAX_WS_MESSAGE_BYTES", str(20 * 1024 * 1024)))
+    )
 
 
 class LiveConfig:

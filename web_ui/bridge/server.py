@@ -35,6 +35,8 @@ from web_ui.bridge.adapter import parse_action_frame, ui_tuple_to_ws_frame
 # We keep INFO-level "connection open/close" logs.
 import logging as _logging
 
+_LOG = _logging.getLogger("web_ui.bridge.server")
+
 
 class _SuppressWebsocketHandshakeFilter(_logging.Filter):
     def filter(self, record: _logging.LogRecord) -> bool:
@@ -69,6 +71,7 @@ class BridgeServer:
         ws_path: str = "/ws",
         static_dir: str | None = None,
         on_client_connect: Any | None = None,
+        max_message_size: int | None = None,
     ) -> None:
         self._ui_queue = ui_queue
         self._action_queue = action_queue or queue.Queue()
@@ -77,6 +80,7 @@ class BridgeServer:
         self._ws_path = ws_path
         self._static_dir = static_dir
         self._on_client_connect = on_client_connect
+        self._max_message_size = max_message_size
 
         self._clients: set[websockets.ServerConnection] = set()
         self._lock = threading.Lock()
@@ -232,6 +236,7 @@ class BridgeServer:
             self._host,
             self._port,
             process_request=_process_request,
+            max_size=self._max_message_size,
         )
         self._startup_event.set()
 
@@ -327,7 +332,13 @@ class BridgeServer:
                     )
                 except asyncio.TimeoutError:
                     continue
-                except Exception:
+                except Exception as exc:
+                    exc_type = type(exc).__name__
+                    exc_msg = str(exc)
+                    hint = ""
+                    if "payload" in exc_msg.lower() or "size" in exc_msg.lower() or "limit" in exc_msg.lower():
+                        hint = " (hint: message may be too large)"
+                    _LOG.warning("Bridge receive failed: %s: %s%s", exc_type, exc_msg, hint)
                     break
 
                 try:

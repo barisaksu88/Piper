@@ -89,6 +89,32 @@ class TestConstruction:
         assert server.client_count() == 0
         assert not server.is_running()
 
+    def test_max_message_size_stored(self) -> None:
+        server = BridgeServer(ui_queue=queue.Queue(), max_message_size=42)
+        assert server._max_message_size == 42
+
+    def test_max_message_size_passed_to_websockets_serve(self) -> None:
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, max_message_size=12345)
+        from unittest.mock import patch, AsyncMock, Mock
+
+        mock_server = Mock()
+        mock_server.close = Mock()
+        mock_server.wait_closed = AsyncMock()
+
+        with patch("web_ui.bridge.server.websockets.serve", new_callable=AsyncMock) as mock_serve:
+            mock_serve.return_value = mock_server
+            server.start()
+            try:
+                assert server.is_running()
+                # Give the loop a moment to reach _serve
+                time.sleep(0.3)
+                mock_serve.assert_called_once()
+                _, kwargs = mock_serve.call_args
+                assert kwargs.get("max_size") == 12345
+            finally:
+                server.stop()
+
 
 class TestLifecycle:
     def test_start_stop_without_hanging(self) -> None:

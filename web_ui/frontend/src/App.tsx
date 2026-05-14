@@ -104,6 +104,7 @@ export default function App() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const micWatchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micSubmitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     micStateRef.current = micState;
@@ -303,16 +304,33 @@ export default function App() {
           return;
         }
         setMicState("transcribing");
+        setMicStageMessage("Encoding audio...");
         try {
           const blobType = chosenMime || recorder.mimeType || "audio/webm";
           const blob = new Blob(chunks, { type: blobType });
           const base64 = await blobToBase64(blob);
           const format = formatFromMimeType(blobType);
-          bridgeRef.current?.sendAction("mic_audio_submit", {
+          appendActivity(`Mic audio encoded: format=${format}, base64 length=${base64.length}`);
+          setMicStageMessage("Sending audio...");
+          const sent = bridgeRef.current?.sendAction("mic_audio_submit", {
             audio: base64,
             format,
             sample_rate_hint: 48000,
           });
+          if (!sent) {
+            setMicState("error");
+            setMicError("Failed to send audio to backend");
+            return;
+          }
+          setMicStageMessage("Waiting for backend...");
+          // Local timeout: if backend doesn't respond within 10s, show error
+          if (micSubmitTimeoutRef.current) clearTimeout(micSubmitTimeoutRef.current);
+          micSubmitTimeoutRef.current = setTimeout(() => {
+            if (micStateRef.current === "transcribing") {
+              setMicState("error");
+              setMicError("Backend did not acknowledge mic audio");
+            }
+          }, 10000);
         } catch {
           setMicState("error");
           setMicError("Failed to encode audio");
@@ -620,6 +638,11 @@ export default function App() {
         case "mic.status": {
           const p = payload as { state?: string; error?: string; stage?: string; message?: string };
           const state = String(p.state || "idle");
+          // Clear local submit timeout on any backend mic status
+          if (micSubmitTimeoutRef.current) {
+            clearTimeout(micSubmitTimeoutRef.current);
+            micSubmitTimeoutRef.current = null;
+          }
           if (state === "transcribing") {
             setMicState("transcribing");
             setMicError("");
@@ -668,7 +691,7 @@ export default function App() {
   }, [handleFrame, appendActivity, abortMicRecording]);
 
   const sendAction = useCallback((action: string, payload: Record<string, unknown> = {}) => {
-    bridgeRef.current?.sendAction(action, payload);
+    return bridgeRef.current?.sendAction(action, payload) ?? false;
   }, []);
 
   const handleSend = useCallback(() => {
