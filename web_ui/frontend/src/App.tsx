@@ -6,6 +6,7 @@ const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
 const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
 const DELTA_COALESCE_MS = 16;
+const MAX_CODE_OUTPUT_LINES = 500;
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -30,9 +31,19 @@ export default function App() {
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
   const [inputText, setInputText] = useState("");
 
+  // Code session state
+  const [codeOutput, setCodeOutput] = useState<string[]>([]);
+  const [codeStatus, setCodeStatus] = useState("idle");
+  const [codeActive, setCodeActive] = useState(false);
+  const [codePreview, setCodePreview] = useState("");
+  const [codePathInput, setCodePathInput] = useState("");
+  const [codeInputText, setCodeInputText] = useState("");
+
   const streamingRef = useRef(false);
   const bridgeRef = useRef<PiperBridge | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
+  const codeOutputRef = useRef<HTMLDivElement | null>(null);
+  const codeInputRef = useRef<HTMLInputElement | null>(null);
   const pendingDeltasRef = useRef("");
   const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -43,6 +54,14 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
+
+  // Auto-scroll code output to bottom
+  useEffect(() => {
+    const el = codeOutputRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [codeOutput]);
 
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
@@ -101,6 +120,16 @@ export default function App() {
 
   const clearThinkingPlaceholders = useCallback(() => {
     setMessages((prev) => prev.filter((m) => !isThinkingPlaceholder(m)));
+  }, []);
+
+  const appendCodeOutput = useCallback((text: string) => {
+    setCodeOutput((prev) => {
+      const next = [...prev, text];
+      if (next.length > MAX_CODE_OUTPUT_LINES) {
+        return next.slice(next.length - MAX_CODE_OUTPUT_LINES);
+      }
+      return next;
+    });
   }, []);
 
   const handleFrame = useCallback(
@@ -238,12 +267,54 @@ export default function App() {
           break;
         }
 
+        // Code session events
+        case "code.launch": {
+          const p = payload as { path?: string };
+          setCodeStatus("launched");
+          if (p.path) {
+            setCodePathInput(p.path);
+          }
+          break;
+        }
+
+        case "code.reset": {
+          setCodeOutput([]);
+          setCodePreview("");
+          break;
+        }
+
+        case "code.output": {
+          const text = String((payload as { text?: string }).text || "");
+          if (text) appendCodeOutput(text);
+          break;
+        }
+
+        case "code.status": {
+          setCodeStatus(String((payload as { text?: string }).text || ""));
+          break;
+        }
+
+        case "code.active": {
+          setCodeActive(Boolean((payload as { active?: boolean }).active));
+          break;
+        }
+
+        case "code.focus": {
+          codeInputRef.current?.focus();
+          break;
+        }
+
+        case "code.preview": {
+          setCodePreview(String((payload as { text?: string }).text || ""));
+          break;
+        }
+
         default:
           // Unhandled kinds go to raw inspector only
           break;
       }
     },
-    [appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta]
+    [appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta, appendCodeOutput]
   );
 
   useEffect(() => {
@@ -285,6 +356,29 @@ export default function App() {
     [handleSend]
   );
 
+  const handleCodeSend = useCallback(() => {
+    const text = codeInputText.trim();
+    if (!text || !codeActive) return;
+    setCodeInputText("");
+    sendAction("code_send", { text });
+  }, [codeInputText, codeActive, sendAction]);
+
+  const handleCodeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleCodeSend();
+      }
+    },
+    [handleCodeSend]
+  );
+
+  const handleCodeRun = useCallback(() => {
+    const path = codePathInput.trim();
+    if (!path) return;
+    sendAction("code_run", { path });
+  }, [codePathInput, sendAction]);
+
   const connBadge =
     connState === "connected"
       ? "badge connected"
@@ -293,6 +387,9 @@ export default function App() {
       : connState === "error"
       ? "badge error"
       : "badge disconnected";
+
+  const codeStatusClass =
+    codeActive ? "code-status active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "code-status error" : "code-status";
 
   return (
     <div className="app">
@@ -324,6 +421,67 @@ export default function App() {
               <div className="status-line">{statusText}</div>
               {modeText && <div className="status-line mode">{modeText}</div>}
               {stepText && <div className="status-line step">{stepText}</div>}
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>Code Session</h3>
+            <div className="code-panel">
+              <div className={codeStatusClass}>{codeStatus}</div>
+              {codePreview && (
+                <div className="code-preview">
+                  <pre>{codePreview}</pre>
+                </div>
+              )}
+              <div className="code-output" ref={codeOutputRef}>
+                {codeOutput.map((line, i) => (
+                  <div key={`c-${i}`} className="code-line">
+                    {line}
+                  </div>
+                ))}
+              </div>
+              <div className="code-controls">
+                <div className="code-control-row">
+                  <input
+                    className="input-text code-path"
+                    type="text"
+                    value={codePathInput}
+                    onChange={(e) => setCodePathInput(e.target.value)}
+                    placeholder="Script path..."
+                    disabled={connState !== "connected"}
+                  />
+                  <button
+                    onClick={handleCodeRun}
+                    disabled={connState !== "connected" || !codePathInput.trim()}
+                  >
+                    Run
+                  </button>
+                </div>
+                <div className="code-control-row">
+                  <input
+                    ref={codeInputRef}
+                    className="input-text"
+                    type="text"
+                    value={codeInputText}
+                    onChange={(e) => setCodeInputText(e.target.value)}
+                    onKeyDown={handleCodeKeyDown}
+                    placeholder="Stdin..."
+                    disabled={connState !== "connected" || !codeActive}
+                  />
+                  <button
+                    onClick={handleCodeSend}
+                    disabled={connState !== "connected" || !codeActive || !codeInputText.trim()}
+                  >
+                    Send
+                  </button>
+                  <button
+                    onClick={() => sendAction("code_clear")}
+                    disabled={connState !== "connected"}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
