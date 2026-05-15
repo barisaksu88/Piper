@@ -654,15 +654,22 @@ export default function App() {
             clearTimeout(micSubmitTimeoutRef.current);
             micSubmitTimeoutRef.current = null;
           }
-          if (state === "transcribing") {
+          if (state === "listening") {
+            setMicState("listening");
+            setMicError("");
+            setMicStageMessage(p.message || "Listening...");
+            appendActivity(`Mic: listening`);
+          } else if (state === "transcribing") {
             setMicState("transcribing");
             setMicError("");
             const msg = p.message || p.stage || "Transcribing...";
             setMicStageMessage(msg);
+            appendActivity(`Mic: transcribing – ${msg}`);
           } else if (state === "error") {
             setMicState("error");
             setMicError(String(p.error || "Mic error"));
             setMicStageMessage("");
+            appendActivity(`Mic: error – ${String(p.error || "Mic error")}`);
           } else {
             setMicState("idle");
             setMicError("");

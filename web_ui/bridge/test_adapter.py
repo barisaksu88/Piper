@@ -577,6 +577,12 @@ class TestMicStatusEvent:
         assert frame["payload"]["state"] == "transcribing"
         assert frame["payload"]["error"] == ""
 
+    def test_mic_status_listening(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("mic_status", {"state": "listening", "message": "Listening..."}))
+        assert frame["kind"] == "mic.status"
+        assert frame["payload"]["state"] == "listening"
+        assert frame["payload"]["message"] == "Listening..."
+
     def test_mic_status_error(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("mic_status", {"state": "error", "error": "Piper is busy"}))
         assert frame["kind"] == "mic.status"
