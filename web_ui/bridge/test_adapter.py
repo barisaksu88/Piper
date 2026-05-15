@@ -382,6 +382,16 @@ class TestActionParsing:
         name, payload = adapter.parse_action_frame(raw)
         assert name == "mic_toggle"
 
+    def test_mic_start(self):
+        raw = json.dumps({"frame": "action", "requestId": "r4-start", "action": "mic_start", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "mic_start"
+
+    def test_mic_stop(self):
+        raw = json.dumps({"frame": "action", "requestId": "r4-stop", "action": "mic_stop", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "mic_stop"
+
     def test_snapshot_toggle(self):
         raw = json.dumps({"frame": "action", "requestId": "r4b", "action": "snapshot_toggle", "payload": {}})
         name, payload = adapter.parse_action_frame(raw)

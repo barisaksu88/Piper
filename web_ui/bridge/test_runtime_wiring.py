@@ -150,9 +150,16 @@ def _make_mock_controller() -> MagicMock:
     ctrl.has_active_operations = MagicMock(return_value=False)
     ctrl.code_session_active = False
     ctrl._pending_input_modality = "typed"
+    ctrl.mic_state = "idle"
 
     # Bind the real dispatch method so we test the real wiring.
     ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(  # type: ignore[method-assign]
+        ctrl, MagicMock
+    )
+    ctrl._handle_web_mic_start = PiperController._handle_web_mic_start.__get__(  # type: ignore[method-assign]
+        ctrl, MagicMock
+    )
+    ctrl._handle_web_mic_stop = PiperController._handle_web_mic_stop.__get__(  # type: ignore[method-assign]
         ctrl, MagicMock
     )
     return ctrl
@@ -247,12 +254,74 @@ class TestWebActionDispatch:
         ctrl._dispatch_web_action("live_screen_interval", {"interval_s": 5.0})
         ctrl.live_screen.set_interval.assert_called_once_with(5.0)
 
-    def test_mic_toggle_deferred(self) -> None:
+    def test_mic_toggle_starts_native_mic_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         ctrl = _make_mock_controller()
+        mock_engine = MagicMock()
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
         ctrl._dispatch_web_action("mic_toggle", {})
+        mock_engine.start_recording.assert_called_once()
         kind, payload = ctrl.ui_queue.get_nowait()
-        assert kind == "chat_append"
-        assert "not available" in payload["content"]
+        assert kind == "mic_status"
+        assert payload["state"] == "listening"
+
+    def test_mic_toggle_stops_native_mic_when_recording(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.mic_state = "recording"
+        mock_engine = MagicMock()
+        mock_engine.stop_recording.return_value = "hello"
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl._dispatch_web_action("mic_toggle", {})
+        mock_engine.stop_recording.assert_called_once()
+        events = []
+        while True:
+            try:
+                events.append(ctrl.ui_queue.get_nowait())
+            except queue.Empty:
+                break
+        assert any(e[0] == "mic_status" and e[1].get("state") == "transcribing" for e in events)
+
+    def test_mic_start_native_mic(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_mock_controller()
+        mock_engine = MagicMock()
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
+        ctrl._dispatch_web_action("mic_start", {})
+        mock_engine.start_recording.assert_called_once()
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "mic_status"
+        assert payload["state"] == "listening"
+
+    def test_mic_stop_native_mic(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.mic_state = "recording"
+        mock_engine = MagicMock()
+        mock_engine.stop_recording.return_value = "hello"
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
+        monkeypatch.setattr(threading, "Thread", lambda target, daemon: _SyncThread(target))
+        ctrl._dispatch_web_action("mic_stop", {})
+        mock_engine.stop_recording.assert_called_once()
+        events = []
+        while True:
+            try:
+                events.append(ctrl.ui_queue.get_nowait())
+            except queue.Empty:
+                break
+        assert any(e[0] == "mic_status" and e[1].get("state") == "transcribing" for e in events)
+
+    def test_mic_start_noop_when_already_recording(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.mic_state = "recording"
+        mock_engine = MagicMock()
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
+        ctrl._dispatch_web_action("mic_start", {})
+        mock_engine.start_recording.assert_not_called()
+
+    def test_mic_stop_noop_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ctrl = _make_mock_controller()
+        mock_engine = MagicMock()
+        monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
+        ctrl._dispatch_web_action("mic_stop", {})
+        mock_engine.stop_recording.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

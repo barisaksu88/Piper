@@ -265,9 +265,18 @@ export default function App() {
     if (discard) {
       audioChunksRef.current = [];
     }
+    // If native mic is active, tell backend to stop
+    if (!experimentalMicUpload && micStateRef.current === "listening") {
+      bridgeRef.current?.sendAction("mic_stop");
+    }
+    if (micSubmitTimeoutRef.current) {
+      clearTimeout(micSubmitTimeoutRef.current);
+      micSubmitTimeoutRef.current = null;
+    }
     if (micStateRef.current === "listening" || micStateRef.current === "requesting_permission") {
       setMicState("idle");
       setMicError("");
+      setMicStageMessage("");
     }
   }, []);
 
@@ -812,7 +821,6 @@ export default function App() {
       : "";
 
   const micDisabled =
-    !experimentalMicUpload ||
     connState !== "connected" ||
     streamingRef.current ||
     micState === "requesting_permission" ||
@@ -825,8 +833,6 @@ export default function App() {
       ? micStageMessage || "Transcribing..."
       : micState === "error"
       ? micError
-      : !experimentalMicUpload
-      ? "Mic upload experimental; native mic bridge planned"
       : "";
 
   return (
@@ -1216,10 +1222,22 @@ export default function App() {
           <button
             className={micButtonClass}
             onClick={() => {
-              if (micState === "listening") {
-                stopMicRecording();
+              if (experimentalMicUpload) {
+                if (micState === "listening") {
+                  stopMicRecording();
+                } else {
+                  startMicRecording();
+                }
               } else {
-                startMicRecording();
+                if (micState === "listening") {
+                  bridgeRef.current?.sendAction("mic_stop");
+                } else if (micState === "idle" || micState === "error") {
+                  const sent = bridgeRef.current?.sendAction("mic_start");
+                  if (!sent) {
+                    setMicState("error");
+                    setMicError("Failed to start mic");
+                  }
+                }
               }
             }}
             disabled={micDisabled}

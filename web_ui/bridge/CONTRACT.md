@@ -165,7 +165,7 @@ The table below maps every observed `kind` to its payload shape, source location
 
 | Kind | Payload | Source | DPG Path | WS Name | Visibility | Notes |
 |---|---|---|---|---|---|---|
-| `mic_status` | `dict` with `state: "idle" | "transcribing" | "error"`, `error: str`, optional `stage: str`, optional `message: str` | `controller.py` (`_handle_web_mic_audio_submit`) | Not used in DPG mode. | `mic.status` | `status` + `control` | Reflects backend mic processing state for Web UI / WebView mic capture. `stage` gives fine-grained progress (`decoding` → `stt` → `identity` → `submitting`). `message` is human-readable status text. |
+| `mic_status` | `dict` with `state: "idle" | "listening" | "transcribing" | "error"`, `error: str`, optional `stage: str`, optional `message: str` | `controller.py` (`_handle_web_mic_start` / `_handle_web_mic_stop` / `_handle_web_mic_audio_submit`) | Not used in DPG mode. | `mic.status` | `status` + `control` | Reflects backend mic processing state for Web UI / WebView mic capture. Native mic bridge emits `listening` when recording starts, then `transcribing` during STT. Experimental upload path emits fine-grained `stage` progress (`decoding` → `stt` → `identity` → `submitting`). |
 
 ---
 
@@ -214,7 +214,7 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | `stop` | `controller_actions.on_stop()` | `layout.py` -> `on_stop` | none | `destructive` | Cancels active operations, stops code session, stops TTS. |
 | `new_session` | `controller_actions.on_new_session()` | `layout.py` -> `on_new_session` | none | `destructive` | Clears conversation summary, starts fresh chat session. |
 | `clear_chat` | `controller_actions.on_clear()` | `layout.py` (modal dialog) -> `on_new_session` alias | none | `destructive` | Clears chat widget and resets cache. |
-| `mic_toggle` | `controller_actions.on_mic_toggle()` | `layout.py` -> `on_mic_toggle` | none | `state-changing` | Toggles STT recording. Applies voice identity match on stop. |
+| `mic_toggle` | `controller_actions.on_mic_toggle()` (DPG) / `controller._handle_web_mic_start()` or `_handle_web_mic_stop()` (Web) | `layout.py` -> `on_mic_toggle` | none | `state-changing` | Toggles native STT recording. In Web mode, delegates to `_handle_web_mic_start` (if idle) or `_handle_web_mic_stop` (if recording). Applies voice identity match on stop. |
 | `snapshot_toggle` | `controller_actions.on_snapshot()` | `layout.py` -> `on_snapshot` | none | `state-changing` | Toggles live screen capture mode. |
 | `live_screen_mode` | `controller_actions.on_live_screen_mode_changed()` | `layout.py` -> combo callback | `mode: str` ("display" / "window" / "pointer") | `state-changing` | Changes live screen source. |
 | `live_screen_interval` | `controller_actions.on_live_screen_interval_changed()` | `layout.py` -> combo callback | `interval_s: float` (2 / 5 / 10 / 15) | `state-changing` | Changes live screen capture interval. |
@@ -226,7 +226,9 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | `code_send` | `controller_actions.on_code_send()` | `layout.py` -> code send button / enter key | `text: str` | `state-changing` | Sends input to active embedded process. |
 | `code_run` | `controller_actions.on_code_run()` | `layout.py` -> code run button | none | `state-changing` | Launches `.py` file from code preview. |
 | `code_clear` | `controller_actions.on_code_clear()` | `layout.py` -> code clear button | none | `destructive` | Clears code console output. |
-| `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | **Experimental / quarantined.** Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. Disabled by default in frontend unless `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. Preferred production path is Web UI controlling native backend mic (Phase 15). |
+| `mic_start` | `controller._handle_web_mic_start()` | Web UI / WebView only | none | `state-changing` | Starts native backend mic recording. Emits `mic.status` → `listening`. |
+| `mic_stop` | `controller._handle_web_mic_stop()` | Web UI / WebView only | none | `state-changing` | Stops native backend mic recording, runs STT in a worker thread. Emits `mic.status` → `transcribing`, then `idle` or `error`. |
+| `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | **Experimental / quarantined.** Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. Disabled by default in frontend unless `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. |
 
 ---
 
@@ -235,10 +237,10 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | Safety | Count |
 |---|---|
 | safe | 2 |
-| state-changing | 10 |
+| state-changing | 12 |
 | destructive | 4 |
 | restart | 1 |
-| **Total** | **18** |
+| **Total** | **19** |
 
 ---
 

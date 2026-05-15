@@ -1308,6 +1308,59 @@ class PiperController:
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _handle_web_mic_start(self) -> None:
+        """Start native mic recording from Web UI / WebView."""
+        from tools.stt import get_stt_engine
+
+        if self.mic_state != "idle":
+            return
+        if not self.boot_ready:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Piper is not ready"}))
+            return
+        try:
+            engine = get_stt_engine()
+            try:
+                profile = self.user_runtime.active_profile()
+                if hasattr(engine, "set_active_voice_profile"):
+                    engine.set_active_voice_profile(profile.user_id, is_unknown=getattr(profile, "is_unknown", False))
+            except Exception:
+                pass
+            engine.start_recording()
+            self.mic_state = "recording"
+            self.ui_queue.put(("mic_status", {"state": "listening", "message": "Listening..."}))
+        except Exception as exc:
+            self.mic_state = "idle"
+            _LOG.warning("Web mic start failed: %s", exc)
+            self.ui_queue.put(("mic_status", {"state": "error", "error": f"Mic error: {exc}"}))
+
+    def _handle_web_mic_stop(self) -> None:
+        """Stop native mic recording from Web UI / WebView and run STT in a worker."""
+        from tools.stt import get_stt_engine
+        from ui.controller_actions import _apply_voice_identity_match
+
+        if self.mic_state != "recording":
+            return
+        self.mic_state = "idle"
+        self.ui_queue.put(("mic_status", {"state": "transcribing", "message": "Running local STT..."}))
+
+        def _worker() -> None:
+            try:
+                engine = get_stt_engine()
+                text = engine.stop_recording()
+                if text:
+                    _apply_voice_identity_match(self, engine)
+                    self._pending_input_modality = "voice"
+                    self.submit_user_text(text)
+                else:
+                    _apply_voice_identity_match(self, engine)
+                    self.chat_append("system", "[No speech detected]")
+                self.ui_queue.put(("mic_status", {"state": "idle", "error": ""}))
+            except Exception as exc:
+                _LOG.exception("Web mic stop/STT failed")
+                self.ui_queue.put(("mic_status", {"state": "error", "error": f"STT error: {exc}"}))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _dispatch_web_action(self, action_name: str, payload: dict) -> None:
         """Dispatch a Web UI action without touching DearPyGui widgets."""
         if action_name == "send_message":
@@ -1319,15 +1372,14 @@ class PiperController:
         elif action_name == "clear_chat":
             self.on_clear()
         elif action_name == "mic_toggle":
-            self.ui_queue.put(
-                (
-                    "chat_append",
-                    {
-                        "role": "system",
-                        "content": "[UI] Microphone is not available in Web UI mode.",
-                    },
-                )
-            )
+            if self.mic_state == "idle":
+                self._handle_web_mic_start()
+            else:
+                self._handle_web_mic_stop()
+        elif action_name == "mic_start":
+            self._handle_web_mic_start()
+        elif action_name == "mic_stop":
+            self._handle_web_mic_stop()
         elif action_name == "mic_audio_submit":
             _LOG.info("Web mic: action received")
             self._handle_web_mic_audio_submit(payload)

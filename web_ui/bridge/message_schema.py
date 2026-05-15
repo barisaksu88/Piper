@@ -80,6 +80,8 @@ KNOWN_ACTION_NAMES: set[str] = {
     "new_session",
     "clear_chat",
     "mic_toggle",
+    "mic_start",
+    "mic_stop",
     "snapshot_toggle",
     "live_screen_mode",
     "live_screen_interval",
