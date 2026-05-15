@@ -723,6 +723,24 @@ python app.py
 
 Vite dev mode (`npm run dev` on port 3000) remains supported for frontend development.
 
+### Desktop Window Mode (Phase 15C)
+
+| Env Flag | Effect |
+|---|---|
+| `PIPER_WEB_UI_WINDOW=true` | Opens the Web UI in a pywebview desktop window instead of requiring a browser |
+
+Requirements:
+- `PIPER_WEB_UI_ENABLED=true` must also be set
+- `pywebview` must be installed (`pip install pywebview`)
+- If pywebview is missing, a warning is logged and the backend continues normally
+
+Window characteristics:
+- Title: "Piper"
+- URL: `http://127.0.0.1:8787/`
+- Size: 1280×820 (resizable)
+- No address bar, no browser toolbar
+- Runs in a daemon thread so backend startup is not blocked
+
 ### Files Added in Phase 2
 
 - `web_ui/bridge/server.py`

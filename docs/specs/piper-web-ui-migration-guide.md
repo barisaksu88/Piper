@@ -36,7 +36,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
-| Next phase | **Phase 15B** — Serve built frontend from backend bridge |
+| Next phase | **Phase 15C** — Optional desktop window wrapper |
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -55,6 +55,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - **Web UI / WebView mic capture** (Phase 15A) — Native backend mic control bridge. Web UI MIC button sends `mic_start`/`mic_stop` actions; backend uses existing `sounddevice` + Faster-Whisper STT + voice identity. No browser audio upload.
 - **Experimental MediaRecorder upload** (Phase 14B) — Quarantined. Available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` only.
 - **Backend-served frontend** (Phase 15B) — Bridge server serves the built React app from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`. No Vite dev server required for normal use.
+- **Desktop window wrapper** (Phase 15C) — Optional pywebview desktop window. Enabled with `PIPER_WEB_UI_WINDOW=true`. Falls back gracefully if pywebview is not installed.
 
 ### What does NOT work yet
 - TTS in browser
@@ -481,6 +482,28 @@ python app.py
 http://127.0.0.1:8787/
 ```
 
+**Desktop window flow (Phase 15C):**
+
+**1. Build frontend:**
+```powershell
+cd web_ui/frontend
+npm run build
+```
+
+**2. Start with desktop window:**
+```powershell
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "true"
+python app.py
+```
+
+**3. Expected:**
+- Dedicated "Piper" window opens (no address bar)
+- WebSocket connects automatically
+- Chat, MIC, and all panels work
+- Closing the window ends the pywebview thread; backend continues until Ctrl+C
+
 **Dev flow (still supported):**
 
 **1. Start backend:**
@@ -766,7 +789,43 @@ npm run dev
 
 ---
 
-### Phase 15C — DearPyGui Retirement Decision (Future)
+### Phase 15C — Desktop Window Wrapper
+
+**Goal:** Provide a dedicated desktop app window for the Web UI without requiring a browser tab.
+
+**Delivered:**
+- New config/env flag: `PIPER_WEB_UI_WINDOW` (default `false`)
+- Thin wrapper module: `web_ui/window.py`
+- Uses pywebview to open a window titled "Piper" at `http://127.0.0.1:8787/`
+- Default size: 1280×820, resizable, no address bar
+- Runs in a daemon thread so the backend is not blocked
+- Graceful fallback if pywebview is missing: logs a warning with the manual URL
+- Works with both backend-served frontend and Vite dev mode
+
+**Launch flow:**
+```powershell
+cd web_ui/frontend
+npm run build
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "true"
+python app.py
+```
+
+**Files touched:**
+- `web_ui/window.py` — new wrapper module
+- `config.py` — `WEB_UI_WINDOW` flag
+- `ui/controller.py` — calls `launch_window_thread` after bridge starts
+- `requirements.txt` — added `pywebview` (optional)
+
+**Tests added:**
+- `TestWindowModule` — graceful missing-pywebview behavior, thread launch
+- `TestRunWebWindowFlag` — window flag on/off wiring through `run_web`
+- `TestConfigDefaults` / `TestConfigEnvOverrides` — config default and env override
+
+---
+
+### Phase 15D — DearPyGui Retirement Decision (Future)
 
 **Criteria for retirement:**
 1. All Phase 9–12 features work without regressions
@@ -872,3 +931,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 14C — Quarantined MediaRecorder upload path; disabled by default; documented native mic bridge as preferred direction |
 | 2026-05-09 | Phase 15A — Native mic control bridge: Web UI sends `mic_start`/`mic_stop`; backend reuses existing `sounddevice` + STT + voice identity pipeline |
 | 2026-05-15 | Phase 15B — Backend serves built React frontend from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`; Vite dev mode remains supported |
+| 2026-05-15 | Phase 15C — Optional pywebview desktop window wrapper (`PIPER_WEB_UI_WINDOW=true`); graceful fallback if missing |

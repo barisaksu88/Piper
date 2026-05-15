@@ -55,6 +55,10 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.WEB_UI_WS_PATH == "/ws"
 
+    def test_web_ui_window_defaults_false(self) -> None:
+        cfg = Config()
+        assert cfg.WEB_UI_WINDOW is False
+
 
 class TestConfigEnvOverrides:
     def test_web_ui_enabled_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +80,11 @@ class TestConfigEnvOverrides:
         monkeypatch.setenv("PIPER_WEB_UI_WS_PATH", "/bridge")
         cfg = Config()
         assert cfg.WEB_UI_WS_PATH == "/bridge"
+
+    def test_web_ui_window_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PIPER_WEB_UI_WINDOW", "true")
+        cfg = Config()
+        assert cfg.WEB_UI_WINDOW is True
 
 
 # ---------------------------------------------------------------------------
@@ -1632,3 +1641,138 @@ class TestRouterIgnoreAfterVisibleReply:
         # In real code clean_answer has already been stripped of [ROUTER].
         clean = _strip_persona_control_tags("Sure! [ROUTER]")
         assert _should_ignore_router_after_visible_reply(clean, True) is True
+
+
+# ---------------------------------------------------------------------------
+# Desktop window wrapper (Phase 15C)
+# ---------------------------------------------------------------------------
+
+
+class TestWindowModule:
+    def test_open_piper_window_graceful_when_pywebview_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If pywebview is not installed, open_piper_window must log and return without crashing."""
+        import web_ui.window as window_module
+
+        monkeypatch.setattr(window_module, "_LOG", MagicMock())
+        # Simulate missing pywebview by raising ImportError on import
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "webview":
+                raise ImportError("No module named 'webview'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        window_module.open_piper_window("http://127.0.0.1:8787/")
+        # Should log a warning
+        assert window_module._LOG.warning.called
+
+    def test_launch_window_thread_starts_daemon_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """launch_window_thread must start a daemon thread named 'piper-webview'."""
+        import web_ui.window as window_module
+
+        started_threads: list[threading.Thread] = []
+        orig_start = threading.Thread.start
+
+        def capture_start(self: threading.Thread) -> None:
+            started_threads.append(self)
+            # Do not actually start the thread in tests
+
+        monkeypatch.setattr(threading.Thread, "start", capture_start)
+        monkeypatch.setattr(window_module, "open_piper_window", lambda *a, **k: None)
+
+        thread = window_module.launch_window_thread("http://127.0.0.1:8787/")
+        assert thread.daemon is True
+        assert thread.name == "piper-webview"
+        assert len(started_threads) == 1
+
+
+class TestRunWebWindowFlag:
+    def _make_ctrl_for_run_web(self) -> MagicMock:
+        """Return a MagicMock wired with the real run_web method."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_mgr = MagicMock()
+        ctrl.boot_mgr.run_sequence = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(  # type: ignore[method-assign]
+            ctrl, MagicMock
+        )
+        return ctrl
+
+    def test_run_web_does_not_launch_window_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When WEB_UI_WINDOW is False, run_web must not call launch_window_thread."""
+        import ui.controller as controller_module
+        from ui.controller import PiperController
+
+        launch_calls: list[Any] = []
+
+        def fake_launch(url: str) -> threading.Thread:
+            launch_calls.append(url)
+            t = threading.Thread(target=lambda: None, daemon=True)
+            t.start()
+            return t
+
+        monkeypatch.setattr(controller_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(
+            "web_ui.bridge.server.BridgeServer",
+            lambda **kwargs: MagicMock(start=lambda: None, stop=lambda: None, is_running=lambda: True),
+        )
+        monkeypatch.setattr(
+            "web_ui.window.launch_window_thread", fake_launch, raising=False
+        )
+
+        ctrl = self._make_ctrl_for_run_web()
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+
+        port = _get_free_port()
+        run_thread = threading.Thread(target=run_web_bound, kwargs={"host": "127.0.0.1", "port": port})
+        run_thread.start()
+        time.sleep(0.2)
+        ctrl.restart_requested = True
+        run_thread.join(timeout=2.0)
+        assert launch_calls == []
+
+    def test_run_web_launches_window_when_flag_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When WEB_UI_WINDOW is True, run_web must call launch_window_thread."""
+        import ui.controller as controller_module
+        from ui.controller import PiperController
+
+        launch_calls: list[Any] = []
+
+        def fake_launch(url: str) -> threading.Thread:
+            launch_calls.append(url)
+            t = threading.Thread(target=lambda: None, daemon=True)
+            t.start()
+            return t
+
+        monkeypatch.setattr(controller_module.CFG, "WEB_UI_WINDOW", True)
+        monkeypatch.setattr(
+            "web_ui.bridge.server.BridgeServer",
+            lambda **kwargs: MagicMock(start=lambda: None, stop=lambda: None, is_running=lambda: True),
+        )
+        monkeypatch.setattr(
+            "web_ui.window.launch_window_thread", fake_launch, raising=False
+        )
+
+        ctrl = self._make_ctrl_for_run_web()
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+
+        port = _get_free_port()
+        run_thread = threading.Thread(target=run_web_bound, kwargs={"host": "127.0.0.1", "port": port})
+        run_thread.start()
+        time.sleep(0.2)
+        ctrl.restart_requested = True
+        run_thread.join(timeout=2.0)
+        assert len(launch_calls) == 1
+        assert launch_calls[0] == f"http://127.0.0.1:{port}"

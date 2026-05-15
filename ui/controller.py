@@ -1516,6 +1516,11 @@ class PiperController:
         )
         bridge.start()
 
+        if getattr(CFG, "WEB_UI_WINDOW", False):
+            from web_ui.window import launch_window_thread
+
+            launch_window_thread(f"http://{host}:{port}")
+
         # Guard DearPyGui calls: without a DPG context dpg.does_item_exist causes a
         # native hard exit on Windows.  Every DPG mutation in the codebase is already
         # guarded with ``if dpg.does_item_exist(tag):``; returning False safely skips

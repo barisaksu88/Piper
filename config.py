@@ -869,6 +869,9 @@ class Config:
             os.environ.get("PIPER_WEB_UI_FRONTEND_DIST_DIR", str(ROOT_DIR / "web_ui" / "frontend" / "dist"))
         )
     )
+    WEB_UI_WINDOW: bool = field(
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", False)
+    )
 
 
 class LiveConfig:
