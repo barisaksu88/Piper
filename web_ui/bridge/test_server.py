@@ -438,3 +438,155 @@ class TestStaticFileServing:
             assert exc_info.value.code == 404
         finally:
             server.stop()
+
+
+class TestFrontendServing:
+    """Built-in React frontend serving from configured frontend_dist_dir."""
+
+    def test_stores_frontend_dist_dir(self, tmp_path) -> None:
+        server = BridgeServer(ui_queue=queue.Queue(), frontend_dist_dir=str(tmp_path))
+        assert server._frontend_dist_dir == str(tmp_path)
+
+    def test_serves_index_html_at_root(self, tmp_path) -> None:
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html>hello</html>")
+
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, frontend_dist_dir=str(dist))
+        server.start()
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read().decode() == "<html>hello</html>"
+                assert resp.headers.get("Content-Type") == "text/html"
+        finally:
+            server.stop()
+
+    def test_serves_asset_file(self, tmp_path) -> None:
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        assets = dist / "assets"
+        assets.mkdir()
+        (assets / "app.js").write_text("console.log('piper')")
+
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, frontend_dist_dir=str(dist))
+        server.start()
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/assets/app.js")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read().decode() == "console.log('piper')"
+                assert resp.headers.get("Content-Type") == "text/javascript"
+        finally:
+            server.stop()
+
+    def test_unknown_path_falls_back_to_index_html(self, tmp_path) -> None:
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html>spa</html>")
+
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, frontend_dist_dir=str(dist))
+        server.start()
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/settings/profile")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read().decode() == "<html>spa</html>"
+        finally:
+            server.stop()
+
+    def test_rejects_frontend_path_traversal(self, tmp_path) -> None:
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html>safe</html>")
+        secret = tmp_path / "secret.txt"
+        secret.write_text("secret")
+
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, frontend_dist_dir=str(dist))
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/../secret.txt")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_workspace_still_works_when_frontend_dir_configured(self, tmp_path) -> None:
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html>spa</html>")
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / "test.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+
+        port = get_free_port()
+        server = BridgeServer(
+            ui_queue=queue.Queue(),
+            port=port,
+            static_dir=str(workspace),
+            frontend_dist_dir=str(dist),
+        )
+        server.start()
+        try:
+            import urllib.request
+
+            # Workspace image still serves
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/workspace/test.png")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read() == b"\x89PNG\r\n\x1a\nfake"
+
+            # Frontend root still serves
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/")
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.read().decode() == "<html>spa</html>"
+        finally:
+            server.stop()
+
+    def test_returns_404_when_no_frontend_dist_dir(self) -> None:
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()
+
+    def test_returns_404_when_frontend_dist_dir_missing(self, tmp_path) -> None:
+        missing = tmp_path / "nonexistent"
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, frontend_dist_dir=str(missing))
+        server.start()
+        try:
+            import urllib.error
+            import urllib.request
+
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/")
+            with pytest.raises(urllib.error.HTTPError) as exc_info:
+                urllib.request.urlopen(req, timeout=2.0)
+            assert exc_info.value.code == 404
+        finally:
+            server.stop()

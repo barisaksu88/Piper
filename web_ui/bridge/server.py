@@ -70,6 +70,7 @@ class BridgeServer:
         port: int = 8787,
         ws_path: str = "/ws",
         static_dir: str | None = None,
+        frontend_dist_dir: str | None = None,
         on_client_connect: Any | None = None,
         max_message_size: int | None = None,
     ) -> None:
@@ -79,6 +80,7 @@ class BridgeServer:
         self._port = port
         self._ws_path = ws_path
         self._static_dir = static_dir
+        self._frontend_dist_dir = frontend_dist_dir
         self._on_client_connect = on_client_connect
         self._max_message_size = max_message_size
 
@@ -212,6 +214,13 @@ class BridgeServer:
                 response = await self._serve_static_file(path)
                 if response is not None:
                     return response
+                return connection.respond(404, "Not Found")
+
+            # Frontend static file serving
+            if method == "GET":
+                response = await self._serve_frontend_file(path)
+                if response is not None:
+                    return response
 
             return connection.respond(404, "Not Found")
 
@@ -291,6 +300,62 @@ class BridgeServer:
             target.relative_to(base_dir)
         except ValueError:
             return None
+
+        if not target.is_file():
+            return None
+
+        try:
+            data = target.read_bytes()
+        except (OSError, PermissionError):
+            return None
+
+        content_type, _ = mimetypes.guess_type(str(target))
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        headers = websockets.Headers()
+        headers["Content-Type"] = content_type
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cache-Control"] = "no-cache"
+
+        return websockets.Response(200, "OK", headers, body=data)
+
+    async def _serve_frontend_file(
+        self, path: str
+    ) -> websockets.Response | None:
+        """Serve a safe static file from ``self._frontend_dist_dir``.
+
+        Returns a Response on success, None to fall through to 404.
+        Guards against directory traversal. Unknown paths fall back to
+        ``index.html`` so that React Router works correctly.
+        """
+        if not self._frontend_dist_dir:
+            return None
+
+        base_dir = Path(self._frontend_dist_dir).resolve()
+        if not base_dir.is_dir():
+            return None
+
+        if path == "/":
+            target = base_dir / "index.html"
+        else:
+            raw = path.lstrip("/")
+            if not raw or raw.startswith(".") or ".." in raw or "\\" in raw:
+                return None
+            try:
+                target = (base_dir / raw).resolve()
+            except (OSError, ValueError):
+                return None
+
+            # Containment check: target must be inside base_dir
+            try:
+                target.relative_to(base_dir)
+            except ValueError:
+                return None
+
+            if not target.is_file():
+                # Fallback to index.html for React Router
+                target = base_dir / "index.html"
 
         if not target.is_file():
             return None

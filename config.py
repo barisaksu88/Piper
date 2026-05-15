@@ -864,6 +864,11 @@ class Config:
     WEB_UI_MAX_WS_MESSAGE_BYTES: int = field(
         default_factory=lambda: int(os.environ.get("PIPER_WEB_UI_MAX_WS_MESSAGE_BYTES", str(20 * 1024 * 1024)))
     )
+    WEB_UI_FRONTEND_DIST_DIR: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("PIPER_WEB_UI_FRONTEND_DIST_DIR", str(ROOT_DIR / "web_ui" / "frontend" / "dist"))
+        )
+    )
 
 
 class LiveConfig:

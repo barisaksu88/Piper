@@ -1510,6 +1510,7 @@ class PiperController:
             port=port,
             ws_path=ws_path,
             static_dir=str(CFG.WORKSPACE_DIR),
+            frontend_dist_dir=str(CFG.WEB_UI_FRONTEND_DIST_DIR),
             on_client_connect=_on_client_connect,
             max_message_size=int(getattr(CFG, "WEB_UI_MAX_WS_MESSAGE_BYTES", 20 * 1024 * 1024)),
         )

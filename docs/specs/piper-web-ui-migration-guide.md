@@ -36,7 +36,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
-| Next phase | **Phase 15 planning** — DearPyGui retirement criteria evaluation |
+| Next phase | **Phase 15B** — Serve built frontend from backend bridge |
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -54,6 +54,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - Safe static file serving with path traversal guards, extension whitelist, CORS headers
 - **Web UI / WebView mic capture** (Phase 15A) — Native backend mic control bridge. Web UI MIC button sends `mic_start`/`mic_stop` actions; backend uses existing `sounddevice` + Faster-Whisper STT + voice identity. No browser audio upload.
 - **Experimental MediaRecorder upload** (Phase 14B) — Quarantined. Available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` only.
+- **Backend-served frontend** (Phase 15B) — Bridge server serves the built React app from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`. No Vite dev server required for normal use.
 
 ### What does NOT work yet
 - TTS in browser
@@ -460,6 +461,28 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 
 ### Manual test checklist — Checkpoint 2
 
+**Production-like flow (Phase 15B):**
+
+**1. Build frontend:**
+```powershell
+cd web_ui/frontend
+npm run build
+```
+
+**2. Start backend only:**
+```powershell
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+python app.py
+```
+
+**3. Open:**
+```
+http://127.0.0.1:8787/
+```
+
+**Dev flow (still supported):**
+
 **1. Start backend:**
 ```powershell
 $env:PIPER_WEB_UI_ENABLED = "true"
@@ -703,7 +726,47 @@ Web UI / WebView should control Piper's existing native/backend mic pipeline:
 
 ---
 
-### Phase 15B — DearPyGui Retirement Decision
+### Phase 15B — Serve Built Frontend from Backend Bridge
+
+**Goal:** Eliminate the need to run `npm run dev` for normal Web UI use. The backend bridge serves the built React app directly.
+
+**Delivered:**
+- `BridgeServer` accepts `frontend_dist_dir` and serves files from it over HTTP
+- `GET /` returns `index.html`
+- `GET /assets/...` returns built JS/CSS assets
+- Unknown non-API paths fall back to `index.html` for React Router compatibility
+- `/workspace/...` image serving is unchanged
+- Path traversal is blocked; files outside `frontend_dist_dir` cannot be accessed
+- Configurable via `PIPER_WEB_UI_FRONTEND_DIST_DIR` (default: `<repo>/web_ui/frontend/dist`)
+
+**Production-like launch flow:**
+```powershell
+cd web_ui/frontend
+npm run build
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+python app.py
+# Open http://127.0.0.1:8787/
+```
+
+**Vite dev mode remains available:**
+```powershell
+# Frontend developers can still use hot-reload
+npm run dev
+# Open http://localhost:3000
+# WebSocket still connects to ws://127.0.0.1:8787/ws
+```
+
+**Files touched:**
+- `web_ui/bridge/server.py` — `_serve_frontend_file()`, `frontend_dist_dir` parameter
+- `config.py` — `WEB_UI_FRONTEND_DIST_DIR`
+- `ui/controller.py` — passes `frontend_dist_dir` to `BridgeServer`
+
+**Tests added:** `TestFrontendServing` in `test_server.py`
+
+---
+
+### Phase 15C — DearPyGui Retirement Decision (Future)
 
 **Criteria for retirement:**
 1. All Phase 9–12 features work without regressions
@@ -808,3 +871,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 14B.3 — Added large-frame WS handling, sendAction return value, 10s local timeout, receive failure logging |
 | 2026-05-09 | Phase 14C — Quarantined MediaRecorder upload path; disabled by default; documented native mic bridge as preferred direction |
 | 2026-05-09 | Phase 15A — Native mic control bridge: Web UI sends `mic_start`/`mic_stop`; backend reuses existing `sounddevice` + STT + voice identity pipeline |
+| 2026-05-15 | Phase 15B — Backend serves built React frontend from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`; Vite dev mode remains supported |

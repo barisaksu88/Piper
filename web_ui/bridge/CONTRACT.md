@@ -688,6 +688,41 @@ This calls `renderable_chat_messages(controller.chat_state.get_messages_snapshot
 - Image file serving over HTTP/WebSocket.
 - Integration with `app.py` or `ui/controller.py`.
 
+---
+
+## 9. PHASE 15B — BACKEND-SERVED FRONTEND
+
+### HTTP Endpoints
+
+| Path | Method | Purpose | Fallback |
+|---|---|---|---|
+| `/ws` | GET | WebSocket upgrade | None (required) |
+| `/workspace/<filename>` | GET | Safe image serving from `CFG.WORKSPACE_DIR` | 404 |
+| `/` | GET | `index.html` from `frontend_dist_dir` | 404 if missing |
+| `/assets/<path>` | GET | Built JS/CSS assets from `frontend_dist_dir` | 404 |
+| `/<any>` | GET | Any other path falls back to `index.html` (React Router) | 404 if missing |
+
+### Security
+
+- `frontend_dist_dir` defaults to `<repo>/web_ui/frontend/dist`.
+- Overridable via `PIPER_WEB_UI_FRONTEND_DIST_DIR`.
+- Path traversal is blocked (`..`, backslash, hidden files).
+- Containment check ensures served files are inside `frontend_dist_dir`.
+- `/workspace/...` serving is unchanged and independent.
+
+### Launch Flow
+
+```powershell
+cd web_ui/frontend
+npm run build
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+python app.py
+# Open http://127.0.0.1:8787/
+```
+
+Vite dev mode (`npm run dev` on port 3000) remains supported for frontend development.
+
 ### Files Added in Phase 2
 
 - `web_ui/bridge/server.py`
