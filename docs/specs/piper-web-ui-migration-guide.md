@@ -1,9 +1,9 @@
 # Piper Web UI Migration Guide
 
-> **Version:** 1.2 (post-Phase 12.8)  
+> **Version:** 1.3 (post-Phase 15D)  
 > **Branch:** `feature/web-ui-bridge`  
 > **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
-> **Status:** Phase 12 complete. Manual checkpoint 2 passed.
+> **Status:** Phase 15D complete. Web UI accepted for daily opt-in use. Default switch deferred.
 
 ---
 
@@ -31,12 +31,25 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 |---|---|
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
-| Completed phase | **Phase 12** |
-| Python tests | **213 / 213 passing** |
+| Completed phase | **Phase 15D** |
+| Python tests | **246 / 246 passing** |
 | Frontend typecheck | **Passing** |
-| Frontend build | **Passing** (211 kB JS + 9.7 kB CSS) |
+| Frontend build | **Passing** (215 kB JS + 10 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
-| Next phase | **Phase 15C** — Optional desktop window wrapper |
+| Desktop window | **Accepted** — pywebview wrapper works on main thread |
+| Native MIC bridge | **Accepted** — backend STT + voice identity via Web UI control |
+| Next phase | **Default-readiness burn-in** — Baris uses Web UI daily; no code changes until acceptance |
+
+### Acceptance checkpoint
+**Canonical acceptance document:** `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`
+
+This checkpoint records:
+- Green features accepted for daily use
+- Deferred features (quarantined mic upload, browser TTS, packaging)
+- Default-readiness criteria (1+ week daily use, no regressions, DPG fallback preserved)
+- DearPyGui retirement criteria
+- Manual acceptance checklist
+- Rollback/fallback instructions for all three launch modes
 
 ### What works today
 - Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
@@ -57,13 +70,16 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - **Backend-served frontend** (Phase 15B) — Bridge server serves the built React app from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`. No Vite dev server required for normal use.
 - **Desktop window wrapper** (Phase 15C) — Optional pywebview desktop window. Enabled with `PIPER_WEB_UI_WINDOW=true`. Falls back gracefully if pywebview is not installed.
 - **Threading fix** (Phase 15C.1) — pywebview requires the main thread on Windows. In window mode, the desktop window blocks the main thread while the Web UI action/pump loop runs in a background thread. Browser mode is unchanged (pump loop stays on main thread).
+- **Log hygiene** (Phase 15C.2) — Per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed in Web UI mode.
+- **Acceptance checkpoint** (Phase 15D) — Formal green/deferred/default-readiness criteria documented in `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`.
 
 ### What does NOT work yet
-- TTS in browser
+- TTS in browser / window (native OS TTS still plays; no browser TTS integration)
 - Search result display panel (raw inspector only)
-- Desktop wrapper (Tauri/pywebview)
-- DearPyGui retirement
+- Native OS packaging / installer (no `.exe` or Start Menu shortcut)
+- DearPyGui retirement (fallback preserved)
 - Settings mutation UI (config reload is read-only)
+- Browser MediaRecorder mic upload (quarantined behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`)
 
 ---
 
@@ -851,14 +867,29 @@ python app.py
 
 ---
 
-### Phase 15D — DearPyGui Retirement Decision (Future)
+### Phase 15D — Web UI Acceptance Checkpoint
+
+**Goal:** Formally document what is green, what is deferred, and what must happen before Web UI can become the default.
+
+**Delivered:**
+- Acceptance checkpoint document: `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`
+- Green features recorded: desktop window, typed chat, streaming, native MIC, voice identity, all panels, backend-served frontend, Vite dev mode, DPG fallback
+- Deferred features recorded: quarantined mic upload, browser TTS, OS packaging, deep visual polish
+- Default-readiness criteria defined: 1+ week daily use, no regressions, clean startup/shutdown, manual checklist passes
+- DearPyGui retirement criteria defined: fallback preserved until explicit approval
+- Rollback instructions for all three launch modes (browser, desktop window, DearPyGui)
+
+**Status:** Web UI is **usable and accepted for daily opt-in use**. It is **not yet the default**.
+
+---
+
+### Phase 15E — DearPyGui Retirement Decision (Future)
 
 **Criteria for retirement:**
-1. All Phase 9–12 features work without regressions
-2. 1+ week of daily use by Baris without issues
-3. Manual test checklist passes 100%
-4. Windows desktop wrapper (Phase 14) produces stable `.exe`
-5. Native mic bridge (Phase 15A) proven reliable
+1. All default-readiness criteria from Phase 15D are met
+2. Windows desktop wrapper or installer is available
+3. Baris explicitly approves the switch
+4. Rollback to DearPyGui is documented and tested
 
 **Transition plan:**
 1. Change `WEB_UI_ENABLED` default from `False` to `True`
@@ -960,3 +991,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-15 | Phase 15C — Optional pywebview desktop window wrapper (`PIPER_WEB_UI_WINDOW=true`); graceful fallback if missing |
 | 2026-05-15 | Phase 15C.1 — Fixed pywebview main-thread requirement: window runs on main thread, Web UI pump loop runs in background thread only in window mode |
 | 2026-05-15 | Phase 15C.2 — Reduced backend console noise in Web UI mode: per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed |
+| 2026-05-15 | Phase 15D — Web UI acceptance checkpoint: formal green/deferred/default-readiness criteria documented in `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md` |
