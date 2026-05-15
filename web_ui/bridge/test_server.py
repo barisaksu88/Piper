@@ -590,3 +590,57 @@ class TestFrontendServing:
             assert exc_info.value.code == 404
         finally:
             server.stop()
+
+
+class TestHandleConnectionErrors:
+    """WebSocket receive error classification."""
+
+    @pytest.mark.asyncio
+    async def test_normal_close_logged_at_debug(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from websockets.frames import Close
+        from websockets.exceptions import ConnectionClosedOK
+        from web_ui.bridge.server import BridgeServer
+
+        debug_calls: list[str] = []
+        warning_calls: list[str] = []
+
+        monkeypatch.setattr("web_ui.bridge.server._LOG.debug", lambda msg, *a: debug_calls.append(msg % a if a else msg))
+        monkeypatch.setattr("web_ui.bridge.server._LOG.warning", lambda msg, *a: warning_calls.append(msg % a if a else msg))
+
+        server = BridgeServer(ui_queue=queue.Queue())
+
+        class FakeConn:
+            async def recv(self) -> None:
+                raise ConnectionClosedOK(Close(1000, ""), None, None)
+
+            async def close(self) -> None:
+                pass
+
+        await server._handle_connection(FakeConn())  # type: ignore[arg-type]
+        assert len(debug_calls) == 1
+        assert "closed normally" in debug_calls[0]
+        assert len(warning_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_unexpected_receive_failure_logged_at_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from web_ui.bridge.server import BridgeServer
+
+        debug_calls: list[str] = []
+        warning_calls: list[str] = []
+
+        monkeypatch.setattr("web_ui.bridge.server._LOG.debug", lambda msg, *a: debug_calls.append(msg % a if a else msg))
+        monkeypatch.setattr("web_ui.bridge.server._LOG.warning", lambda msg, *a: warning_calls.append(msg % a if a else msg))
+
+        server = BridgeServer(ui_queue=queue.Queue())
+
+        class FakeConn:
+            async def recv(self) -> None:
+                raise RuntimeError("network broken")
+
+            async def close(self) -> None:
+                pass
+
+        await server._handle_connection(FakeConn())  # type: ignore[arg-type]
+        assert len(debug_calls) == 0
+        assert len(warning_calls) == 1
+        assert "Bridge receive failed" in warning_calls[0]

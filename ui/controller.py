@@ -739,7 +739,10 @@ class PiperController:
         self.chat_state.upsert_streaming_assistant(text)
         if self._try_update_streaming_chat_ui(renderable_chat_messages(self.chat_state.get_messages_snapshot())):
             return
-        print(f"[STREAM DEBUG] _try_update_streaming_chat_ui FAILED — falling back to full refresh (text len={len(text)})")
+        _LOG.debug(
+            "_try_update_streaming_chat_ui failed — falling back to full refresh (text len=%d)",
+            len(text),
+        )
         self._refresh_chat_ui()
 
     def _should_persist_turn(self) -> bool:

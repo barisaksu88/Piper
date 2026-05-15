@@ -178,6 +178,9 @@ def build_controller() -> PiperController:
 def main() -> int:
     controller = build_controller()
     if getattr(CFG, "WEB_UI_ENABLED", False):
+        # Quiet websockets per-connection INFO logs in Web UI mode
+        # (HTTP asset serving and open/close messages are not useful at INFO).
+        logging.getLogger("websockets.server").setLevel(logging.WARNING)
         exit_code = controller.run_web(
             host=getattr(CFG, "WEB_UI_HOST", "127.0.0.1"),
             port=getattr(CFG, "WEB_UI_PORT", 8787),

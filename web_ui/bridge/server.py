@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 import websockets
+from websockets.exceptions import ConnectionClosedOK
 
 from web_ui.bridge.adapter import parse_action_frame, ui_tuple_to_ws_frame
 
@@ -400,10 +401,15 @@ class BridgeServer:
                 except Exception as exc:
                     exc_type = type(exc).__name__
                     exc_msg = str(exc)
-                    hint = ""
-                    if "payload" in exc_msg.lower() or "size" in exc_msg.lower() or "limit" in exc_msg.lower():
-                        hint = " (hint: message may be too large)"
-                    _LOG.warning("Bridge receive failed: %s: %s%s", exc_type, exc_msg, hint)
+                    # Normal close codes (1000 = normal, 1001 = going away) are not errors.
+                    close_code = getattr(getattr(exc, "rcvd", None), "code", 0)
+                    if isinstance(exc, ConnectionClosedOK) and close_code in (1000, 1001):
+                        _LOG.debug("Bridge connection closed normally: %s", exc_msg)
+                    else:
+                        hint = ""
+                        if "payload" in exc_msg.lower() or "size" in exc_msg.lower() or "limit" in exc_msg.lower():
+                            hint = " (hint: message may be too large)"
+                        _LOG.warning("Bridge receive failed: %s: %s%s", exc_type, exc_msg, hint)
                     break
 
                 try:

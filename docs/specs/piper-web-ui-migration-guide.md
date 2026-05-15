@@ -830,6 +830,27 @@ python app.py
 
 ---
 
+### Phase 15C.2 — Quiet Noisy Backend Logs in Web UI Mode
+
+**Goal:** Reduce backend console spam during Web UI streaming and normal operation.
+
+**Delivered:**
+- Replaced per-token `print("[STREAM DEBUG] ...")` in `chat_upsert_streaming_assistant` with `_LOG.debug(...)`. Silent at default INFO level.
+- Normal WebSocket closes (codes 1000/1001) are logged at DEBUG instead of WARNING in `BridgeServer._handle_connection`.
+- `websockets.server` logger level is set to WARNING when Web UI mode is active, suppressing per-connection INFO noise.
+- Real errors (unexpected exceptions, payload too large) still log at WARNING.
+
+**Files touched:**
+- `ui/controller.py` — `_LOG.debug` instead of `print`
+- `web_ui/bridge/server.py` — normal close classification
+- `app.py` — `websockets.server` log level adjustment
+
+**Tests added:**
+- `TestHandleConnectionErrors` — normal close → DEBUG; unexpected failure → WARNING
+- `TestAppBranch.test_app_quietens_websockets_server_in_web_ui_mode` — verifies log level change
+
+---
+
 ### Phase 15D — DearPyGui Retirement Decision (Future)
 
 **Criteria for retirement:**
@@ -938,3 +959,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-15 | Phase 15B — Backend serves built React frontend from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`; Vite dev mode remains supported |
 | 2026-05-15 | Phase 15C — Optional pywebview desktop window wrapper (`PIPER_WEB_UI_WINDOW=true`); graceful fallback if missing |
 | 2026-05-15 | Phase 15C.1 — Fixed pywebview main-thread requirement: window runs on main thread, Web UI pump loop runs in background thread only in window mode |
+| 2026-05-15 | Phase 15C.2 — Reduced backend console noise in Web UI mode: per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed |

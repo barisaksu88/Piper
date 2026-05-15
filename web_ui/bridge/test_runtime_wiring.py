@@ -139,6 +139,31 @@ class TestAppBranch:
         assert calls[0][1]["port"] == 8787
         assert calls[0][1]["ws_path"] == "/ws"
 
+    def test_app_quietens_websockets_server_in_web_ui_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import app as app_module
+        import logging
+
+        set_level_calls: list[tuple[str, int]] = []
+        orig_set_level = logging.Logger.setLevel
+
+        def capture_set_level(self: logging.Logger, level: int) -> None:
+            set_level_calls.append((self.name, level))
+            orig_set_level(self, level)
+
+        monkeypatch.setattr(logging.Logger, "setLevel", capture_set_level)
+
+        class FakeController:
+            def run(self) -> int:
+                return 0
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+
+        app_module.main()
+        assert ("websockets.server", logging.WARNING) in set_level_calls
+
 
 # ---------------------------------------------------------------------------
 # Controller dispatch tests (MagicMock-based)

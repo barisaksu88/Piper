@@ -745,6 +745,18 @@ Threading model:
 - **Window mode** (`PIPER_WEB_UI_WINDOW=true`): pywebview blocks the main thread; the action/pump loop runs in a background thread (`piper-web-pump`). When the window closes, the background loop is signaled to stop and joined before cleanup.
 - Restart from inside the window (via the Restart button) sets the restart flag; the restart completes after the user closes the window.
 
+### Log Hygiene (Phase 15C.2)
+
+In Web UI mode the backend intentionally quiets the following noise:
+
+| Source | Old behavior | New behavior |
+|---|---|---|
+| `ui/controller.py` `chat_upsert_streaming_assistant` | `print("[STREAM DEBUG] ...")` on every DPG fallback | `_LOG.debug(...)` — silent at INFO level |
+| `web_ui/bridge/server.py` normal WebSocket close | Logged at WARNING | Logged at DEBUG |
+| `websockets.server` logger | INFO per connection | WARNING in Web UI mode |
+
+Real errors (unexpected exceptions, payload too large) still log at WARNING.
+
 ### Files Added in Phase 2
 
 - `web_ui/bridge/server.py`
