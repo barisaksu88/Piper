@@ -24,8 +24,9 @@ _LOG = logging.getLogger("web_ui.window")
 def open_piper_window(url: str, width: int = 1280, height: int = 820) -> None:
     """Open a desktop window for the Piper Web UI.
 
-    This function blocks while the window is open.  Call it from a
-    daemon thread so the backend continues to run.
+    This function blocks while the window is open.  In window mode it
+    must be called from the **main thread** (pywebview requirement).
+    The backend pump loop should run in a background thread instead.
     """
     try:
         import webview  # type: ignore[import-untyped]

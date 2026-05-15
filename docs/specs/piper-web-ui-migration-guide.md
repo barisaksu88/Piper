@@ -56,6 +56,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 - **Experimental MediaRecorder upload** (Phase 14B) — Quarantined. Available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` only.
 - **Backend-served frontend** (Phase 15B) — Bridge server serves the built React app from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`. No Vite dev server required for normal use.
 - **Desktop window wrapper** (Phase 15C) — Optional pywebview desktop window. Enabled with `PIPER_WEB_UI_WINDOW=true`. Falls back gracefully if pywebview is not installed.
+- **Threading fix** (Phase 15C.1) — pywebview requires the main thread on Windows. In window mode, the desktop window blocks the main thread while the Web UI action/pump loop runs in a background thread. Browser mode is unchanged (pump loop stays on main thread).
 
 ### What does NOT work yet
 - TTS in browser
@@ -502,7 +503,11 @@ python app.py
 - Dedicated "Piper" window opens (no address bar)
 - WebSocket connects automatically
 - Chat, MIC, and all panels work
-- Closing the window ends the pywebview thread; backend continues until Ctrl+C
+- Closing the window triggers clean shutdown of the background pump loop
+
+**Notes:**
+- pywebview must run on the main thread (Windows requirement). The Web UI action/pump loop moves to a background thread only when `PIPER_WEB_UI_WINDOW=true`.
+- In browser mode (`PIPER_WEB_UI_WINDOW=false` or unset), the pump loop remains on the main thread as before.
 
 **Dev flow (still supported):**
 
@@ -932,3 +937,4 @@ If this guide and CONTRACT.md conflict, **tests win**. The code is the final aut
 | 2026-05-09 | Phase 15A — Native mic control bridge: Web UI sends `mic_start`/`mic_stop`; backend reuses existing `sounddevice` + STT + voice identity pipeline |
 | 2026-05-15 | Phase 15B — Backend serves built React frontend from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`; Vite dev mode remains supported |
 | 2026-05-15 | Phase 15C — Optional pywebview desktop window wrapper (`PIPER_WEB_UI_WINDOW=true`); graceful fallback if missing |
+| 2026-05-15 | Phase 15C.1 — Fixed pywebview main-thread requirement: window runs on main thread, Web UI pump loop runs in background thread only in window mode |

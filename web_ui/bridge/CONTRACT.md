@@ -739,7 +739,11 @@ Window characteristics:
 - URL: `http://127.0.0.1:8787/`
 - Size: 1280×820 (resizable)
 - No address bar, no browser toolbar
-- Runs in a daemon thread so backend startup is not blocked
+
+Threading model:
+- **Browser mode** (`PIPER_WEB_UI_WINDOW=false`): Web UI action/pump loop runs on the main thread.
+- **Window mode** (`PIPER_WEB_UI_WINDOW=true`): pywebview blocks the main thread; the action/pump loop runs in a background thread (`piper-web-pump`). When the window closes, the background loop is signaled to stop and joined before cleanup.
+- Restart from inside the window (via the Restart button) sets the restart flag; the restart completes after the user closes the window.
 
 ### Files Added in Phase 2
 

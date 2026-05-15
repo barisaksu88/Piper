@@ -1516,11 +1516,6 @@ class PiperController:
         )
         bridge.start()
 
-        if getattr(CFG, "WEB_UI_WINDOW", False):
-            from web_ui.window import launch_window_thread
-
-            launch_window_thread(f"http://{host}:{port}")
-
         # Guard DearPyGui calls: without a DPG context dpg.does_item_exist causes a
         # native hard exit on Windows.  Every DPG mutation in the codebase is already
         # guarded with ``if dpg.does_item_exist(tag):``; returning False safely skips
@@ -1528,20 +1523,47 @@ class PiperController:
         _orig_dpg_exists = dpg.does_item_exist
         dpg.does_item_exist = lambda _tag: False
 
-        try:
-            while not self.restart_requested:
-                try:
-                    action_name, payload = action_queue.get(timeout=0.05)
-                except queue.Empty:
-                    pass
-                else:
-                    try:
-                        self._dispatch_web_action(action_name, payload)
-                    except Exception as exc:
-                        _LOG.exception("Web action dispatch failed: %s", action_name)
-                        self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+        use_window = getattr(CFG, "WEB_UI_WINDOW", False)
+        stop_event = threading.Event()
 
-                pump_ui_queue_web(self, forward_queue=bridge_queue)
+        def _pump_loop() -> None:
+            """Web UI action/pump loop.
+
+            Runs on the main thread in browser mode, or in a background
+            thread when a desktop window is active.
+            """
+            try:
+                while not self.restart_requested and not stop_event.is_set():
+                    try:
+                        action_name, payload = action_queue.get(timeout=0.05)
+                    except queue.Empty:
+                        pass
+                    else:
+                        try:
+                            self._dispatch_web_action(action_name, payload)
+                        except Exception as exc:
+                            _LOG.exception("Web action dispatch failed: %s", action_name)
+                            self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+
+                    pump_ui_queue_web(self, forward_queue=bridge_queue)
+            except KeyboardInterrupt:
+                pass
+
+        try:
+            if use_window:
+                pump_thread = threading.Thread(
+                    target=_pump_loop, daemon=True, name="piper-web-pump"
+                )
+                pump_thread.start()
+
+                from web_ui.window import open_piper_window
+
+                open_piper_window(f"http://{host}:{port}")
+
+                stop_event.set()
+                pump_thread.join(timeout=3.0)
+            else:
+                _pump_loop()
         except KeyboardInterrupt:
             pass
         finally:
