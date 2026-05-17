@@ -8,6 +8,7 @@ interface VoiceStripProps {
   micStatusText: string;
   onMicClick: () => void;
   connState: string;
+  isSpeaking?: boolean;
 }
 
 export default function VoiceStrip({
@@ -18,9 +19,21 @@ export default function VoiceStrip({
   micStatusText,
   onMicClick,
   connState,
+  isSpeaking,
 }: VoiceStripProps) {
+  const stripState =
+    micState === "listening"
+      ? "listening"
+      : micState === "transcribing"
+      ? "transcribing"
+      : micState === "error"
+      ? "error"
+      : isSpeaking
+      ? "speaking"
+      : "idle";
+
   return (
-    <div className="voice-strip">
+    <div className={`voice-strip ${stripState}`}>
       <div className="voice-left">
         <div className="voice-indicator">
           <span
@@ -37,24 +50,24 @@ export default function VoiceStrip({
           <span className="voice-label">Voice</span>
         </div>
         <div className="waveform-placeholder">
-          {micState === "listening" && (
+          {(micState === "listening" || isSpeaking) && (
             <div className="waveform-bars">
-              {[...Array(16)].map((_, i) => (
+              {[...Array(20)].map((_, i) => (
                 <div
                   key={i}
                   className="waveform-bar"
-                  style={{ animationDelay: `${i * 0.06}s` }}
+                  style={{ animationDelay: `${i * 0.05}s` }}
                 />
               ))}
             </div>
           )}
           {micState === "transcribing" && (
             <div className="waveform-bars static">
-              {[...Array(16)].map((_, i) => (
+              {[...Array(20)].map((_, i) => (
                 <div
                   key={i}
                   className="waveform-bar"
-                  style={{ height: `${4 + Math.sin(i * 0.8) * 3}px` }}
+                  style={{ height: `${4 + Math.sin(i * 0.7) * 3}px` }}
                 />
               ))}
             </div>

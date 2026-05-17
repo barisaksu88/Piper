@@ -1,21 +1,19 @@
+import { useState } from "react";
+
 const MODES = ["Secretary", "Scientist", "Analyst", "Engineer"];
 
-interface ModeSelectorProps {
-  activeMode: string;
-}
-
-export default function ModeSelector({ activeMode }: ModeSelectorProps) {
-  const normalized = activeMode.toLowerCase();
+export default function ModeSelector() {
+  const [active, setActive] = useState("Secretary");
   return (
     <div className="mode-selector">
       {MODES.map((mode) => {
-        const isActive = normalized.includes(mode.toLowerCase());
+        const isActive = active === mode;
         return (
           <button
             key={mode}
             className={`mode-tab ${isActive ? "active" : ""}`}
-            disabled
-            title="Visual only — mode switching not yet implemented"
+            onClick={() => setActive(mode)}
+            title={`Select ${mode} mode`}
           >
             {mode}
           </button>

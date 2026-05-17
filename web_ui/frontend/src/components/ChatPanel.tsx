@@ -30,11 +30,6 @@ export default function ChatPanel({
     <div className="chat-panel">
       <div className="chat-panel-header">
         <h2>Conversation</h2>
-        <div className="chat-header-actions">
-          <button className="icon-btn ghost" title="Options">
-            ⋮
-          </button>
-        </div>
       </div>
 
       <div className="chat-messages" ref={chatBoxRef}>
@@ -47,7 +42,13 @@ export default function ChatPanel({
           >
             <div className="message-avatar">
               {isAssistant(m.role) ? (
-                <div className="avatar-thumb assistant-thumb">P</div>
+                <div className="avatar-thumb assistant-thumb">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                  </svg>
+                </div>
               ) : isUser(m.role) ? (
                 <div className="avatar-thumb user-thumb">U</div>
               ) : (

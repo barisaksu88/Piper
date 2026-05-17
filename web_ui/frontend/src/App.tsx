@@ -888,8 +888,8 @@ export default function App() {
         />
 
         <div className="center-stage">
-          <AvatarStage state={avatarState} modeText={modeText} />
-          <ModeSelector activeMode={modeText} />
+          <AvatarStage state={avatarState} />
+          <ModeSelector />
         </div>
 
         <aside className="right-rail">
@@ -1122,6 +1122,7 @@ export default function App() {
         micStatusText={micStatusText}
         onMicClick={handleMicClick}
         connState={connState}
+        isSpeaking={streamingRef.current}
       />
 
       <StatusFooter statsText={statsText} modeText={modeText} />
