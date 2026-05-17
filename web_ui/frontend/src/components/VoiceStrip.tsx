@@ -8,7 +8,7 @@ interface VoiceStripProps {
   micStatusText: string;
   onMicClick: () => void;
   connState: string;
-  isSpeaking?: boolean;
+  isGenerating?: boolean;
 }
 
 export default function VoiceStrip({
@@ -19,7 +19,7 @@ export default function VoiceStrip({
   micStatusText,
   onMicClick,
   connState,
-  isSpeaking,
+  isGenerating,
 }: VoiceStripProps) {
   const stripState =
     micState === "listening"
@@ -28,9 +28,11 @@ export default function VoiceStrip({
       ? "transcribing"
       : micState === "error"
       ? "error"
-      : isSpeaking
-      ? "speaking"
+      : isGenerating
+      ? "generating"
       : "idle";
+
+  const statusDisplay = micStatusText || (isGenerating ? "Generating reply..." : "");
 
   return (
     <div className={`voice-strip ${stripState}`}>
@@ -50,7 +52,7 @@ export default function VoiceStrip({
           <span className="voice-label">Voice</span>
         </div>
         <div className="waveform-placeholder">
-          {(micState === "listening" || isSpeaking) && (
+          {(micState === "listening" || isGenerating) && (
             <div className="waveform-bars">
               {[...Array(20)].map((_, i) => (
                 <div
@@ -91,8 +93,8 @@ export default function VoiceStrip({
           </span>
           <span className="mic-label">{micButtonLabel}</span>
         </button>
-        {micStatusText && (
-          <div className="mic-status-display">{micStatusText}</div>
+        {statusDisplay && (
+          <div className="mic-status-display">{statusDisplay}</div>
         )}
       </div>
 

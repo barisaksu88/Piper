@@ -94,6 +94,8 @@ export default function App() {
   // System / identity state
   const [activeUserLabel, setActiveUserLabel] = useState("");
   const [identityStatus, setIdentityStatus] = useState("");
+  const [userName, setUserName] = useState("User");
+  const [authWaiting, setAuthWaiting] = useState(false);
   const [statsText, setStatsText] = useState("");
   const [configReloads, setConfigReloads] = useState<string[]>([]);
   const [controlsRefreshCount, setControlsRefreshCount] = useState(0);
@@ -620,9 +622,17 @@ export default function App() {
 
         // System / identity events
         case "user.changed": {
-          const p = payload as { preserve_transcript?: boolean };
-          setActiveUserLabel("Active user changed");
+          const p = payload as { preserve_transcript?: boolean; user_name?: string; user_id?: string; role?: string };
+          const name = p.user_name || p.user_id || "User";
+          setActiveUserLabel(name);
+          setUserName(name);
           setIdentityStatus(p.preserve_transcript ? "Transcript preserved" : "Transcript reset");
+          break;
+        }
+
+        case "auth.status": {
+          const p = payload as { waiting?: boolean };
+          setAuthWaiting(Boolean(p.waiting));
           break;
         }
 
@@ -859,11 +869,11 @@ export default function App() {
   const avatarState = (() => {
     if (micState === "listening") return "listening";
     if (micState === "transcribing") return "transcribing";
-    if (streamingRef.current) return "speaking";
+    if (streamingRef.current) return "generating";
     const st = statusText.toLowerCase();
     if (st.includes("thinking") || st.includes("planning")) return "thinking";
     return "idle";
-  })() as "idle" | "listening" | "transcribing" | "thinking" | "speaking";
+  })() as "idle" | "listening" | "transcribing" | "thinking" | "generating";
 
   return (
     <div className="app">
@@ -877,6 +887,13 @@ export default function App() {
       />
 
       <div className="app-body">
+        {authWaiting && (
+          <div className="auth-banner">
+            <span className="auth-icon">🔒</span>
+            <span className="auth-text">Password required. Type the password below or /cancel.</span>
+          </div>
+        )}
+
         <ChatPanel
           messages={messages}
           inputText={inputText}
@@ -885,6 +902,7 @@ export default function App() {
           onKeyDown={handleKeyDown}
           chatBoxRef={chatBoxRef}
           connState={connState}
+          userName={userName}
         />
 
         <div className="center-stage">
@@ -1122,7 +1140,7 @@ export default function App() {
         micStatusText={micStatusText}
         onMicClick={handleMicClick}
         connState={connState}
-        isSpeaking={streamingRef.current}
+        isGenerating={streamingRef.current}
       />
 
       <StatusFooter statsText={statsText} modeText={modeText} />

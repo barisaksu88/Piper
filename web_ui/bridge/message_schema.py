@@ -64,6 +64,8 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     "config_reloaded": "config.reloaded",
     # Mic / STT
     "mic_status": "mic.status",
+    # Auth
+    "auth_status": "auth.status",
 }
 
 # Set for O(1) membership checks.

@@ -286,27 +286,18 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 forward_queue.put((kind, {"text": clean_delta}))
             continue
 
-        if forward_queue is not None:
-            forward_queue.put((kind, payload))
-
-        if kind == "boot_log":
-            controller.maybe_speak_ui_event(kind, payload)
-            continue
-
-        if kind == "boot_ready":
-            if time.perf_counter() < float(getattr(controller, "_boot_ui_min_visible_until", 0.0)):
-                controller._pending_boot_ready = True
-                controller._pending_boot_ready_payload = payload
-            else:
-                controller.boot_ready = True
-                controller.maybe_speak_ui_event("boot_ready", payload)
-            continue
-
-        if kind == "ui_controls_refresh":
-            continue
-
         if kind == "active_user_changed":
-            preserve_transcript = bool(isinstance(payload, dict) and payload.get("preserve_transcript"))
+            enriched = dict(payload) if isinstance(payload, dict) else {}
+            try:
+                profile = controller.user_runtime.active_profile()
+                enriched["user_name"] = str(getattr(profile, "name", "") or "")
+                enriched["user_id"] = str(getattr(profile, "user_id", "") or "")
+                enriched["role"] = str(getattr(profile, "role", "") or "")
+            except Exception:
+                pass
+            if forward_queue is not None:
+                forward_queue.put((kind, enriched))
+            preserve_transcript = bool(enriched.get("preserve_transcript"))
             captured_messages: list[dict[str, str]] = []
             if preserve_transcript:
                 try:
@@ -335,6 +326,25 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             except Exception:
                 label = ""
             controller.user_meta = f"User: {label}" if label else ""
+            continue
+
+        if forward_queue is not None:
+            forward_queue.put((kind, payload))
+
+        if kind == "boot_log":
+            controller.maybe_speak_ui_event(kind, payload)
+            continue
+
+        if kind == "boot_ready":
+            if time.perf_counter() < float(getattr(controller, "_boot_ui_min_visible_until", 0.0)):
+                controller._pending_boot_ready = True
+                controller._pending_boot_ready_payload = payload
+            else:
+                controller.boot_ready = True
+                controller.maybe_speak_ui_event("boot_ready", payload)
+            continue
+
+        if kind == "ui_controls_refresh":
             continue
 
         if kind == "clear_thinking":

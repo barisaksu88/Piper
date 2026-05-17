@@ -261,9 +261,39 @@ class TestUserIdentityEvents:
         assert frame["kind"] == "user.changed"
         assert frame["payload"]["preserve_transcript"] is True
 
+    def test_active_user_changed_enriched(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("active_user_changed", {
+            "preserve_transcript": True,
+            "user_name": "Baris",
+            "user_id": "admin_baris",
+            "role": "admin",
+        }))
+        assert frame["kind"] == "user.changed"
+        assert frame["payload"]["preserve_transcript"] is True
+        assert frame["payload"]["user_name"] == "Baris"
+        assert frame["payload"]["user_id"] == "admin_baris"
+        assert frame["payload"]["role"] == "admin"
+
     def test_active_user_changed_empty(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("active_user_changed", None))
         assert frame["payload"]["preserve_transcript"] is False
+
+
+class TestAuthEvents:
+    def test_auth_status_waiting(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("auth_status", {"waiting": True}))
+        assert frame["kind"] == "auth.status"
+        assert frame["payload"]["waiting"] is True
+
+    def test_auth_status_idle(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("auth_status", {"waiting": False}))
+        assert frame["kind"] == "auth.status"
+        assert frame["payload"]["waiting"] is False
+
+    def test_auth_status_empty(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("auth_status", None))
+        assert frame["kind"] == "auth.status"
+        assert frame["payload"] == {}
 
 
 class TestStatsEvents:

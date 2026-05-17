@@ -8,6 +8,7 @@ interface ChatPanelProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   chatBoxRef: React.RefObject<HTMLDivElement | null>;
   connState: string;
+  userName?: string;
 }
 
 function isAssistant(role: string) {
@@ -15,6 +16,12 @@ function isAssistant(role: string) {
 }
 function isUser(role: string) {
   return role === "user";
+}
+
+function displayRole(role: string, userName: string): string {
+  if (isAssistant(role)) return "Piper";
+  if (isUser(role)) return userName || "User";
+  return role;
 }
 
 export default function ChatPanel({
@@ -25,6 +32,7 @@ export default function ChatPanel({
   onKeyDown,
   chatBoxRef,
   connState,
+  userName = "User",
 }: ChatPanelProps) {
   return (
     <div className="chat-panel">
@@ -40,24 +48,24 @@ export default function ChatPanel({
               m.streaming ? "streaming" : ""
             }`}
           >
-            <div className="message-avatar">
-              {isAssistant(m.role) ? (
-                <div className="avatar-thumb assistant-thumb">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                    <path d="M2 17l10 5 10-5"/>
-                    <path d="M2 12l10 5 10-5"/>
-                  </svg>
-                </div>
-              ) : isUser(m.role) ? (
-                <div className="avatar-thumb user-thumb">U</div>
-              ) : (
-                <div className="avatar-thumb system-thumb">S</div>
-              )}
-            </div>
+            {!isUser(m.role) && (
+              <div className="message-avatar">
+                {isAssistant(m.role) ? (
+                  <div className="avatar-thumb assistant-thumb">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                      <path d="M2 17l10 5 10-5"/>
+                      <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                  </div>
+                ) : (
+                  <div className="avatar-thumb system-thumb">S</div>
+                )}
+              </div>
+            )}
             <div className="message-body">
               <div className="message-meta">
-                <span className="message-author">{m.role}</span>
+                <span className="message-author">{displayRole(m.role, userName)}</span>
               </div>
               <pre className="message-content">{m.content}</pre>
             </div>

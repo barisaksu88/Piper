@@ -154,7 +154,12 @@ def _normalize_search_result_payload(payload: object) -> dict[str, Any]:
 
 def _normalize_active_user_changed_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
-        return {"preserve_transcript": bool(payload.get("preserve_transcript"))}
+        result: dict[str, Any] = {"preserve_transcript": bool(payload.get("preserve_transcript"))}
+        for key in ("user_name", "user_id", "role"):
+            val = payload.get(key)
+            if val is not None:
+                result[key] = str(val)
+        return result
     return {"preserve_transcript": False}
 
 
@@ -217,6 +222,12 @@ def _normalize_empty_payload(_payload: object) -> dict[str, Any]:
     return {}
 
 
+def _normalize_auth_status_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return {"waiting": bool(payload.get("waiting"))}
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Leakage guard
 # ---------------------------------------------------------------------------
@@ -256,6 +267,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "code_view": _normalize_code_preview_payload,
     "search_result": _normalize_search_result_payload,
     "active_user_changed": _normalize_active_user_changed_payload,
+    "auth_status": _normalize_auth_status_payload,
     "live_screen_refresh": _normalize_live_screen_refresh_payload,
     "document_ingest_active": _normalize_document_ingest_payload,
     "config_reloaded": _normalize_config_reloaded_payload,
@@ -383,8 +395,12 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["control"],
     },
     "active_user_changed": {
-        "payload_fields": {"preserve_transcript": "bool"},
+        "payload_fields": {"preserve_transcript": "bool", "user_name": "str | None", "user_id": "str | None", "role": "str | None"},
         "visibility": ["chat", "status"],
+    },
+    "auth_status": {
+        "payload_fields": {"waiting": "bool"},
+        "visibility": ["status", "control"],
     },
     "stats_view_refresh": {
         "payload_fields": {},

@@ -1367,7 +1367,23 @@ class PiperController:
     def _dispatch_web_action(self, action_name: str, payload: dict) -> None:
         """Dispatch a Web UI action without touching DearPyGui widgets."""
         if action_name == "send_message":
-            self.submit_user_text(payload.get("text", ""))
+            text = str(payload.get("text", ""))
+            try:
+                waiting = bool(self.user_runtime.is_waiting_for_admin_password())
+            except Exception:
+                waiting = False
+            if waiting:
+                lowered = text.strip().lower()
+                if lowered in {"/cancel", "cancel"}:
+                    msg = self.user_runtime.cancel_pending_admin_password()
+                else:
+                    result = self.user_runtime.submit_admin_password(text)
+                    msg = str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
+                    if getattr(result, "switched", False):
+                        self.ui_queue.put(("active_user_changed", {"preserve_transcript": True}))
+                self.chat_append("system", msg)
+                return
+            self.submit_user_text(text)
         elif action_name == "stop":
             self.on_stop()
         elif action_name == "new_session":
@@ -1549,6 +1565,15 @@ class PiperController:
                             self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
 
                     pump_ui_queue_web(self, forward_queue=bridge_queue)
+
+                    # Auth state tracking: emit when password-waiting state changes.
+                    try:
+                        auth_waiting = self.user_runtime.is_waiting_for_admin_password()
+                    except Exception:
+                        auth_waiting = False
+                    if getattr(self, "_web_ui_prev_auth_waiting", None) != auth_waiting:
+                        self._web_ui_prev_auth_waiting = auth_waiting
+                        bridge_queue.put(("auth_status", {"waiting": auth_waiting}))
             except KeyboardInterrupt:
                 pass
 

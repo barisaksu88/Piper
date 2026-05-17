@@ -196,6 +196,8 @@ def _make_mock_controller() -> MagicMock:
     ctrl._handle_web_mic_stop = PiperController._handle_web_mic_stop.__get__(  # type: ignore[method-assign]
         ctrl, MagicMock
     )
+    ctrl.user_runtime = MagicMock()
+    ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
     return ctrl
 
 
@@ -549,6 +551,14 @@ def _make_realish_controller() -> MagicMock:
     ctrl._flush_autoscrolls = PiperController._flush_autoscrolls.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
     ctrl.load_style_state = MagicMock()
     ctrl.do_generate_stream = lambda: None
+
+    # Mock user_runtime for web dispatch auth safety.
+    ctrl.user_runtime = MagicMock()
+    ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
+    ctrl.user_runtime.active_profile.return_value = MagicMock()
+    ctrl.user_runtime.active_profile.return_value.name = "Test"
+    ctrl.user_runtime.active_profile.return_value.user_id = "test"
+    ctrl.user_runtime.active_profile.return_value.role = "standard"
 
     # Safe chat_append for Web mode: no DPG, just ui_queue.
     def _chat_append(role: str, content: str) -> None:
