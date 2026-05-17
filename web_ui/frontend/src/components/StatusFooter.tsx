@@ -1,9 +1,10 @@
 interface StatusFooterProps {
   statsText: string;
   modeText: string;
+  styleText: string;
 }
 
-export default function StatusFooter({ statsText, modeText }: StatusFooterProps) {
+export default function StatusFooter({ statsText, modeText, styleText }: StatusFooterProps) {
   const time = new Date().toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -18,6 +19,9 @@ export default function StatusFooter({ statsText, modeText }: StatusFooterProps)
         <span className="footer-badge privacy">PRIVACY 100% Local</span>
       </div>
       <div className="footer-right">
+        {styleText && (
+          <span className="footer-badge dim">STYLE {styleText}</span>
+        )}
         {modeText && (
           <span className="footer-badge dim">{modeText}</span>
         )}

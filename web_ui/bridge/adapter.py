@@ -228,6 +228,24 @@ def _normalize_auth_status_payload(payload: object) -> dict[str, Any]:
     return {}
 
 
+def _normalize_tts_status_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        state = str(payload.get("state") or "idle").strip().lower() or "idle"
+        if state not in {"idle", "synthesizing", "playing", "error"}:
+            state = "idle"
+        return {"state": state, "error": str(payload.get("error") or "")}
+    return {"state": "idle", "error": ""}
+
+
+def _normalize_style_status_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        name = str(payload.get("name") or "default").strip() or "default"
+        label = str(payload.get("label") or name).strip() or name
+        filename = str(payload.get("filename") or "").strip()
+        return {"name": name, "label": label, "filename": filename}
+    return {"name": "default", "label": "Default", "filename": ""}
+
+
 # ---------------------------------------------------------------------------
 # Leakage guard
 # ---------------------------------------------------------------------------
@@ -272,6 +290,8 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "document_ingest_active": _normalize_document_ingest_payload,
     "config_reloaded": _normalize_config_reloaded_payload,
     "mic_status": _normalize_mic_status_payload,
+    "tts_status": _normalize_tts_status_payload,
+    "style_status": _normalize_style_status_payload,
     "error": _normalize_error_payload,
     # All remaining events default to generic string payload
     "status": _normalize_generic_string_payload,
@@ -424,6 +444,14 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "mic_status": {
         "payload_fields": {"state": "str", "error": "str"},
+        "visibility": ["status", "control"],
+    },
+    "tts_status": {
+        "payload_fields": {"state": "str", "error": "str"},
+        "visibility": ["status", "control"],
+    },
+    "style_status": {
+        "payload_fields": {"name": "str", "label": "str", "filename": "str"},
         "visibility": ["status", "control"],
     },
 }

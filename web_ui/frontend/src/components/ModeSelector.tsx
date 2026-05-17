@@ -1,24 +1,16 @@
-import { useState } from "react";
+interface ModeSelectorProps {
+  styleLabel: string;
+}
 
-const MODES = ["Secretary", "Scientist", "Analyst", "Engineer"];
-
-export default function ModeSelector() {
-  const [active, setActive] = useState("Secretary");
+export default function ModeSelector({ styleLabel }: ModeSelectorProps) {
+  const label = styleLabel || "Default";
   return (
     <div className="mode-selector">
-      {MODES.map((mode) => {
-        const isActive = active === mode;
-        return (
-          <button
-            key={mode}
-            className={`mode-tab ${isActive ? "active" : ""}`}
-            onClick={() => setActive(mode)}
-            title={`Select ${mode} mode`}
-          >
-            {mode}
-          </button>
-        );
-      })}
+      <div className="mode-readout">
+        <span className="mode-readout-label">Active Style</span>
+        <span className="mode-readout-value">{label}</span>
+      </div>
+      <span className="mode-readout-hint">Use /style name to switch</span>
     </div>
   );
 }

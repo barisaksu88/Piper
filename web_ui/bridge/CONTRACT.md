@@ -50,6 +50,8 @@ The table below maps every observed `kind` to its payload shape, source location
 | `status_widget_mode` | `str` | `core/orchestrator.py` / phases | `controller.runtime_mode = classify_runtime_mode(...)` -> `refresh_top_bar()` | `status.mode` | `status` | Runtime mode classification (IDLE, ROUTING, SEARCHING, etc.). |
 | `status_widget_step` | `str` | `core/orchestrator_phases.py` | `controller._set_stage_meta()` -> `refresh_top_bar()` | `status.step` | `status` | Stage/step metadata like "Stage 1/2 | Step 3". |
 | `status_widget_dashboard_activity` | `str` | `controller_actions.py`, `core/engines/`, various | Appends to bounded line block in dashboard activity log (max 50 lines). Also triggers `maybe_speak_ui_event`. | `activity.append` | `log` + `status` (speech) | High-volume activity log. Speech-enabled depending on `event_speech_mode`. |
+| `tts_status` | `dict` with `state` one of `idle` / `synthesizing` / `playing` / `error`, `error: str` | `controller.py` (`web_tts_status_payload`) | Not used in DPG mode. Native TTS state remains owned by `tools/tts.py`. | `tts.status` | `status` + `control` | Web-only playback lifecycle hint. Frontend may display "Speaking" only when this state is `playing`; text generation is not TTS playback. |
+| `style_status` | `dict` with `name: str`, `label: str`, `filename: str` | `controller_actions.py`, `controller_queue.py`, `controller.py` connect sync | Native style state is refreshed via `StyleManager` and mode indicator. | `style.status` | `status` + `control` | Reports the real active backend style/persona after slash commands, identity switches, and initial Web connect. This is read-only UI state, not a frontend-only style switch. |
 | `ui_controls_refresh` | `str` (usually empty) | `controller.py` (cancel/search/reminder retain/release) | `controller.refresh_interaction_state()` -> enables/disables DPG widgets (send, stop, mic, etc.) | `controls.refresh` | `control` | **Frequent.** Sent whenever operation counters change. A Web UI should debounce this or derive state from explicit lifecycle events. |
 
 ---
@@ -174,7 +176,7 @@ The table below maps every observed `kind` to its payload shape, source location
 | Category | Count |
 |---|---|
 | Streaming | 3 |
-| Status/Mode | 4 |
+| Status/Mode | 6 |
 | Boot/Lifecycle | 2 |
 | Chat/Message | 3 |
 | Search | 1 |
@@ -188,7 +190,7 @@ The table below maps every observed `kind` to its payload shape, source location
 | Live Screen | 1 |
 | Config | 1 |
 | Mic / STT | 1 |
-| **Total** | **31** |
+| **Total** | **33** |
 
 
 ---

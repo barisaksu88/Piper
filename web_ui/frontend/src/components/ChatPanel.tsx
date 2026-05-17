@@ -9,6 +9,7 @@ interface ChatPanelProps {
   chatBoxRef: React.RefObject<HTMLDivElement | null>;
   connState: string;
   userName?: string;
+  authWaiting?: boolean;
 }
 
 function isAssistant(role: string) {
@@ -33,6 +34,7 @@ export default function ChatPanel({
   chatBoxRef,
   connState,
   userName = "User",
+  authWaiting = false,
 }: ChatPanelProps) {
   return (
     <div className="chat-panel">
@@ -76,11 +78,11 @@ export default function ChatPanel({
       <div className="chat-input-area">
         <input
           className="chat-input"
-          type="text"
+          type={authWaiting ? "password" : "text"}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type a message..."
+          placeholder={authWaiting ? "Enter password or /cancel..." : "Type a message..."}
           disabled={connState !== "connected"}
         />
         <button

@@ -1,5 +1,5 @@
 interface AvatarStageProps {
-  state: "idle" | "listening" | "transcribing" | "thinking" | "generating";
+  state: "idle" | "listening" | "transcribing" | "thinking" | "generating" | "speaking";
 }
 
 const STATE_META: Record<
@@ -28,6 +28,11 @@ const STATE_META: Record<
   },
   generating: {
     label: "Generating",
+    color: "#22c55e",
+    glow: "rgba(34, 197, 94, 0.35)",
+  },
+  speaking: {
+    label: "Speaking",
     color: "#22c55e",
     glow: "rgba(34, 197, 94, 0.35)",
   },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { PiperBridge, WS_URL } from "./bridge";
 import type { BackendFrame, ChatMessage, ConnectionState, RawEvent } from "./types";
 import TopBar from "./components/TopBar";
@@ -15,6 +16,70 @@ const DELTA_COALESCE_MS = 16;
 const MAX_CODE_OUTPUT_LINES = 500;
 
 type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
+type TtsState = "idle" | "synthesizing" | "playing" | "error";
+type RailPanelId = "code" | "vision" | "documents" | "system" | "activity" | "raw";
+
+interface RailCardProps {
+  title: string;
+  children: ReactNode;
+  badge?: ReactNode;
+  compact?: boolean;
+  collapsible?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+}
+
+function sanitizeOperationalText(text: string): string {
+  const clean = String(text || "").trim();
+  if (!clean) return "";
+  if (clean.toUpperCase().includes("SPEAK")) return "Generating";
+  return clean;
+}
+
+function RailCard({
+  title,
+  children,
+  badge,
+  compact = false,
+  collapsible = false,
+  expanded = true,
+  onToggle,
+}: RailCardProps) {
+  const bodyId = `rail-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const className = [
+    "rail-card",
+    compact ? "compact" : "",
+    collapsible ? "collapsible" : "",
+    collapsible && expanded ? "expanded" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        className="rail-card-header"
+        onClick={collapsible ? onToggle : undefined}
+        aria-expanded={collapsible ? expanded : undefined}
+        aria-controls={collapsible ? bodyId : undefined}
+        aria-disabled={!collapsible}
+        tabIndex={collapsible ? 0 : -1}
+      >
+        <h3>{title}</h3>
+        <span className="rail-card-header-meta">
+          {badge}
+          {collapsible && <span className="rail-toggle">{expanded ? "Collapse" : "Expand"}</span>}
+        </span>
+      </button>
+      {(!collapsible || expanded) && (
+        <div className="rail-card-body" id={bodyId}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -64,6 +129,10 @@ export default function App() {
   const [statusText, setStatusText] = useState("IDLE");
   const [modeText, setModeText] = useState("");
   const [stepText, setStepText] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [ttsState, setTtsState] = useState<TtsState>("idle");
+  const [ttsError, setTtsError] = useState("");
+  const [styleLabel, setStyleLabel] = useState("Default");
   const [activities, setActivities] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
@@ -101,6 +170,14 @@ export default function App() {
   const [controlsRefreshCount, setControlsRefreshCount] = useState(0);
   const [lastControlsRefreshAt, setLastControlsRefreshAt] = useState("");
   const [lastStatsRefreshAt, setLastStatsRefreshAt] = useState("");
+  const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
+    code: false,
+    vision: false,
+    documents: false,
+    system: true,
+    activity: false,
+    raw: false,
+  });
 
   // Mic state
   const [micState, setMicState] = useState<MicState>("idle");
@@ -428,6 +505,7 @@ export default function App() {
         case "stream.start": {
           flushPendingDeltas();
           streamingRef.current = true;
+          setIsGenerating(true);
           clearThinkingPlaceholders();
           setMessages((prev) => {
             const next = [...prev];
@@ -457,6 +535,7 @@ export default function App() {
           if (!text) break;
           if (!streamingRef.current) {
             streamingRef.current = true;
+            setIsGenerating(true);
             setMessages((prev) => [
               ...prev,
               { id: generateId(), role: "assistant", content: text, streaming: true },
@@ -470,6 +549,7 @@ export default function App() {
         case "stream.end": {
           flushPendingDeltas();
           streamingRef.current = false;
+          setIsGenerating(false);
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -499,12 +579,12 @@ export default function App() {
         }
 
         case "status.set": {
-          setStatusText(String((payload as { text?: string }).text || "IDLE"));
+          setStatusText(sanitizeOperationalText(String((payload as { text?: string }).text || "IDLE")) || "IDLE");
           break;
         }
 
         case "status.mode": {
-          setModeText(String((payload as { text?: string }).text || ""));
+          setModeText(sanitizeOperationalText(String((payload as { text?: string }).text || "")));
           break;
         }
 
@@ -534,6 +614,8 @@ export default function App() {
         }
 
         case "error": {
+          streamingRef.current = false;
+          setIsGenerating(false);
           appendActivity(
             `[Error] ${String((payload as { message?: string }).message || "Unknown error")}`
           );
@@ -626,13 +708,27 @@ export default function App() {
           const name = p.user_name || p.user_id || "User";
           setActiveUserLabel(name);
           setUserName(name);
-          setIdentityStatus(p.preserve_transcript ? "Transcript preserved" : "Transcript reset");
+          setIdentityStatus(p.preserve_transcript ? "Transcript preserved" : "");
+          break;
+        }
+
+        case "style.status": {
+          const p = payload as { label?: string; name?: string };
+          setStyleLabel(String(p.label || p.name || "Default"));
           break;
         }
 
         case "auth.status": {
           const p = payload as { waiting?: boolean };
           setAuthWaiting(Boolean(p.waiting));
+          break;
+        }
+
+        case "tts.status": {
+          const p = payload as { state?: string; error?: string };
+          const state = String(p.state || "idle") as TtsState;
+          setTtsState(["idle", "synthesizing", "playing", "error"].includes(state) ? state : "idle");
+          setTtsError(String(p.error || ""));
           break;
         }
 
@@ -708,6 +804,9 @@ export default function App() {
         setConnState(state);
         if (state === "disconnected" || state === "error") {
           abortMicRecording(true);
+          streamingRef.current = false;
+          setIsGenerating(false);
+          setTtsState("idle");
         }
       },
       onFrame: handleFrame,
@@ -817,6 +916,13 @@ export default function App() {
     sendAction("restart_piper");
   }, [abortMicRecording, sendAction]);
 
+  const toggleRailPanel = useCallback((panel: RailPanelId) => {
+    setExpandedRailPanels((prev) => ({
+      ...prev,
+      [panel]: !prev[panel],
+    }));
+  }, []);
+
   const handleMicClick = useCallback(() => {
     if (experimentalMicUpload) {
       if (micState === "listening") {
@@ -853,7 +959,7 @@ export default function App() {
 
   const micDisabled =
     connState !== "connected" ||
-    streamingRef.current ||
+    isGenerating ||
     micState === "requesting_permission" ||
     micState === "transcribing";
 
@@ -866,21 +972,36 @@ export default function App() {
       ? micError
       : "";
 
+  const isSpeaking = ttsState === "playing";
+  const primaryStatusText =
+    micState === "listening"
+      ? "Listening"
+      : micState === "transcribing"
+      ? "Transcribing"
+      : isSpeaking
+      ? "Speaking"
+      : isGenerating
+      ? "Generating"
+      : statusText || "Idle";
+  const detailModeText = isSpeaking ? "TTS playing" : sanitizeOperationalText(modeText);
+
   const avatarState = (() => {
     if (micState === "listening") return "listening";
     if (micState === "transcribing") return "transcribing";
-    if (streamingRef.current) return "generating";
+    if (isSpeaking) return "speaking";
+    if (isGenerating) return "generating";
     const st = statusText.toLowerCase();
     if (st.includes("thinking") || st.includes("planning")) return "thinking";
     return "idle";
-  })() as "idle" | "listening" | "transcribing" | "thinking" | "generating";
+  })() as "idle" | "listening" | "transcribing" | "thinking" | "generating" | "speaking";
 
   return (
     <div className="app">
       <TopBar
         connState={connState}
-        statusText={statusText}
-        modeText={modeText}
+        statusText={primaryStatusText}
+        modeText={detailModeText}
+        styleText={styleLabel}
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}
@@ -903,69 +1024,61 @@ export default function App() {
           chatBoxRef={chatBoxRef}
           connState={connState}
           userName={userName}
+          authWaiting={authWaiting}
         />
 
         <div className="center-stage">
           <AvatarStage state={avatarState} />
-          <ModeSelector />
+          <ModeSelector styleLabel={styleLabel} />
         </div>
 
         <aside className="right-rail">
-          {/* Quick Actions */}
-          <div className="rail-card compact">
-            <div className="rail-card-header">
-              <h3>Quick Actions</h3>
+          <RailCard title="Quick Actions" compact>
+            <div className="quick-actions-grid">
+              <button className="action-btn" onClick={handleStop} disabled={connState !== "connected"}>Stop</button>
+              <button className="action-btn" onClick={handleNewSession} disabled={connState !== "connected"}>New Session</button>
+              <button className="action-btn danger" onClick={handleRestart} disabled={connState !== "connected"}>Restart</button>
             </div>
-            <div className="rail-card-body">
-              <div className="quick-actions-grid">
-                <button className="action-btn" onClick={handleStop} disabled={connState !== "connected"}>Stop</button>
-                <button className="action-btn" onClick={handleNewSession} disabled={connState !== "connected"}>New Session</button>
-                <button className="action-btn danger" onClick={handleRestart} disabled={connState !== "connected"}>Restart</button>
-              </div>
-              <div className="settings-row">
-                <label className="setting-label">
-                  Event Speech
-                  <select onChange={(e) => sendAction("event_speech_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="off">
-                    {EVENT_SPEECH_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
-                  </select>
-                </label>
-                <label className="setting-label">
-                  Live Screen
-                  <select onChange={(e) => sendAction("live_screen_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="display">
-                    {LIVE_SCREEN_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
-                  </select>
-                </label>
-                <label className="setting-label">
-                  Interval
-                  <select onChange={(e) => sendAction("live_screen_interval", { interval_s: Number(e.target.value) })} disabled={connState !== "connected"} defaultValue={10}>
-                    {LIVE_SCREEN_INTERVALS.map((n) => (<option key={n} value={n}>{n}s</option>))}
-                  </select>
-                </label>
-              </div>
+            <div className="settings-row">
+              <label className="setting-label">
+                Event Speech
+                <select onChange={(e) => sendAction("event_speech_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="off">
+                  {EVENT_SPEECH_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
+                </select>
+              </label>
+              <label className="setting-label">
+                Live Screen
+                <select onChange={(e) => sendAction("live_screen_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="display">
+                  {LIVE_SCREEN_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
+                </select>
+              </label>
+              <label className="setting-label">
+                Interval
+                <select onChange={(e) => sendAction("live_screen_interval", { interval_s: Number(e.target.value) })} disabled={connState !== "connected"} defaultValue={10}>
+                  {LIVE_SCREEN_INTERVALS.map((n) => (<option key={n} value={n}>{n}s</option>))}
+                </select>
+              </label>
             </div>
-          </div>
+          </RailCard>
 
-          {/* Status */}
-          <div className="rail-card compact">
-            <div className="rail-card-header">
-              <h3>Status</h3>
+          <RailCard title="Status" compact>
+            <div className="status-pills">
+              <div className="status-pill">{primaryStatusText}</div>
+              {detailModeText && <div className="status-pill mode">{detailModeText}</div>}
+              <div className="status-pill mode">Style {styleLabel}</div>
+              {ttsState === "synthesizing" && <div className="status-pill step">TTS synthesizing</div>}
+              {ttsState === "error" && <div className="status-pill error">TTS error</div>}
+              {stepText && <div className="status-pill step">{stepText}</div>}
             </div>
-            <div className="rail-card-body">
-              <div className="status-pills">
-                <div className="status-pill">{statusText}</div>
-                {modeText && <div className="status-pill mode">{modeText}</div>}
-                {stepText && <div className="status-pill step">{stepText}</div>}
-              </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* Code Session */}
-          <div className="rail-card">
-            <div className="rail-card-header">
-              <h3>Code Session</h3>
-              <span className={codeActive ? "rail-badge active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "rail-badge error" : "rail-badge"}>{codeStatus}</span>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="Code Session"
+            collapsible
+            expanded={expandedRailPanels.code}
+            onToggle={() => toggleRailPanel("code")}
+            badge={<span className={codeActive ? "rail-badge active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "rail-badge error" : "rail-badge"}>{codeStatus}</span>}
+          >
               <div className="code-panel">
                 {codePreview && (
                   <div className="code-preview">
@@ -989,15 +1102,14 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* Image / Vision */}
-          <div className="rail-card">
-            <div className="rail-card-header">
-              <h3>Image / Vision</h3>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="Image / Vision"
+            collapsible
+            expanded={expandedRailPanels.vision}
+            onToggle={() => toggleRailPanel("vision")}
+          >
               <div className="image-panel">
                 <div className="image-preview-area">
                   {imageUrl && !imageLoadError ? (
@@ -1021,16 +1133,15 @@ export default function App() {
                   <button onClick={handleClearVisionNotes} disabled={connState !== "connected" || visionNotes.length === 0}>Clear Notes</button>
                 </div>
               </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* Documents */}
-          <div className="rail-card">
-            <div className="rail-card-header">
-              <h3>Documents</h3>
-              <span className={documentIngestActive ? "rail-badge active" : "rail-badge"}>{documentIngestActive ? "Ingesting..." : "Idle"}</span>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="Documents"
+            collapsible
+            expanded={expandedRailPanels.documents}
+            onToggle={() => toggleRailPanel("documents")}
+            badge={<span className={documentIngestActive ? "rail-badge active" : "rail-badge"}>{documentIngestActive ? "Ingesting..." : "Idle"}</span>}
+          >
               <div className="doc-panel">
                 <div className="doc-view" ref={documentsViewRef}>
                   {documentsView && <pre className="doc-view-content">{documentsView}</pre>}
@@ -1054,19 +1165,28 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* System Overview */}
-          <div className="rail-card compact">
-            <div className="rail-card-header">
-              <h3>System Overview</h3>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="System Overview"
+            compact
+            collapsible
+            expanded={expandedRailPanels.system}
+            onToggle={() => toggleRailPanel("system")}
+          >
               <div className="sys-panel">
                 <div className="sys-block">
                   <div className="sys-label">Identity</div>
                   <div className="sys-value">{activeUserLabel || "—"} {identityStatus && <span className="sys-sub">({identityStatus})</span>}</div>
+                </div>
+                <div className="sys-block">
+                  <div className="sys-label">Style</div>
+                  <div className="sys-value">{styleLabel || "Default"}</div>
+                </div>
+                <div className="sys-block">
+                  <div className="sys-label">TTS</div>
+                  <div className="sys-value">{ttsState}</div>
+                  {ttsError && <div className="sys-sub">{ttsError}</div>}
                 </div>
                 <div className="sys-block">
                   <div className="sys-label">Stats</div>
@@ -1093,15 +1213,14 @@ export default function App() {
                   <button onClick={handleClearConfigReloads} disabled={configReloads.length === 0}>Clear Config Log</button>
                 </div>
               </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* Activity & Logs */}
-          <div className="rail-card collapsible">
-            <div className="rail-card-header">
-              <h3>Activity & Logs</h3>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="Activity & Logs"
+            collapsible
+            expanded={expandedRailPanels.activity}
+            onToggle={() => toggleRailPanel("activity")}
+          >
               <div className="log-box">
                 {activities.map((a, i) => (
                   <div key={`a-${i}`} className="log-line activity">{a}</div>
@@ -1110,15 +1229,14 @@ export default function App() {
                   <div key={`l-${i}`} className="log-line log">{l}</div>
                 ))}
               </div>
-            </div>
-          </div>
+          </RailCard>
 
-          {/* Raw Events */}
-          <div className="rail-card collapsible">
-            <div className="rail-card-header">
-              <h3>Raw Events</h3>
-            </div>
-            <div className="rail-card-body">
+          <RailCard
+            title="Raw Events"
+            collapsible
+            expanded={expandedRailPanels.raw}
+            onToggle={() => toggleRailPanel("raw")}
+          >
               <div className="log-box raw">
                 {rawEvents.map((e, i) => (
                   <details key={`e-${i}`} className="raw-event">
@@ -1127,8 +1245,7 @@ export default function App() {
                   </details>
                 ))}
               </div>
-            </div>
-          </div>
+          </RailCard>
         </aside>
       </div>
 
@@ -1140,10 +1257,11 @@ export default function App() {
         micStatusText={micStatusText}
         onMicClick={handleMicClick}
         connState={connState}
-        isGenerating={streamingRef.current}
+        isGenerating={isGenerating}
+        isSpeaking={isSpeaking}
       />
 
-      <StatusFooter statsText={statsText} modeText={modeText} />
+      <StatusFooter statsText={statsText} modeText={detailModeText} styleText={styleLabel} />
     </div>
   );
 }

@@ -48,6 +48,7 @@ from ui.controller_actions import (
     on_stop as on_stop_action,
     refresh_live_screen_ui as refresh_live_screen_ui_action,
     reset_mic_ui as reset_mic_ui_action,
+    submit_text_input as submit_text_input_action,
     trigger_proactive_reminder as trigger_proactive_reminder_action,
 )
 from ui.controller_queue import pump_ui_queue as pump_ui_queue_action
@@ -472,6 +473,62 @@ class PiperController:
             str(getattr(CFG, "TTS_VOICE", "af_heart")),
             float(getattr(CFG, "TTS_SPEED", 0.85)),
         )
+
+    def web_active_user_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {"preserve_transcript": False}
+        try:
+            profile = self.user_runtime.active_profile()
+            payload["user_name"] = str(getattr(profile, "name", "") or "")
+            payload["user_id"] = str(getattr(profile, "user_id", "") or "")
+            payload["role"] = str(getattr(profile, "role", "") or "")
+        except Exception:
+            pass
+        return payload
+
+    def web_style_status_payload(self) -> dict[str, str]:
+        try:
+            style_state = self.load_style_state()
+        except Exception:
+            return {"name": "default", "label": "Default", "filename": ""}
+        name = str(getattr(style_state, "name", "") or "default").strip() or "default"
+        try:
+            filename = str(getattr(self.style_mgr, "active_filename", "") or "").strip()
+        except Exception:
+            filename = ""
+        return {
+            "name": name,
+            "label": name.upper() if name.lower() != "default" else "Default",
+            "filename": filename,
+        }
+
+    def web_tts_status_payload(self) -> dict[str, str]:
+        try:
+            tts = self.tts
+            play_active = bool(getattr(tts, "_play_active", False))
+            synth_active = bool(getattr(tts, "_synth_active", False))
+            stream_active = False
+            stream_lock = getattr(tts, "_stream_lock", None)
+            if stream_lock is not None:
+                try:
+                    with stream_lock:
+                        stream_active = getattr(tts, "_stream_epoch", None) is not None
+                except Exception:
+                    stream_active = False
+            queued = False
+            for attr in ("_job_q", "_audio_q"):
+                q = getattr(tts, attr, None)
+                if q is not None and not q.empty():
+                    queued = True
+                    break
+            if play_active:
+                state = "playing"
+            elif synth_active or stream_active or queued:
+                state = "synthesizing"
+            else:
+                state = "idle"
+            return {"state": state, "error": ""}
+        except Exception as exc:
+            return {"state": "error", "error": str(exc)}
 
     def _speak_event_notification(self, text: str, *, key: str = "", force: bool = False) -> None:
         if not force and self.event_speech_mode == EVENT_SPEECH_OFF:
@@ -1368,22 +1425,7 @@ class PiperController:
         """Dispatch a Web UI action without touching DearPyGui widgets."""
         if action_name == "send_message":
             text = str(payload.get("text", ""))
-            try:
-                waiting = bool(self.user_runtime.is_waiting_for_admin_password())
-            except Exception:
-                waiting = False
-            if waiting:
-                lowered = text.strip().lower()
-                if lowered in {"/cancel", "cancel"}:
-                    msg = self.user_runtime.cancel_pending_admin_password()
-                else:
-                    result = self.user_runtime.submit_admin_password(text)
-                    msg = str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
-                    if getattr(result, "switched", False):
-                        self.ui_queue.put(("active_user_changed", {"preserve_transcript": True}))
-                self.chat_append("system", msg)
-                return
-            self.submit_user_text(text)
+            submit_text_input_action(self, text, emit_bridge_events=True)
         elif action_name == "stop":
             self.on_stop()
         elif action_name == "new_session":
@@ -1513,12 +1555,40 @@ class PiperController:
         from ui.controller_queue import pump_ui_queue_web
         from ui.controller_render import renderable_chat_messages
 
+        def _web_payload(method_name: str, fallback: dict[str, object]) -> dict[str, object]:
+            method = getattr(self, method_name, None)
+            if callable(method):
+                try:
+                    payload = method()
+                    if isinstance(payload, dict):
+                        return payload
+                except Exception:
+                    pass
+            return dict(fallback)
+
         def _on_client_connect() -> list[str]:
             """Return initial frames for a newly connected WebSocket client."""
             try:
                 messages = renderable_chat_messages(self.chat_state.get_messages_snapshot())
-                sync_frame = ui_tuple_to_ws_frame("chat_sync", messages)
-                return [sync_frame]
+                return [
+                    ui_tuple_to_ws_frame("chat_sync", messages),
+                    ui_tuple_to_ws_frame(
+                        "active_user_changed",
+                        _web_payload("web_active_user_payload", {"preserve_transcript": False}),
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "style_status",
+                        _web_payload("web_style_status_payload", {"name": "default", "label": "Default", "filename": ""}),
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "auth_status",
+                        {"waiting": bool(self.user_runtime.is_waiting_for_admin_password())},
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "tts_status",
+                        _web_payload("web_tts_status_payload", {"state": "idle", "error": ""}),
+                    ),
+                ]
             except Exception:
                 return []
 
@@ -1544,6 +1614,7 @@ class PiperController:
 
         use_window = getattr(CFG, "WEB_UI_WINDOW", False)
         stop_event = threading.Event()
+        previous_tts_status: tuple[str, str] | None = None
 
         def _pump_loop() -> None:
             """Web UI action/pump loop.
@@ -1551,6 +1622,7 @@ class PiperController:
             Runs on the main thread in browser mode, or in a background
             thread when a desktop window is active.
             """
+            nonlocal previous_tts_status
             try:
                 while not self.restart_requested and not stop_event.is_set():
                     try:
@@ -1574,6 +1646,14 @@ class PiperController:
                     if getattr(self, "_web_ui_prev_auth_waiting", None) != auth_waiting:
                         self._web_ui_prev_auth_waiting = auth_waiting
                         bridge_queue.put(("auth_status", {"waiting": auth_waiting}))
+                    tts_payload = _web_payload("web_tts_status_payload", {"state": "idle", "error": ""})
+                    tts_key = (
+                        str(tts_payload.get("state") or "idle"),
+                        str(tts_payload.get("error") or ""),
+                    )
+                    if previous_tts_status != tts_key:
+                        previous_tts_status = tts_key
+                        bridge_queue.put(("tts_status", tts_payload))
             except KeyboardInterrupt:
                 pass
 

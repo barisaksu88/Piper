@@ -16,6 +16,7 @@ import queue
 import socket
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -31,6 +32,15 @@ def _get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _drain_queue(q: queue.Queue) -> list[tuple[str, Any]]:
+    items: list[tuple[str, Any]] = []
+    while True:
+        try:
+            items.append(q.get_nowait())
+        except queue.Empty:
+            return items
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +190,7 @@ def _make_mock_controller() -> MagicMock:
     ctrl.boot_ready = True
     ctrl.live_screen = MagicMock()
     ctrl.boot_mgr = MagicMock()
-    ctrl.has_active_code_session = MagicMock(return_value=True)
+    ctrl.has_active_code_session = MagicMock(return_value=False)
     ctrl.has_active_operations = MagicMock(return_value=False)
     ctrl.code_session_active = False
     ctrl._pending_input_modality = "typed"
@@ -198,6 +208,8 @@ def _make_mock_controller() -> MagicMock:
     )
     ctrl.user_runtime = MagicMock()
     ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
+    ctrl.style_mgr = MagicMock()
+    ctrl.load_style_state.return_value = SimpleNamespace(name="Default")
     return ctrl
 
 
@@ -549,7 +561,8 @@ def _make_realish_controller() -> MagicMock:
     ctrl.refresh_interaction_state = PiperController.refresh_interaction_state.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
     ctrl.clear_code_output = PiperController.clear_code_output.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
     ctrl._flush_autoscrolls = PiperController._flush_autoscrolls.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
-    ctrl.load_style_state = MagicMock()
+    ctrl.style_mgr = MagicMock()
+    ctrl.load_style_state = MagicMock(return_value=SimpleNamespace(name="Default"))
     ctrl.do_generate_stream = lambda: None
 
     # Mock user_runtime for web dispatch auth safety.
@@ -589,6 +602,46 @@ class TestSubmitUserTextExistence:
         ctrl.submit_user_text = _tracking_submit  # type: ignore[method-assign]
         ctrl._dispatch_web_action("send_message", {"text": "hello"})
         assert calls == ["hello"]
+
+
+class TestWebSendMessageSharedBackendPath:
+    def test_style_command_uses_shared_command_path(self, tmp_path) -> None:
+        from core.style import StyleManager
+
+        style_dir = tmp_path / "styles"
+        style_dir.mkdir()
+        (style_dir / "default.style").write_text("name = default\n---\nTone: neutral\n", encoding="utf-8")
+        (style_dir / "jarvis.style").write_text("name = Jarvis\n---\nTone: precise\n", encoding="utf-8")
+
+        ctrl = _make_mock_controller()
+        ctrl.style_mgr = StyleManager(style_dir)
+        ctrl.load_style_state.return_value = SimpleNamespace(name="Jarvis")
+
+        ctrl._dispatch_web_action("send_message", {"text": "/style jarvis"})
+
+        ctrl.submit_user_text.assert_not_called()
+        ctrl.on_new_session.assert_called_once_with()
+        ctrl.user_runtime.set_active_style_filename.assert_called_once_with("jarvis.style")
+        assert ctrl.style_mgr.active_filename == "jarvis.style"
+        events = _drain_queue(ctrl.ui_queue)
+        assert any(kind == "style_status" and payload["name"] == "Jarvis" for kind, payload in events)
+
+    def test_admin_password_submission_stays_out_of_normal_chat_path(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.user_runtime.is_waiting_for_admin_password.return_value = True
+        ctrl.user_runtime.submit_admin_password.return_value = SimpleNamespace(
+            switched=True,
+            message="[UI] Password accepted.",
+        )
+        ctrl.load_style_state.return_value = SimpleNamespace(name="Jarvis")
+
+        ctrl._dispatch_web_action("send_message", {"text": "secret-password"})
+
+        ctrl.submit_user_text.assert_not_called()
+        ctrl.user_runtime.submit_admin_password.assert_called_once_with("secret-password")
+        events = _drain_queue(ctrl.ui_queue)
+        assert any(kind == "active_user_changed" for kind, _payload in events)
+        assert any(kind == "style_status" and payload["name"] == "Jarvis" for kind, payload in events)
 
 
 class TestWebDispatchDpgSafety:
@@ -1018,6 +1071,25 @@ class TestNonSyncedChatAppendWebState:
         kind, payload = bridge_q.get_nowait()
         assert kind == "chat_append"
         assert payload["role"] == "system"
+
+
+class TestWebStatusSemantics:
+    def test_persona_speaking_mode_is_forwarded_as_generating(self) -> None:
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl._clean_ui_text = lambda value: str(value)
+        ctrl.stage_meta = ""
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("status_widget_mode", "SPEAKING"))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        assert ctrl.runtime_mode == "SPEAKING"
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "status_widget_mode"
+        assert payload == "GENERATING"
 
 
 class TestDpgHardExitGuardLifecycle:

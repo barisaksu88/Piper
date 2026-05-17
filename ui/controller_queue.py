@@ -6,7 +6,12 @@ import time
 import dearpygui.dearpygui as dpg
 
 from config import CFG
-from ui.controller_actions import handle_search_result, handle_show_image, refresh_live_screen_ui
+from ui.controller_actions import (
+    _refresh_active_user_style,
+    handle_search_result,
+    handle_show_image,
+    refresh_live_screen_ui,
+)
 from ui.controller_render import append_bounded_line_block
 from ui.controller_status import classify_runtime_mode
 
@@ -99,6 +104,10 @@ def pump_ui_queue(controller, forward_queue: queue.Queue | None = None) -> None:
                     pass
                 controller.session_meta = "Session: active"
             controller.refresh_active_user_meta()
+            try:
+                _refresh_active_user_style(controller)
+            except Exception:
+                pass
             controller._refresh_chat_ui()
             controller.refresh_interaction_state()
             continue
@@ -295,8 +304,6 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 enriched["role"] = str(getattr(profile, "role", "") or "")
             except Exception:
                 pass
-            if forward_queue is not None:
-                forward_queue.put((kind, enriched))
             preserve_transcript = bool(enriched.get("preserve_transcript"))
             captured_messages: list[dict[str, str]] = []
             if preserve_transcript:
@@ -326,6 +333,24 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             except Exception:
                 label = ""
             controller.user_meta = f"User: {label}" if label else ""
+            try:
+                _refresh_active_user_style(controller)
+            except Exception:
+                pass
+            if forward_queue is not None:
+                forward_queue.put((kind, enriched))
+                payload_fn = getattr(controller, "web_style_status_payload", None)
+                if callable(payload_fn):
+                    forward_queue.put(("style_status", payload_fn()))
+            continue
+
+        if kind == "status_widget_mode":
+            controller.runtime_mode = classify_runtime_mode(controller._clean_ui_text(payload))
+            if controller.runtime_mode == "IDLE":
+                controller.stage_meta = ""
+            forwarded_payload = "GENERATING" if controller.runtime_mode == "SPEAKING" else payload
+            if forward_queue is not None:
+                forward_queue.put((kind, forwarded_payload))
             continue
 
         if forward_queue is not None:
@@ -389,12 +414,6 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                     controller.stage_meta = ""
                     controller.runtime_mode = classify_runtime_mode(clean)
             controller.maybe_speak_ui_event(kind, payload)
-            continue
-
-        if kind == "status_widget_mode":
-            controller.runtime_mode = classify_runtime_mode(controller._clean_ui_text(payload))
-            if controller.runtime_mode == "IDLE":
-                controller.stage_meta = ""
             continue
 
         if kind == "status_widget_step":

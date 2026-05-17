@@ -165,6 +165,37 @@ def _refresh_active_user_style(controller) -> None:
     controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
 
 
+def _current_style_status_payload(controller) -> dict[str, str]:
+    try:
+        style_state = controller.load_style_state()
+    except Exception:
+        return {"name": "default", "label": "Default", "filename": ""}
+    name = str(getattr(style_state, "name", "") or "default").strip() or "default"
+    try:
+        filename = str(getattr(controller.style_mgr, "active_filename", "") or "").strip()
+    except Exception:
+        filename = ""
+    return {
+        "name": name,
+        "label": name.upper() if name.lower() != "default" else "Default",
+        "filename": filename,
+    }
+
+
+def _queue_style_status(controller) -> None:
+    try:
+        controller.ui_queue.put(("style_status", _current_style_status_payload(controller)))
+    except Exception:
+        pass
+
+
+def _queue_active_user_changed(controller, *, preserve_transcript: bool = False) -> None:
+    try:
+        controller.ui_queue.put(("active_user_changed", {"preserve_transcript": bool(preserve_transcript)}))
+    except Exception:
+        pass
+
+
 def _render_user_list_message(controller) -> str:
     active_id = ""
     active_profile = None
@@ -246,16 +277,19 @@ def _apply_active_user_switch(
     controller.refresh_interaction_state()
 
 
-def _switch_active_user(controller, target: str) -> str:
+def _switch_active_user(controller, target: str, *, emit_bridge_events: bool = False) -> str:
     old_profile = controller.user_runtime.active_profile()
     previous_was_unknown = getattr(old_profile, "is_unknown", False)
     result = controller.user_runtime.request_typed_user_switch(target)
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        if emit_bridge_events:
+            _queue_active_user_changed(controller, preserve_transcript=previous_was_unknown)
+            _queue_style_status(controller)
     return str(getattr(result, "message", "") or "[UI] User switch failed.")
 
 
-def _submit_admin_password(controller, raw_text: str) -> str:
+def _submit_admin_password(controller, raw_text: str, *, emit_bridge_events: bool = False) -> str:
     text = str(raw_text or "")
     lowered = text.strip().lower()
     if lowered in {"/cancel", "cancel"}:
@@ -263,6 +297,9 @@ def _submit_admin_password(controller, raw_text: str) -> str:
     result = controller.user_runtime.submit_admin_password(text)
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller)
+        if emit_bridge_events:
+            _queue_active_user_changed(controller, preserve_transcript=True)
+            _queue_style_status(controller)
     return str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
 
 
@@ -1037,30 +1074,50 @@ def on_clear(controller) -> None:
     controller.refresh_interaction_state()
 
 
-def on_send(controller) -> None:
+def _clear_input_widget(controller, *, focus: bool = False) -> None:
+    if not dpg.does_item_exist(controller.tags.input_box):
+        return
+    dpg.set_value(controller.tags.input_box, "")
+    if focus:
+        dpg.focus_item(controller.tags.input_box)
+
+
+def submit_text_input(
+    controller,
+    input_text: str,
+    *,
+    clear_input_widget: bool = False,
+    emit_bridge_events: bool = False,
+) -> None:
+    """Handle one user text submission through Piper's shared UI path.
+
+    DearPyGui and Web UI both need commands, auth, interrupts, code-session
+    forwarding, and normal generation to pass through the same backend rails.
+    The widget cleanup flag keeps native input-box behavior out of Web mode.
+    """
     if not controller.boot_ready:
         return
 
-    raw = dpg.get_value(controller.tags.input_box) or ""
-    input_text = str(raw).rstrip("\n")
+    input_text = str(input_text or "").rstrip("\n")
     if controller.has_active_operations():
         text = input_text.strip()
         if not text or _is_active_turn_cancel_request(text):
-            if dpg.does_item_exist(controller.tags.input_box):
-                dpg.set_value(controller.tags.input_box, "")
+            if clear_input_widget:
+                _clear_input_widget(controller)
             on_stop(controller)
             return
         controller.chat_append("system", "[UI] Piper is busy. Press Stop or type `stop` / `cancel` to interrupt the running turn.")
-        if dpg.does_item_exist(controller.tags.input_box):
-            dpg.set_value(controller.tags.input_box, "")
-            dpg.focus_item(controller.tags.input_box)
+        if clear_input_widget:
+            _clear_input_widget(controller, focus=True)
         return
 
     if not input_text.strip():
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
     if controller.has_active_code_session():
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         controller.activate_code_tab()
         sent = controller.send_code_session_input(input_text)
         if sent:
@@ -1073,8 +1130,16 @@ def on_send(controller) -> None:
     user_text = input_text.strip()
 
     if controller.user_runtime.is_waiting_for_admin_password():
-        controller.chat_append("system", _submit_admin_password(controller, input_text))
-        dpg.set_value(controller.tags.input_box, "")
+        controller.chat_append(
+            "system",
+            _submit_admin_password(
+                controller,
+                input_text,
+                emit_bridge_events=emit_bridge_events,
+            ),
+        )
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     res = handle_command(user_text, style_mgr=controller.style_mgr)
@@ -1088,7 +1153,14 @@ def on_send(controller) -> None:
         elif res.action == "show_active_user":
             controller.chat_append("system", _render_active_user_message(controller))
         elif res.action == "switch_user" and res.user_query:
-            controller.chat_append("system", _switch_active_user(controller, res.user_query))
+            controller.chat_append(
+                "system",
+                _switch_active_user(
+                    controller,
+                    res.user_query,
+                    emit_bridge_events=emit_bridge_events,
+                ),
+            )
         elif res.action == "ingest_document" and res.document_path:
             _start_document_ingest(controller, [res.document_path])
         elif res.action == "vision_query" and res.vision_path and res.vision_prompt:
@@ -1096,8 +1168,8 @@ def on_send(controller) -> None:
             controller.persist_turn("user", user_text)
             controller.session_meta = "Session: active"
             controller._refresh_top_bar()
-            dpg.set_value(controller.tags.input_box, "")
-            dpg.focus_item(controller.tags.input_box)
+            if clear_input_widget:
+                _clear_input_widget(controller, focus=True)
             controller.show_thinking_placeholder()
             threading.Thread(
                 target=do_vision_query,
@@ -1114,7 +1186,8 @@ def on_send(controller) -> None:
         elif res.action == "set_admin_password" and res.password_value is not None:
             outcome = controller.user_runtime.set_admin_password(res.password_value)
             controller.chat_append("system", outcome.message)
-            dpg.set_value(controller.tags.input_box, "")
+            if clear_input_widget:
+                _clear_input_widget(controller)
             return
         if res.style_filename:
             try:
@@ -1124,15 +1197,25 @@ def on_send(controller) -> None:
             style_state = controller.load_style_state()
             mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
             controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
+            if emit_bridge_events:
+                _queue_style_status(controller)
         if res.ui_message:
             controller.chat_append("system", res.ui_message)
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     if _try_resume_langgraph_interrupt(controller, user_text):
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     controller.submit_user_text(user_text)
+
+
+def on_send(controller) -> None:
+    raw = dpg.get_value(controller.tags.input_box) or ""
+    submit_text_input(controller, str(raw), clear_input_widget=True)
 
 
 def on_code_send(controller) -> None:

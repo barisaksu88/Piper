@@ -64,6 +64,10 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     "config_reloaded": "config.reloaded",
     # Mic / STT
     "mic_status": "mic.status",
+    # TTS / playback
+    "tts_status": "tts.status",
+    # Style / persona
+    "style_status": "style.status",
     # Auth
     "auth_status": "auth.status",
 }

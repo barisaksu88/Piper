@@ -296,6 +296,30 @@ class TestAuthEvents:
         assert frame["payload"] == {}
 
 
+class TestTtsEvents:
+    def test_tts_status_playing(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("tts_status", {"state": "playing"}))
+        assert frame["kind"] == "tts.status"
+        assert frame["payload"]["state"] == "playing"
+
+    def test_tts_status_invalid_state_falls_back_to_idle(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("tts_status", {"state": "speaking"}))
+        assert frame["payload"]["state"] == "idle"
+
+
+class TestStyleEvents:
+    def test_style_status(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("style_status", {
+            "name": "Jarvis",
+            "label": "JARVIS",
+            "filename": "jarvis.style",
+        }))
+        assert frame["kind"] == "style.status"
+        assert frame["payload"]["name"] == "Jarvis"
+        assert frame["payload"]["label"] == "JARVIS"
+        assert frame["payload"]["filename"] == "jarvis.style"
+
+
 class TestStatsEvents:
     def test_stats_view_refresh(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("stats_view_refresh", ""))
