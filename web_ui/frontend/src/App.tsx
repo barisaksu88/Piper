@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PiperBridge, WS_URL } from "./bridge";
 import type { BackendFrame, ChatMessage, ConnectionState, RawEvent } from "./types";
+import TopBar from "./components/TopBar";
+import ChatPanel from "./components/ChatPanel";
+import AvatarStage from "./components/AvatarStage";
+import ModeSelector from "./components/ModeSelector";
+import VoiceStrip from "./components/VoiceStrip";
+import StatusFooter from "./components/StatusFooter";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
@@ -76,7 +82,7 @@ export default function App() {
   const [documentIngestActive, setDocumentIngestActive] = useState(false);
   const [documentPathInput, setDocumentPathInput] = useState("");
   const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
-  const [documentStatus] = useState("");
+  // documentStatus placeholder removed — not currently used by backend events
 
   // Image / vision state
   const [imageCaption, setImageCaption] = useState("");
@@ -801,17 +807,25 @@ export default function App() {
     sendAction("restart_piper");
   }, [abortMicRecording, sendAction]);
 
-  const connBadge =
-    connState === "connected"
-      ? "badge connected"
-      : connState === "connecting"
-      ? "badge connecting"
-      : connState === "error"
-      ? "badge error"
-      : "badge disconnected";
-
-  const codeStatusClass =
-    codeActive ? "code-status active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "code-status error" : "code-status";
+  const handleMicClick = useCallback(() => {
+    if (experimentalMicUpload) {
+      if (micState === "listening") {
+        stopMicRecording();
+      } else {
+        startMicRecording();
+      }
+    } else {
+      if (micState === "listening") {
+        bridgeRef.current?.sendAction("mic_stop");
+      } else if (micState === "idle" || micState === "error") {
+        const sent = bridgeRef.current?.sendAction("mic_start");
+        if (!sent) {
+          setMicState("error");
+          setMicError("Failed to start mic");
+        }
+      }
+    }
+  }, [experimentalMicUpload, micState, stopMicRecording, startMicRecording]);
 
   const micButtonLabel =
     micState === "listening"
@@ -842,421 +856,275 @@ export default function App() {
       ? micError
       : "";
 
+  const avatarState = (() => {
+    if (micState === "listening") return "listening";
+    if (micState === "transcribing") return "transcribing";
+    if (streamingRef.current) return "speaking";
+    const st = statusText.toLowerCase();
+    if (st.includes("thinking") || st.includes("planning")) return "thinking";
+    return "idle";
+  })() as "idle" | "listening" | "transcribing" | "thinking" | "speaking";
+
   return (
     <div className="app">
-      <header className="header">
-        <h1>Piper Web UI</h1>
-        <span className={connBadge}>{connState}</span>
-      </header>
+      <TopBar
+        connState={connState}
+        statusText={statusText}
+        modeText={modeText}
+        onNewSession={handleNewSession}
+        onRestart={handleRestart}
+        onStop={handleStop}
+      />
 
-      <main className="main">
-        <section className="chat-panel">
-          <h2>Chat</h2>
-          <div className="chat-messages" ref={chatBoxRef}>
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`message ${m.role} ${m.streaming ? "streaming" : ""}`}
-              >
-                <span className="message-role">{m.role}</span>
-                <pre className="message-content">{m.content}</pre>
-              </div>
-            ))}
-          </div>
-        </section>
+      <div className="app-body">
+        <ChatPanel
+          messages={messages}
+          inputText={inputText}
+          setInputText={setInputText}
+          onSend={handleSend}
+          onKeyDown={handleKeyDown}
+          chatBoxRef={chatBoxRef}
+          connState={connState}
+        />
 
-        <aside className="sidebar">
-          <div className="sidebar-section">
-            <h3>Status</h3>
-            <div className="status-box">
-              <div className="status-line">{statusText}</div>
-              {modeText && <div className="status-line mode">{modeText}</div>}
-              {stepText && <div className="status-line step">{stepText}</div>}
+        <div className="center-stage">
+          <AvatarStage state={avatarState} modeText={modeText} />
+          <ModeSelector activeMode={modeText} />
+        </div>
+
+        <aside className="right-rail">
+          {/* Quick Actions */}
+          <div className="rail-card compact">
+            <div className="rail-card-header">
+              <h3>Quick Actions</h3>
             </div>
-          </div>
-
-          <div className="sidebar-section">
-            <h3>Code Session</h3>
-            <div className="code-panel">
-              <div className={codeStatusClass}>{codeStatus}</div>
-              {codePreview && (
-                <div className="code-preview">
-                  <pre>{codePreview}</pre>
-                </div>
-              )}
-              <div className="code-output" ref={codeOutputRef}>
-                {codeOutput.map((line, i) => (
-                  <div key={`c-${i}`} className="code-line">
-                    {line}
-                  </div>
-                ))}
+            <div className="rail-card-body">
+              <div className="quick-actions-grid">
+                <button className="action-btn" onClick={handleStop} disabled={connState !== "connected"}>Stop</button>
+                <button className="action-btn" onClick={handleNewSession} disabled={connState !== "connected"}>New Session</button>
+                <button className="action-btn danger" onClick={handleRestart} disabled={connState !== "connected"}>Restart</button>
               </div>
-              <div className="code-controls">
-                <div className="code-control-row">
-                  <input
-                    className="input-text code-path"
-                    type="text"
-                    value={codePathInput}
-                    onChange={(e) => setCodePathInput(e.target.value)}
-                    placeholder="Script path..."
-                    disabled={connState !== "connected"}
-                  />
-                  <button
-                    onClick={handleCodeRun}
-                    disabled={connState !== "connected" || !codePathInput.trim()}
-                  >
-                    Run
-                  </button>
-                </div>
-                <div className="code-control-row">
-                  <input
-                    ref={codeInputRef}
-                    className="input-text"
-                    type="text"
-                    value={codeInputText}
-                    onChange={(e) => setCodeInputText(e.target.value)}
-                    onKeyDown={handleCodeKeyDown}
-                    placeholder="Stdin..."
-                    disabled={connState !== "connected" || !codeActive}
-                  />
-                  <button
-                    onClick={handleCodeSend}
-                    disabled={connState !== "connected" || !codeActive || !codeInputText.trim()}
-                  >
-                    Send
-                  </button>
-                  <button
-                    onClick={() => sendAction("code_clear")}
-                    disabled={connState !== "connected"}
-                  >
-                    Clear
-                  </button>
-                </div>
+              <div className="settings-row">
+                <label className="setting-label">
+                  Event Speech
+                  <select onChange={(e) => sendAction("event_speech_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="off">
+                    {EVENT_SPEECH_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
+                  </select>
+                </label>
+                <label className="setting-label">
+                  Live Screen
+                  <select onChange={(e) => sendAction("live_screen_mode", { mode: e.target.value })} disabled={connState !== "connected"} defaultValue="display">
+                    {LIVE_SCREEN_MODES.map((m) => (<option key={m} value={m}>{m}</option>))}
+                  </select>
+                </label>
+                <label className="setting-label">
+                  Interval
+                  <select onChange={(e) => sendAction("live_screen_interval", { interval_s: Number(e.target.value) })} disabled={connState !== "connected"} defaultValue={10}>
+                    {LIVE_SCREEN_INTERVALS.map((n) => (<option key={n} value={n}>{n}s</option>))}
+                  </select>
+                </label>
               </div>
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Image / Vision</h3>
-            <div className="image-panel">
-              <div className="image-preview-area">
-                {imageUrl && !imageLoadError ? (
-                  <img
-                    src={imageUrl}
-                    alt={imageCaption || "Generated image"}
-                    className="image-preview-img"
-                    onError={() => setImageLoadError(true)}
-                    onLoad={() => setImageLoadError(false)}
-                  />
-                ) : imagePath ? (
-                  <div className="image-meta">
-                    <div className="image-meta-caption">{imageCaption}</div>
-                    <div className="image-meta-path">{imagePath}</div>
-                    {imageLoadError && (
-                      <div className="image-meta-hint">
-                        Image preview unavailable. Ensure the backend is serving static files.
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="image-meta">
-                    <div className="image-meta-hint">No image yet.</div>
-                  </div>
-                )}
-              </div>
-              <div className="vision-notes" ref={visionNotesRef}>
-                {visionNotes.map((note, i) => (
-                  <div key={`v-${i}`} className="vision-note">
-                    {note}
-                  </div>
-                ))}
-              </div>
-              <div className="image-controls">
-                <button
-                  onClick={handleClearVisionNotes}
-                  disabled={connState !== "connected" || visionNotes.length === 0}
-                >
-                  Clear Notes
-                </button>
+          {/* Status */}
+          <div className="rail-card compact">
+            <div className="rail-card-header">
+              <h3>Status</h3>
+            </div>
+            <div className="rail-card-body">
+              <div className="status-pills">
+                <div className="status-pill">{statusText}</div>
+                {modeText && <div className="status-pill mode">{modeText}</div>}
+                {stepText && <div className="status-pill step">{stepText}</div>}
               </div>
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>System / Identity</h3>
-            <div className="sys-panel">
-              <div className="sys-block">
-                <div className="sys-label">Identity</div>
-                <div className="sys-value">
-                  {activeUserLabel || "—"}
-                  {identityStatus && (
-                    <span className="sys-sub"> ({identityStatus})</span>
-                  )}
-                </div>
-              </div>
-              <div className="sys-block">
-                <div className="sys-label">Stats</div>
-                <div className="sys-value">{statsText || "—"}</div>
-                {lastStatsRefreshAt && (
-                  <div className="sys-sub">Refreshed: {lastStatsRefreshAt}</div>
-                )}
-              </div>
-              <div className="sys-block">
-                <div className="sys-label">Controls Refresh</div>
-                <div className="sys-value">{controlsRefreshCount} events</div>
-                {lastControlsRefreshAt && (
-                  <div className="sys-sub">Last: {lastControlsRefreshAt}</div>
-                )}
-              </div>
-              {configReloads.length > 0 && (
-                <div className="sys-block">
-                  <div className="sys-label">Config Reloads</div>
-                  <div className="sys-list">
-                    {configReloads.map((entry, i) => (
-                      <div key={`cr-${i}`} className="sys-list-item">
-                        {entry}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="sys-controls">
-                <button
-                  onClick={handleClearStats}
-                  disabled={!statsText && !lastStatsRefreshAt}
-                >
-                  Clear Stats
-                </button>
-                <button
-                  onClick={handleClearConfigReloads}
-                  disabled={configReloads.length === 0}
-                >
-                  Clear Config Log
-                </button>
-              </div>
+          {/* Code Session */}
+          <div className="rail-card">
+            <div className="rail-card-header">
+              <h3>Code Session</h3>
+              <span className={codeActive ? "rail-badge active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "rail-badge error" : "rail-badge"}>{codeStatus}</span>
             </div>
-          </div>
-
-          <div className="sidebar-section">
-            <h3>Documents</h3>
-            <div className="doc-panel">
-              <div
-                className={
-                  documentIngestActive
-                    ? "doc-status active"
-                    : "doc-status"
-                }
-              >
-                {documentIngestActive ? "Ingesting..." : documentStatus || "Idle"}
-              </div>
-              <div className="doc-view" ref={documentsViewRef}>
-                {documentsView && (
-                  <pre className="doc-view-content">{documentsView}</pre>
+            <div className="rail-card-body">
+              <div className="code-panel">
+                {codePreview && (
+                  <div className="code-preview">
+                    <pre>{codePreview}</pre>
+                  </div>
                 )}
-              </div>
-              {selectedDocumentPaths.length > 0 && (
-                <div className="doc-selected-list">
-                  {selectedDocumentPaths.map((p, i) => (
-                    <div key={`dp-${i}`} className="doc-selected-item">
-                      {p}
-                    </div>
+                <div className="code-output" ref={codeOutputRef}>
+                  {codeOutput.map((line, i) => (
+                    <div key={`c-${i}`} className="code-line">{line}</div>
                   ))}
                 </div>
-              )}
-              <div className="doc-controls">
-                <div className="doc-control-row">
-                  <input
-                    className="input-text doc-path"
-                    type="text"
-                    value={documentPathInput}
-                    onChange={(e) => setDocumentPathInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddDocumentPaths();
-                      }
-                    }}
-                    placeholder="Path(s) separated by ; or newline..."
-                    disabled={connState !== "connected"}
-                  />
-                  <button
-                    onClick={handleAddDocumentPaths}
-                    disabled={connState !== "connected" || !documentPathInput.trim()}
-                  >
-                    Add
-                  </button>
-                </div>
-                <div className="doc-control-row">
-                  <button
-                    onClick={handleIngestSelected}
-                    disabled={
-                      connState !== "connected" ||
-                      documentIngestActive ||
-                      selectedDocumentPaths.length === 0
-                    }
-                  >
-                    Ingest Selected
-                  </button>
-                  <button
-                    onClick={handleClearDocumentSelection}
-                    disabled={connState !== "connected"}
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={() => sendAction("document_picker_cancel")}
-                    disabled={connState !== "connected" || !documentIngestActive}
-                  >
-                    Cancel
-                  </button>
+                <div className="code-controls">
+                  <div className="code-control-row">
+                    <input className="input-text code-path" type="text" value={codePathInput} onChange={(e) => setCodePathInput(e.target.value)} placeholder="Script path..." disabled={connState !== "connected"} />
+                    <button onClick={handleCodeRun} disabled={connState !== "connected" || !codePathInput.trim()}>Run</button>
+                  </div>
+                  <div className="code-control-row">
+                    <input ref={codeInputRef} className="input-text" type="text" value={codeInputText} onChange={(e) => setCodeInputText(e.target.value)} onKeyDown={handleCodeKeyDown} placeholder="Stdin..." disabled={connState !== "connected" || !codeActive} />
+                    <button onClick={handleCodeSend} disabled={connState !== "connected" || !codeActive || !codeInputText.trim()}>Send</button>
+                    <button onClick={() => sendAction("code_clear")} disabled={connState !== "connected"}>Clear</button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Activity & Logs</h3>
-            <div className="log-box">
-              {activities.map((a, i) => (
-                <div key={`a-${i}`} className="log-line activity">
-                  {a}
+          {/* Image / Vision */}
+          <div className="rail-card">
+            <div className="rail-card-header">
+              <h3>Image / Vision</h3>
+            </div>
+            <div className="rail-card-body">
+              <div className="image-panel">
+                <div className="image-preview-area">
+                  {imageUrl && !imageLoadError ? (
+                    <img src={imageUrl} alt={imageCaption || "Generated image"} className="image-preview-img" onError={() => setImageLoadError(true)} onLoad={() => setImageLoadError(false)} />
+                  ) : imagePath ? (
+                    <div className="image-meta">
+                      <div className="image-meta-caption">{imageCaption}</div>
+                      <div className="image-meta-path">{imagePath}</div>
+                      {imageLoadError && <div className="image-meta-hint">Image preview unavailable. Ensure the backend is serving static files.</div>}
+                    </div>
+                  ) : (
+                    <div className="image-meta"><div className="image-meta-hint">No image yet.</div></div>
+                  )}
                 </div>
-              ))}
-              {logs.map((l, i) => (
-                <div key={`l-${i}`} className="log-line log">
-                  {l}
+                <div className="vision-notes" ref={visionNotesRef}>
+                  {visionNotes.map((note, i) => (
+                    <div key={`v-${i}`} className="vision-note">{note}</div>
+                  ))}
                 </div>
-              ))}
+                <div className="image-controls">
+                  <button onClick={handleClearVisionNotes} disabled={connState !== "connected" || visionNotes.length === 0}>Clear Notes</button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="sidebar-section inspector">
-            <h3>Raw Events</h3>
-            <div className="log-box raw">
-              {rawEvents.map((e, i) => (
-                <details key={`e-${i}`} className="raw-event">
-                  <summary>
-                    {e.kind} ({e.sourceKind})
-                  </summary>
-                  <pre>{JSON.stringify(e.payload, null, 2)}</pre>
-                </details>
-              ))}
+          {/* Documents */}
+          <div className="rail-card">
+            <div className="rail-card-header">
+              <h3>Documents</h3>
+              <span className={documentIngestActive ? "rail-badge active" : "rail-badge"}>{documentIngestActive ? "Ingesting..." : "Idle"}</span>
+            </div>
+            <div className="rail-card-body">
+              <div className="doc-panel">
+                <div className="doc-view" ref={documentsViewRef}>
+                  {documentsView && <pre className="doc-view-content">{documentsView}</pre>}
+                </div>
+                {selectedDocumentPaths.length > 0 && (
+                  <div className="doc-selected-list">
+                    {selectedDocumentPaths.map((p, i) => (
+                      <div key={`dp-${i}`} className="doc-selected-item">{p}</div>
+                    ))}
+                  </div>
+                )}
+                <div className="doc-controls">
+                  <div className="doc-control-row">
+                    <input className="input-text doc-path" type="text" value={documentPathInput} onChange={(e) => setDocumentPathInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAddDocumentPaths(); } }} placeholder="Path(s) separated by ; or newline..." disabled={connState !== "connected"} />
+                    <button onClick={handleAddDocumentPaths} disabled={connState !== "connected" || !documentPathInput.trim()}>Add</button>
+                  </div>
+                  <div className="doc-control-row">
+                    <button onClick={handleIngestSelected} disabled={connState !== "connected" || documentIngestActive || selectedDocumentPaths.length === 0}>Ingest Selected</button>
+                    <button onClick={handleClearDocumentSelection} disabled={connState !== "connected"}>Clear</button>
+                    <button onClick={() => sendAction("document_picker_cancel")} disabled={connState !== "connected" || !documentIngestActive}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* System Overview */}
+          <div className="rail-card compact">
+            <div className="rail-card-header">
+              <h3>System Overview</h3>
+            </div>
+            <div className="rail-card-body">
+              <div className="sys-panel">
+                <div className="sys-block">
+                  <div className="sys-label">Identity</div>
+                  <div className="sys-value">{activeUserLabel || "—"} {identityStatus && <span className="sys-sub">({identityStatus})</span>}</div>
+                </div>
+                <div className="sys-block">
+                  <div className="sys-label">Stats</div>
+                  <div className="sys-value">{statsText || "—"}</div>
+                  {lastStatsRefreshAt && <div className="sys-sub">Refreshed: {lastStatsRefreshAt}</div>}
+                </div>
+                <div className="sys-block">
+                  <div className="sys-label">Controls Refresh</div>
+                  <div className="sys-value">{controlsRefreshCount} events</div>
+                  {lastControlsRefreshAt && <div className="sys-sub">Last: {lastControlsRefreshAt}</div>}
+                </div>
+                {configReloads.length > 0 && (
+                  <div className="sys-block">
+                    <div className="sys-label">Config Reloads</div>
+                    <div className="sys-list">
+                      {configReloads.map((entry, i) => (
+                        <div key={`cr-${i}`} className="sys-list-item">{entry}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="sys-controls">
+                  <button onClick={handleClearStats} disabled={!statsText && !lastStatsRefreshAt}>Clear Stats</button>
+                  <button onClick={handleClearConfigReloads} disabled={configReloads.length === 0}>Clear Config Log</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Activity & Logs */}
+          <div className="rail-card collapsible">
+            <div className="rail-card-header">
+              <h3>Activity & Logs</h3>
+            </div>
+            <div className="rail-card-body">
+              <div className="log-box">
+                {activities.map((a, i) => (
+                  <div key={`a-${i}`} className="log-line activity">{a}</div>
+                ))}
+                {logs.map((l, i) => (
+                  <div key={`l-${i}`} className="log-line log">{l}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Raw Events */}
+          <div className="rail-card collapsible">
+            <div className="rail-card-header">
+              <h3>Raw Events</h3>
+            </div>
+            <div className="rail-card-body">
+              <div className="log-box raw">
+                {rawEvents.map((e, i) => (
+                  <details key={`e-${i}`} className="raw-event">
+                    <summary>{e.kind} ({e.sourceKind})</summary>
+                    <pre>{JSON.stringify(e.payload, null, 2)}</pre>
+                  </details>
+                ))}
+              </div>
             </div>
           </div>
         </aside>
-      </main>
+      </div>
 
-      <footer className="controls">
-        <div className="control-row">
-          <input
-            className="input-text"
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            disabled={connState !== "connected"}
-          />
-          <button onClick={handleSend} disabled={connState !== "connected"}>
-            Send
-          </button>
-          <button onClick={handleStop} disabled={connState !== "connected"}>
-            Stop
-          </button>
-          <button
-            onClick={handleNewSession}
-            disabled={connState !== "connected"}
-          >
-            New Session
-          </button>
-          <button
-            className="danger"
-            onClick={handleRestart}
-            disabled={connState !== "connected"}
-          >
-            Restart
-          </button>
-        </div>
+      <VoiceStrip
+        micState={micState}
+        micButtonLabel={micButtonLabel}
+        micButtonClass={micButtonClass}
+        micDisabled={micDisabled}
+        micStatusText={micStatusText}
+        onMicClick={handleMicClick}
+        connState={connState}
+      />
 
-        <div className="control-row">
-          <label>
-            Event Speech
-            <select
-              onChange={(e) => sendAction("event_speech_mode", { mode: e.target.value })}
-              disabled={connState !== "connected"}
-              defaultValue="off"
-            >
-              {EVENT_SPEECH_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Live Screen
-            <select
-              onChange={(e) => sendAction("live_screen_mode", { mode: e.target.value })}
-              disabled={connState !== "connected"}
-              defaultValue="display"
-            >
-              {LIVE_SCREEN_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            Interval (s)
-            <select
-              onChange={(e) =>
-                sendAction("live_screen_interval", { interval_s: Number(e.target.value) })
-              }
-              disabled={connState !== "connected"}
-              defaultValue={10}
-            >
-              {LIVE_SCREEN_INTERVALS.map((n) => (
-                <option key={n} value={n}>
-                  {n}s
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <button
-            className={micButtonClass}
-            onClick={() => {
-              if (experimentalMicUpload) {
-                if (micState === "listening") {
-                  stopMicRecording();
-                } else {
-                  startMicRecording();
-                }
-              } else {
-                if (micState === "listening") {
-                  bridgeRef.current?.sendAction("mic_stop");
-                } else if (micState === "idle" || micState === "error") {
-                  const sent = bridgeRef.current?.sendAction("mic_start");
-                  if (!sent) {
-                    setMicState("error");
-                    setMicError("Failed to start mic");
-                  }
-                }
-              }
-            }}
-            disabled={micDisabled}
-          >
-            {micButtonLabel}
-          </button>
-          {micStatusText && (
-            <span className="mic-status-text">{micStatusText}</span>
-          )}
-          <span className="placeholder">Image: placeholder</span>
-        </div>
-      </footer>
+      <StatusFooter statsText={statsText} modeText={modeText} />
     </div>
   );
 }

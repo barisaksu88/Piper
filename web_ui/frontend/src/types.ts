@@ -48,3 +48,5 @@ export interface RawEvent {
   payload: Record<string, unknown>;
   receivedAt: number;
 }
+
+export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
