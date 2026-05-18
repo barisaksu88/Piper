@@ -101,6 +101,50 @@ These are validated in [`scripts/voice_identity_inference_smoke_test.py`](../../
 
 This threshold model should remain centralized in config/runtime code, not copied into Persona or scattered docs.
 
+## Admin Drift Policy (3-Strike Confirmation)
+
+Admin is **not** revoked on a single noisy or low-confidence voice sample.
+Drift protection is confirmation-based and requires **3 consecutive non-admin/uncertain voice events** before the active user changes.
+
+### Strike counting
+
+| State | Event 1 | Event 2 | Event 3 | Result |
+|---|---|---|---|---|
+| Active admin + no confident match | `unknown_count = 1` | `unknown_count = 2` | `unknown_count = 3` | Switch to **unknown/guest** |
+| Active admin + known candidate (e.g. Max) | `candidate_count = 1` | `candidate_count = 2` | `candidate_count = 3` | Switch to **Max** |
+| Active admin + admin match | Reset tracker | — | — | Keep admin |
+
+### Rules
+
+1. **First failure:** Admin stays active. Tracker records the failure type (unknown vs candidate).
+2. **Second failure:** Admin stays active. Counter increments. If the candidate changes, the count resets to 1 for the new candidate (safe switch).
+3. **Third failure:** Resolve identity:
+   - If the same known candidate was consistently recognized, switch to that known user.
+   - If there is no consistent known candidate, switch to unknown/guest.
+   - Admin is no longer active.
+4. **Admin voice returns before strike 3:** Reset drift tracker, keep admin active.
+5. **Non-admin drift:** Existing behavior preserved — public users also use confirmation-based drift.
+
+### Why 3-strike?
+
+- Avoids accidental admin lockout from a single low-confidence voice recognition sample.
+- Preserves safety by preventing indefinite admin access after repeated, consistent mismatch.
+
+### Threshold defaults (dev/testing)
+
+These defaults are intentionally relaxed for development/testing convenience:
+
+- `VOICE_ADMIN_SIMILARITY_THRESHOLD = 0.70` (was 0.80)
+- `VOICE_ADMIN_MARGIN_THRESHOLD = 0.08` (was 0.14)
+- `VOICE_DRIFT_CONFIRMATION_TURNS = 3`
+
+Environment variables can override them:
+- `PIPER_VOICE_ADMIN_SIMILARITY_THRESHOLD`
+- `PIPER_VOICE_ADMIN_MARGIN_THRESHOLD`
+- `PIPER_VOICE_DRIFT_CONFIRMATION_TURNS`
+
+Production deployments should consider raising the admin thresholds.
+
 ## Safety Rules
 
 - Voice identity must not be treated as certain unless the runtime decision accepts it.
@@ -109,6 +153,7 @@ This threshold model should remain centralized in config/runtime code, not copie
 - Router/typed correction must remain able to fix a mistaken voice guess.
 - Unknown is acceptable and often preferable to false certainty.
 - Revoking admin/private access on uncertainty is safer than leaking it.
+- Admin drift uses **3-strike confirmation**, not immediate revocation.
 
 ## Remaining Active Work
 

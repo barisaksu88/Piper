@@ -415,6 +415,7 @@ def _apply_voice_identity_match(controller, engine) -> None:
                 if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
                     controller.user_runtime.switch_active_user("unknown")
                     _apply_active_user_switch(controller, previous_was_unknown=False)
+                    _queue_active_user_changed(controller, preserve_transcript=False)
                 _announce_voice_identity_event(
                     controller,
                     "I'm no longer confident who is speaking, so I'm treating this as an unknown speaker.",

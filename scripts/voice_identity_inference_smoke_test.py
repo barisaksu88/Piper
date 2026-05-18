@@ -170,14 +170,14 @@ def run_smoke(include_stt_hook: bool = False) -> VoiceIdentityInferenceReport:
         engine.import_profile("guest_public", [calibrated_second], admin=False)
         accepted_admin = engine.evaluate_match(calibrated_baris_probe)
 
-        low_admin_probe = _embedding_for_admin_score(0.72)
+        low_admin_probe = _embedding_for_admin_score(0.68)
         low_admin_second = _embedding_with_score_against(low_admin_probe, 0.50)
         low_engine = VoiceFingerprintEngine(data_dir=voice_dir / "low")
         low_engine.import_profile("baris", [admin_embedding], admin=True)
         low_engine.import_profile("guest_public", [low_admin_second], admin=False)
         low_admin = low_engine.evaluate_match(low_admin_probe)
 
-        close_second = _embedding_with_score_against(calibrated_baris_probe, 0.78)
+        close_second = _embedding_with_score_against(calibrated_baris_probe, 0.81)
         close_engine = VoiceFingerprintEngine(data_dir=voice_dir / "close")
         close_engine.import_profile("baris", [admin_embedding], admin=True)
         close_engine.import_profile("guest_public", [close_second], admin=False)
@@ -217,12 +217,12 @@ def run_smoke(include_stt_hook: bool = False) -> VoiceIdentityInferenceReport:
             admin_user_id="admin_baris",
             admin_name="Baris",
         )
-        rejected_result = rejected_runtime.activate_voice_match("baris", 0.72, margin=0.20)
+        rejected_result = rejected_runtime.activate_voice_match("baris", 0.68, margin=0.20)
 
         checks = {
             "thresholds_match_calibration": (
-                float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD) == 0.80
-                and float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD) == 0.14
+                float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD) == 0.70
+                and float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD) == 0.08
                 and float(CFG.VOICE_SIMILARITY_THRESHOLD_HIGH) == 0.74
                 and float(CFG.VOICE_SIMILARITY_THRESHOLD_LOW) == 0.58
                 and float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD) == 0.74

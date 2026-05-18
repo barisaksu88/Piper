@@ -332,13 +332,43 @@ class BootManager:
         killed = False
         if self.process and self.process.poll() is None:
             self.log("[System] Terminating LLM Server...")
+            pid = self.process.pid
             try:
+                # Graceful termination first
                 self.process.terminate()
-                self.process.wait(timeout=5)
-            except Exception:
-                try: self.process.kill()
+                try:
+                    self.process.wait(timeout=3)
                 except Exception:
                     pass
+
+                # If still alive, force-kill the whole tree
+                if self.process.poll() is None:
+                    if psutil is not None:
+                        try:
+                            parent = psutil.Process(pid)
+                            for child in parent.children(recursive=True):
+                                try:
+                                    child.kill()
+                                except Exception:
+                                    pass
+                            parent.kill()
+                        except Exception:
+                            try:
+                                self.process.kill()
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            self.process.kill()
+                        except Exception:
+                            pass
+
+                    try:
+                        self.process.wait(timeout=3)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             finally:
                 self._close_server_log_handle()
             killed = True

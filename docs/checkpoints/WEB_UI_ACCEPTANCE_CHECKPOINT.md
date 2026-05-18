@@ -71,6 +71,7 @@ These features are verified working and accepted for daily use:
 - [x] Streaming assistant reply works
 - [x] Native MIC works (backend sounddevice → Faster-Whisper → voice identity)
 - [x] Voice identity recognizes Baris
+- [x] Voice identity drift is 3-strike confirmed (admin not revoked on one sample)
 - [x] New Session clears chat and resets context
 - [x] Stop button interrupts generation
 - [x] Restart button restarts Piper cleanly

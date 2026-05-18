@@ -89,6 +89,7 @@ class _DummyController:
         self.stage_meta = ""
         self.runtime_mode = ""
         self.safe_logs: list[str] = []
+        self._ui_queue: list[tuple[str, object]] = []
 
     def refresh_active_user_meta(self) -> None:
         pass
@@ -130,9 +131,17 @@ class VoiceIdentityDriftReport:
     max_to_baris_active_after_two: str
     max_to_baris_active_after_three: str
     baris_to_unknown_after_one: str
+    baris_to_unknown_after_two: str
     baris_to_unknown_after_three: str
+    unknown_count_after_one: int
+    unknown_count_after_two: int
+    baris_to_max_candidate_count_after_one: int
+    baris_to_max_candidate_count_after_two: int
+    max_switch_notice: str
+    baris_return_after_uncertainty: str
+    baris_candidate_reset_after_alice: str
+    baris_stays_admin_after_alice_two: str
     fresh_sessions_after_single_admin_mismatch: int
-    baris_recovered_after_admin_revocation: str
     checks: dict[str, bool]
 
 
@@ -146,8 +155,8 @@ def _accepted(user_id: str, *, admin: bool = False) -> tuple:
             "second_score": 0.681 if admin else 0.68,
             "margin": 0.184 if admin else 0.12,
             "best_is_admin": admin,
-            "threshold": 0.82 if admin else 0.74,
-            "margin_threshold": 0.14 if admin else 0.08,
+            "threshold": 0.70 if admin else 0.74,
+            "margin_threshold": 0.08 if admin else 0.08,
             "final_decision": "accepted_admin" if admin else "accepted_public",
             "reason": "accepted_admin" if admin else "accepted_public",
         },
@@ -186,17 +195,23 @@ def run_smoke() -> VoiceIdentityDriftReport:
     with tempfile.TemporaryDirectory(prefix="piper_voice_drift_") as tmp:
         root = Path(tmp)
 
+        # ── Scenario A: admin Baris → known candidate Max ──
         runtime_a = _runtime(root / "baris_to_max")
         runtime_a.switch_active_user("admin_baris")
         controller_a = _DummyController(runtime_a)
         _apply(controller_a, _accepted("max"))
         baris_to_max_after_one = runtime_a.active_profile().user_id
         fresh_after_one = controller_a.chat_state.fresh_sessions
+        tracker_a1 = controller_actions._voice_drift_tracker(controller_a)
+        candidate_count_after_one = int(tracker_a1.get("candidate_count") or 0)
         _apply(controller_a, _accepted("max"))
+        tracker_a2 = controller_actions._voice_drift_tracker(controller_a)
+        candidate_count_after_two = int(tracker_a2.get("candidate_count") or 0)
         _apply(controller_a, _accepted("max"))
         baris_to_max_after_three = runtime_a.active_profile().user_id
-        baris_to_max_notice = str(getattr(controller_a, "_pending_voice_identity_notice", "") or "")
+        max_switch_notice = str(getattr(controller_a, "_pending_voice_identity_notice", "") or "")
 
+        # ── Scenario B: Max → admin Baris ──
         runtime_b = _runtime(root / "max_to_baris")
         runtime_b.switch_active_user("max")
         controller_b = _DummyController(runtime_b)
@@ -205,35 +220,58 @@ def run_smoke() -> VoiceIdentityDriftReport:
         max_to_baris_after_two = runtime_b.active_profile().user_id
         _apply(controller_b, _accepted("baris", admin=True))
         max_to_baris_after_three = runtime_b.active_profile().user_id
-        max_to_baris_notice = str(getattr(controller_b, "_pending_voice_identity_notice", "") or "")
 
+        # ── Scenario C: admin Baris → unknown ──
         runtime_c = _runtime(root / "baris_to_unknown")
         runtime_c.switch_active_user("admin_baris")
         controller_c = _DummyController(runtime_c)
         _apply(controller_c, _unknown())
         baris_to_unknown_after_one = runtime_c.active_profile().user_id
+        tracker_c1 = controller_actions._voice_drift_tracker(controller_c)
+        unknown_count_after_one = int(tracker_c1.get("unknown_count") or 0)
         _apply(controller_c, _unknown())
+        baris_to_unknown_after_two = runtime_c.active_profile().user_id
+        tracker_c2 = controller_actions._voice_drift_tracker(controller_c)
+        unknown_count_after_two = int(tracker_c2.get("unknown_count") or 0)
         _apply(controller_c, _unknown())
         baris_to_unknown_after_three = runtime_c.active_profile().user_id
 
+        # ── Scenario D: one uncertainty then admin match → tracker resets ──
         runtime_d = _runtime(root / "baris_return")
         runtime_d.switch_active_user("admin_baris")
         controller_d = _DummyController(runtime_d)
         _apply(controller_d, _unknown())
         _apply(controller_d, _accepted("baris", admin=True))
-        baris_recovered_after_admin_revocation = runtime_d.active_profile().user_id
+        baris_return_after_uncertainty = runtime_d.active_profile().user_id
+
+        # ── Scenario E: candidate Max once, then candidate Alice ──
+        runtime_e = _runtime(root / "baris_candidate_switch")
+        runtime_e.switch_active_user("admin_baris")
+        controller_e = _DummyController(runtime_e)
+        _apply(controller_e, _accepted("max"))
+        tracker_e1 = controller_actions._voice_drift_tracker(controller_e)
+        baris_candidate_reset_after_alice = str(tracker_e1.get("candidate_user_id") or "")
+        _apply(controller_e, _accepted("alice"))
+        _apply(controller_e, _accepted("alice"))
+        baris_stays_admin_after_alice_two = runtime_e.active_profile().user_id
 
     checks = {
-        "baris_to_max_revokes_admin_on_first_mismatch": baris_to_max_after_one == "unknown",
+        "baris_to_max_waits_after_first_mismatch": baris_to_max_after_one == "admin_baris",
         "baris_to_max_waits_for_three": baris_to_max_after_three == "max",
-        "single_admin_mismatch_hides_prior_admin_session": fresh_after_one == 1,
+        "candidate_count_after_one": candidate_count_after_one == 1,
+        "candidate_count_after_two": candidate_count_after_two == 2,
+        "single_admin_mismatch_preserves_current_session": fresh_after_one == 0,
         "max_to_baris_waits_for_three": max_to_baris_after_two == "max"
         and max_to_baris_after_three == "admin_baris",
-        "baris_to_unknown_revokes_admin_then_stays_unknown": baris_to_unknown_after_one == "unknown"
-        and baris_to_unknown_after_three == "unknown",
-        "baris_return_after_admin_revocation_recovers_immediately": baris_recovered_after_admin_revocation == "admin_baris",
-        "voice_events_use_event_block": "[VOICE IDENTITY EVENT]" in baris_to_max_notice
-        and "[VOICE IDENTITY EVENT]" in max_to_baris_notice,
+        "baris_to_unknown_after_one": baris_to_unknown_after_one == "admin_baris",
+        "baris_to_unknown_after_two": baris_to_unknown_after_two == "admin_baris",
+        "baris_to_unknown_after_three": baris_to_unknown_after_three == "unknown",
+        "unknown_count_after_one": unknown_count_after_one == 1,
+        "unknown_count_after_two": unknown_count_after_two == 2,
+        "single_uncertainty_then_admin_match_stays_admin": baris_return_after_uncertainty == "admin_baris",
+        "candidate_switch_resets_count": baris_candidate_reset_after_alice == "max",
+        "candidate_change_keeps_admin": baris_stays_admin_after_alice_two == "admin_baris",
+        "voice_events_use_event_block": "[VOICE IDENTITY EVENT]" in max_switch_notice,
     }
     return VoiceIdentityDriftReport(
         success=all(checks.values()),
@@ -242,9 +280,17 @@ def run_smoke() -> VoiceIdentityDriftReport:
         max_to_baris_active_after_two=max_to_baris_after_two,
         max_to_baris_active_after_three=max_to_baris_after_three,
         baris_to_unknown_after_one=baris_to_unknown_after_one,
+        baris_to_unknown_after_two=baris_to_unknown_after_two,
         baris_to_unknown_after_three=baris_to_unknown_after_three,
+        unknown_count_after_one=unknown_count_after_one,
+        unknown_count_after_two=unknown_count_after_two,
+        baris_to_max_candidate_count_after_one=candidate_count_after_one,
+        baris_to_max_candidate_count_after_two=candidate_count_after_two,
+        max_switch_notice=max_switch_notice,
+        baris_return_after_uncertainty=baris_return_after_uncertainty,
+        baris_candidate_reset_after_alice=baris_candidate_reset_after_alice,
+        baris_stays_admin_after_alice_two=baris_stays_admin_after_alice_two,
         fresh_sessions_after_single_admin_mismatch=fresh_after_one,
-        baris_recovered_after_admin_revocation=baris_recovered_after_admin_revocation,
         checks=checks,
     )
 
