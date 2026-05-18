@@ -616,12 +616,14 @@ class TestWebSendMessageSharedBackendPath:
         ctrl = _make_mock_controller()
         ctrl.style_mgr = StyleManager(style_dir)
         ctrl.load_style_state.return_value = SimpleNamespace(name="Jarvis")
+        ctrl.user_runtime.registry = SimpleNamespace(default_style_filename="quinn.style")
 
         ctrl._dispatch_web_action("send_message", {"text": "/style jarvis"})
 
         ctrl.submit_user_text.assert_not_called()
         ctrl.on_new_session.assert_called_once_with()
         ctrl.user_runtime.set_active_style_filename.assert_called_once_with("jarvis.style")
+        assert ctrl.user_runtime.registry.default_style_filename == "jarvis.style"
         assert ctrl.style_mgr.active_filename == "jarvis.style"
         events = _drain_queue(ctrl.ui_queue)
         assert any(kind == "style_status" and payload["name"] == "Jarvis" for kind, payload in events)
@@ -1090,6 +1092,23 @@ class TestWebStatusSemantics:
         kind, payload = bridge_q.get_nowait()
         assert kind == "status_widget_mode"
         assert payload == "GENERATING"
+
+    def test_stream_end_clears_web_generation_status(self) -> None:
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.pipeline = MagicMock()
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("assistant_stream_end", ""))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        forwarded = _drain_queue(bridge_q)
+        assert forwarded[0][0] == "assistant_stream_end"
+        assert ("status_widget_mode", "IDLE") in forwarded
+        assert ("status", "IDLE") in forwarded
+        ctrl.pipeline.handle_event.assert_called_once_with("end", "", tts_voice=None, tts_speed=None)
 
 
 class TestDpgHardExitGuardLifecycle:
@@ -1618,14 +1637,16 @@ class TestPumpWebForwardsCleanDeltas:
 
         pump_ui_queue_web(ctrl, forward_queue=fwd_q)
 
-        # start, delta, delta, end
-        assert fwd_q.qsize() == 4
-        kinds = [fwd_q.get()[0] for _ in range(4)]
+        # start, delta, delta, end, then explicit idle status reset
+        assert fwd_q.qsize() == 6
+        kinds = [fwd_q.get()[0] for _ in range(6)]
         assert kinds == [
             "assistant_stream_start",
             "assistant_stream_delta",
             "assistant_stream_delta",
             "assistant_stream_end",
+            "status_widget_mode",
+            "status",
         ]
 
     def test_clean_delta_excludes_internal_markers(self) -> None:

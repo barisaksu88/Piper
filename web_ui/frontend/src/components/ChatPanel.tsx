@@ -54,11 +54,11 @@ export default function ChatPanel({
               <div className="message-avatar">
                 {isAssistant(m.role) ? (
                   <div className="avatar-thumb assistant-thumb">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                      <path d="M2 17l10 5 10-5"/>
-                      <path d="M2 12l10 5 10-5"/>
-                    </svg>
+                    <img
+                      src="/piper-avatar.png"
+                      alt="Piper"
+                      style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
+                    />
                   </div>
                 ) : (
                   <div className="avatar-thumb system-thumb">S</div>

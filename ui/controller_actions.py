@@ -165,6 +165,18 @@ def _refresh_active_user_style(controller) -> None:
     controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
 
 
+def _set_runtime_default_style_filename(controller, style_filename: str) -> None:
+    filename = str(style_filename or "").strip()
+    if not filename:
+        return
+    try:
+        registry = getattr(controller.user_runtime, "registry", None)
+        if registry is not None:
+            registry.default_style_filename = filename
+    except Exception:
+        pass
+
+
 def _current_style_status_payload(controller) -> dict[str, str]:
     try:
         style_state = controller.load_style_state()
@@ -374,24 +386,9 @@ def _apply_voice_identity_match(controller, engine) -> None:
                         "candidate_user_id": target_user_id,
                         "candidate_count": candidate_count,
                         "unknown_count": 0,
+                        "admin_revoked": bool(tracker.get("admin_revoked")),
                     }
                 )
-                if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
-                    controller.user_runtime.switch_active_user("unknown")
-                    _apply_active_user_switch(
-                        controller,
-                        previous_was_unknown=False,
-                        preserve_current_session=False,
-                    )
-                    tracker = {
-                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                        "candidate_user_id": target_user_id,
-                        "candidate_count": candidate_count,
-                        "unknown_count": 0,
-                        "admin_revoked": True,
-                    }
-                    _set_voice_drift_tracker(controller, tracker)
-                    _log_voice_identity_ui("admin_revoked_on_voice_drift")
                 if candidate_count < threshold_turns:
                     _log_voice_identity_ui(
                         f"drift_pending from={getattr(old_profile, 'user_id', '')} "
@@ -400,6 +397,7 @@ def _apply_voice_identity_match(controller, engine) -> None:
                     return
                 previous_was_unknown = False
                 matched_user = target_user_id or matched_user
+                _set_voice_drift_tracker(controller, tracker)
 
         elif not previous_was_unknown and not matched_user:
             threshold_turns = _voice_drift_confirmation_turns()
@@ -410,24 +408,9 @@ def _apply_voice_identity_match(controller, engine) -> None:
                     "candidate_user_id": "",
                     "candidate_count": 0,
                     "unknown_count": unknown_count,
+                    "admin_revoked": bool(tracker.get("admin_revoked")),
                 }
             )
-            if getattr(old_profile, "is_admin", False) and not tracker.get("admin_revoked"):
-                controller.user_runtime.switch_active_user("unknown")
-                _apply_active_user_switch(
-                    controller,
-                    previous_was_unknown=False,
-                    preserve_current_session=False,
-                )
-                tracker = {
-                    "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
-                    "candidate_user_id": "",
-                    "candidate_count": 0,
-                    "unknown_count": unknown_count,
-                    "admin_revoked": True,
-                }
-                _set_voice_drift_tracker(controller, tracker)
-                _log_voice_identity_ui("admin_revoked_on_voice_uncertainty")
             if unknown_count >= threshold_turns:
                 if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
                     controller.user_runtime.switch_active_user("unknown")
@@ -438,6 +421,7 @@ def _apply_voice_identity_match(controller, engine) -> None:
                 )
                 _reset_voice_drift_tracker(controller)
             else:
+                _set_voice_drift_tracker(controller, tracker)
                 _log_voice_identity_ui(
                     f"unknown_pending from={getattr(old_profile, 'user_id', '')} "
                     f"count={unknown_count}/{threshold_turns}"
@@ -496,6 +480,7 @@ def _apply_voice_identity_match(controller, engine) -> None:
         return
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        _queue_active_user_changed(controller, preserve_transcript=previous_was_unknown)
         if previous_was_unknown:
             _announce_voice_identity_event(
                 controller,
@@ -1192,6 +1177,7 @@ def submit_text_input(
         if res.style_filename:
             try:
                 controller.user_runtime.set_active_style_filename(res.style_filename)
+                _set_runtime_default_style_filename(controller, res.style_filename)
             except Exception:
                 pass
             style_state = controller.load_style_state()
@@ -1404,8 +1390,18 @@ def on_restart(controller) -> None:
         print("[System] Restart requested.")
         controller.restart_requested = True
         controller.set_status("Restarting...")
-        controller.boot_mgr.shutdown()
-        dpg.stop_dearpygui()
+
+        def _shutdown_worker() -> None:
+            try:
+                controller.boot_mgr.shutdown()
+            except Exception as exc:
+                print(f"[System] Shutdown error: {exc}")
+            try:
+                dpg.stop_dearpygui()
+            except Exception:
+                pass
+
+        threading.Thread(target=_shutdown_worker, daemon=True).start()
     except Exception as exc:
         print(f"[System] Restart failed: {exc}")
 

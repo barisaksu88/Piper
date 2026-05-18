@@ -435,10 +435,16 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
 
         if kind == "assistant_stream_end":
             controller.pipeline.handle_event("end", "", tts_voice=None, tts_speed=None)
+            if forward_queue is not None:
+                forward_queue.put(("status_widget_mode", "IDLE"))
+                forward_queue.put(("status", "IDLE"))
             continue
 
         if kind == "error":
             controller.pipeline.handle_event("error", str(payload), tts_voice=None, tts_speed=None)
+            if forward_queue is not None:
+                forward_queue.put(("status_widget_mode", "ERROR"))
+                forward_queue.put(("status", "Error"))
             controller.maybe_speak_ui_event(kind, payload)
             continue
 

@@ -329,13 +329,13 @@ body,
   padding: 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-height: 0;
 }
 
 .message-bubble {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
   max-width: 100%;
 }
@@ -384,8 +384,8 @@ body,
 }
 
 .avatar-thumb {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -432,14 +432,14 @@ body,
 
 .message-content {
   margin: 0;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
   font-family: inherit;
-  font-size: 13.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--text);
   max-width: 100%;
 }

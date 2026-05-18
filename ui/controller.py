@@ -1480,8 +1480,15 @@ class PiperController:
         elif action_name == "restart_piper":
             self.restart_requested = True
             self.set_status("Restarting...")
-            self.boot_mgr.shutdown()
-            self.ui_queue.put(("status_widget_dashboard_activity", "Restart requested."))
+
+            def _shutdown_worker() -> None:
+                try:
+                    self.boot_mgr.shutdown()
+                except Exception as exc:
+                    _LOG.exception("Web restart shutdown failed")
+                self.ui_queue.put(("status_widget_dashboard_activity", "Restart requested."))
+
+            threading.Thread(target=_shutdown_worker, daemon=True).start()
         elif action_name == "open_document_picker":
             self.ui_queue.put(
                 (

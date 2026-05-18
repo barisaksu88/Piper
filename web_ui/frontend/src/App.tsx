@@ -550,6 +550,8 @@ export default function App() {
           flushPendingDeltas();
           streamingRef.current = false;
           setIsGenerating(false);
+          setStatusText("Idle");
+          setModeText("");
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -584,7 +586,9 @@ export default function App() {
         }
 
         case "status.mode": {
-          setModeText(sanitizeOperationalText(String((payload as { text?: string }).text || "")));
+          const cleanMode = sanitizeOperationalText(String((payload as { text?: string }).text || ""));
+          const upperMode = cleanMode.toUpperCase();
+          setModeText(upperMode === "IDLE" || upperMode === "READY" ? "" : cleanMode);
           break;
         }
 
