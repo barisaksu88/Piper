@@ -838,10 +838,10 @@ class Config:
     SEARCH_CONTENT_SLICE_LENGTH: int = 1500
 
     # -----------------------------------------------------------------
-    # Web UI bridge (opt-in; DearPyGui remains the default)
+    # Web UI bridge (default; DearPyGui remains available as fallback)
     # -----------------------------------------------------------------
     WEB_UI_ENABLED: bool = field(
-        default_factory=lambda: _env_flag("PIPER_WEB_UI_ENABLED", False)
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_ENABLED", True)
     )
     WEB_UI_HOST: str = field(
         default_factory=lambda: os.environ.get("PIPER_WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
@@ -870,7 +870,7 @@ class Config:
         )
     )
     WEB_UI_WINDOW: bool = field(
-        default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", False)
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", True)
     )
 
 

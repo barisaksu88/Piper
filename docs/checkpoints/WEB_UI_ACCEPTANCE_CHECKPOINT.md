@@ -1,8 +1,8 @@
-# Web UI Acceptance Checkpoint — Phase 15D
+# Web UI Acceptance Checkpoint — Phase 17A
 
 > **Branch:** `feature/web-ui-bridge`
-> **Date:** 2026-05-15
-> **Status:** Usable and accepted for daily opt-in use. Not yet default.
+> **Date:** 2026-05-17
+> **Status:** Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
 
 ---
 
@@ -16,31 +16,30 @@
 | Backend served URL | `http://127.0.0.1:8787/` |
 | WebSocket endpoint | `ws://127.0.0.1:8787/ws` |
 | Vite dev URL | `http://127.0.0.1:3000` |
-| Default UI | DearPyGui (unchanged) |
+| Default UI | Web UI desktop mode (pywebview) |
 
 ---
 
 ## 2. Launch Modes
 
-### Browser Web UI (backend-served)
+### Default — Desktop Window (pywebview)
 ```powershell
 cd web_ui/frontend
 npm run build
 cd C:\Projects\Piper
-$env:PIPER_WEB_UI_ENABLED = "true"
-python app.py
-# Open http://127.0.0.1:8787/ in any browser
-```
-
-### Desktop Window (pywebview)
-```powershell
-cd web_ui/frontend
-npm run build
-cd C:\Projects\Piper
-$env:PIPER_WEB_UI_ENABLED = "true"
-$env:PIPER_WEB_UI_WINDOW = "true"
 python app.py
 # Piper desktop window opens automatically
+```
+
+### Browser Web UI (backend-served, no window)
+```powershell
+cd web_ui/frontend
+npm run build
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "false"
+python app.py
+# Open http://127.0.0.1:8787/ in any browser
 ```
 
 ### Vite Dev Mode (frontend developers)
@@ -53,9 +52,8 @@ npm run dev
 
 ### DearPyGui Fallback
 ```powershell
-# Unset Web UI flags
-Remove-Item Env:\PIPER_WEB_UI_ENABLED -ErrorAction SilentlyContinue
-Remove-Item Env:\PIPER_WEB_UI_WINDOW -ErrorAction SilentlyContinue
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "false"
 python app.py
 ```
 
@@ -83,7 +81,8 @@ These features are verified working and accepted for daily use:
 - [x] Raw Events inspector exists and functions
 - [x] Backend serves built frontend without Vite
 - [x] Vite dev mode still works for frontend development
-- [x] DearPyGui remains the default/fallback
+- [x] DearPyGui remains available as explicit fallback
+- [x] Web UI desktop mode is the default
 - [x] Backend log noise reduced (Phase 15C.2)
 - [x] Window closes and cleans up without traceback
 

@@ -49,9 +49,9 @@ def _drain_queue(q: queue.Queue) -> list[tuple[str, Any]]:
 
 
 class TestConfigDefaults:
-    def test_web_ui_enabled_defaults_false(self) -> None:
+    def test_web_ui_enabled_defaults_true(self) -> None:
         cfg = Config()
-        assert cfg.WEB_UI_ENABLED is False
+        assert cfg.WEB_UI_ENABLED is True
 
     def test_web_ui_host_defaults_loopback(self) -> None:
         cfg = Config()
@@ -65,9 +65,9 @@ class TestConfigDefaults:
         cfg = Config()
         assert cfg.WEB_UI_WS_PATH == "/ws"
 
-    def test_web_ui_window_defaults_false(self) -> None:
+    def test_web_ui_window_defaults_true(self) -> None:
         cfg = Config()
-        assert cfg.WEB_UI_WINDOW is False
+        assert cfg.WEB_UI_WINDOW is True
 
 
 class TestConfigEnvOverrides:
@@ -95,6 +95,18 @@ class TestConfigEnvOverrides:
         monkeypatch.setenv("PIPER_WEB_UI_WINDOW", "true")
         cfg = Config()
         assert cfg.WEB_UI_WINDOW is True
+
+    def test_web_ui_enabled_env_override_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit false env var overrides the new default true."""
+        monkeypatch.setenv("PIPER_WEB_UI_ENABLED", "false")
+        cfg = Config()
+        assert cfg.WEB_UI_ENABLED is False
+
+    def test_web_ui_window_env_override_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit false env var overrides the new default true."""
+        monkeypatch.setenv("PIPER_WEB_UI_WINDOW", "false")
+        cfg = Config()
+        assert cfg.WEB_UI_WINDOW is False
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +185,57 @@ class TestAppBranch:
 
         app_module.main()
         assert ("websockets.server", logging.WARNING) in set_level_calls
+
+    def test_app_passes_use_window_to_run_web(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """app.py should pass use_window=False to run_web when pywebview is missing."""
+        import sys
+        import app as app_module
+
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        class FakeController:
+            def run(self) -> int:
+                calls.append(("run", {}))
+                return 0
+
+            def run_web(self, **kwargs: Any) -> int:
+                calls.append(("run_web", kwargs))
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", True)
+        # Simulate missing pywebview
+        monkeypatch.setitem(sys.modules, "webview", None)
+
+        result = app_module.main()
+        assert result == 0
+        assert len(calls) == 1
+        assert calls[0][0] == "run_web"
+        assert calls[0][1].get("use_window") is False
+
+    def test_app_uses_dearpygui_when_web_ui_explicitly_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PIPER_WEB_UI_ENABLED=false should still select DearPyGui."""
+        import app as app_module
+
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        class FakeController:
+            def run(self) -> int:
+                calls.append(("run", {}))
+                return 0
+
+            def run_web(self, **kwargs: Any) -> int:
+                calls.append(("run_web", kwargs))
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", True)
+
+        result = app_module.main()
+        assert result == 0
+        assert calls == [("run", {})]
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +469,7 @@ class TestRunWebLifecycle:
         port = _get_free_port()
 
         def _runner() -> None:
-            result.append(run_web_bound(host="127.0.0.1", port=port, ws_path="/ws"))
+            result.append(run_web_bound(host="127.0.0.1", port=port, ws_path="/ws", use_window=False))
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -471,7 +534,7 @@ class TestRunWebLifecycle:
         port = _get_free_port()
 
         def _runner() -> None:
-            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws")
+            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws", use_window=False)
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -1138,7 +1201,7 @@ class TestDpgHardExitGuardLifecycle:
         port = _get_free_port()
 
         def _runner() -> None:
-            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws")
+            run_web_bound(host="127.0.0.1", port=port, ws_path="/ws", use_window=False)
 
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()

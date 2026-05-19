@@ -1,9 +1,9 @@
 # Piper Web UI Migration Guide
 
-> **Version:** 1.3 (post-Phase 15D)  
+> **Version:** 1.4 (Phase 17A)  
 > **Branch:** `feature/web-ui-bridge`  
 > **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
-> **Status:** Phase 15D complete. Web UI accepted for daily opt-in use. Default switch deferred.
+> **Status:** Phase 17A complete. Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
 
 ---
 
@@ -17,7 +17,7 @@ This guide is the canonical reference for Piper's Web UI migration. It reconcile
 ### Key definitions
 - **Web UI** means React/HTML/CSS rendering technology. The browser tab used during development is for debugging only.
 - **Production target** remains a dedicated Piper desktop window (Tauri or pywebview wrapper — deferred until after parity).
-- **DearPyGui** remains the default UI path. Web UI is strictly opt-in via `PIPER_WEB_UI_ENABLED`.
+- **Web UI desktop mode** is the default UI path. DearPyGui remains available as explicit fallback via `PIPER_WEB_UI_ENABLED=false`.
 - **Parity** means the Web UI can do everything DearPyGui does today, without regressions.
 
 ### High-level goal
@@ -31,14 +31,14 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 |---|---|
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
-| Completed phase | **Phase 15D** |
-| Python tests | **246 / 246 passing** |
+| Completed phase | **Phase 17A** |
+| Python tests | **250+ passing** |
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (215 kB JS + 10 kB CSS) |
 | Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
 | Desktop window | **Accepted** — pywebview wrapper works on main thread |
 | Native MIC bridge | **Accepted** — backend STT + voice identity via Web UI control |
-| Next phase | **Default-readiness burn-in** — Baris uses Web UI daily; no code changes until acceptance |
+| Next phase | **Stabilization** — monitor daily use for regressions; DearPyGui fallback preserved indefinitely |
 
 ### Acceptance checkpoint
 **Canonical acceptance document:** `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`
@@ -481,55 +481,54 @@ Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.
 
 **Production-like flow (Phase 15B):**
 
-**1. Build frontend:**
+### Default launch (desktop window)
+
+No environment variables required. Builds and opens the Web UI desktop window by default.
+
 ```powershell
 cd web_ui/frontend
 npm run build
-```
-
-**2. Start backend only:**
-```powershell
 cd C:\Projects\Piper
-$env:PIPER_WEB_UI_ENABLED = "true"
 python app.py
 ```
 
-**3. Open:**
-```
-http://127.0.0.1:8787/
-```
-
-**Desktop window flow (Phase 15C):**
-
-**1. Build frontend:**
-```powershell
-cd web_ui/frontend
-npm run build
-```
-
-**2. Start with desktop window:**
-```powershell
-cd C:\Projects\Piper
-$env:PIPER_WEB_UI_ENABLED = "true"
-$env:PIPER_WEB_UI_WINDOW = "true"
-python app.py
-```
-
-**3. Expected:**
+**Expected:**
 - Dedicated "Piper" window opens (no address bar)
 - WebSocket connects automatically
 - Chat, MIC, and all panels work
-- Closing the window triggers clean shutdown of the background pump loop
+- Closing the window triggers clean shutdown
+
+**If pywebview is missing:** Falls back to browser mode with a warning. Open `http://127.0.0.1:8787/` manually, or install pywebview.
+
+### Browser mode (no desktop window)
+
+```powershell
+cd web_ui/frontend
+npm run build
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "false"
+python app.py
+```
+
+**Then open:** `http://127.0.0.1:8787/`
+
+### DearPyGui fallback
+
+```powershell
+cd C:\Projects\Piper
+$env:PIPER_WEB_UI_ENABLED = "false"
+python app.py
+```
 
 **Notes:**
 - pywebview must run on the main thread (Windows requirement). The Web UI action/pump loop moves to a background thread only when `PIPER_WEB_UI_WINDOW=true`.
-- In browser mode (`PIPER_WEB_UI_WINDOW=false` or unset), the pump loop remains on the main thread as before.
+- In browser mode (`PIPER_WEB_UI_WINDOW=false`), the pump loop remains on the main thread.
 
 **Dev flow (still supported):**
 
 **1. Start backend:**
 ```powershell
-$env:PIPER_WEB_UI_ENABLED = "true"
 python app.py
 ```
 
@@ -879,7 +878,7 @@ python app.py
 - DearPyGui retirement criteria defined: fallback preserved until explicit approval
 - Rollback instructions for all three launch modes (browser, desktop window, DearPyGui)
 
-**Status:** Web UI is **usable and accepted for daily opt-in use**. It is **not yet the default**.
+**Status:** Web UI desktop mode is **the default** as of Phase 17A. DearPyGui remains available as an explicit fallback.
 
 ---
 

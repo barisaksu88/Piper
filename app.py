@@ -177,14 +177,39 @@ def build_controller() -> PiperController:
 
 def main() -> int:
     controller = build_controller()
-    if getattr(CFG, "WEB_UI_ENABLED", False):
+    web_ui_enabled = getattr(CFG, "WEB_UI_ENABLED", True)
+    use_window = getattr(CFG, "WEB_UI_WINDOW", True)
+
+    if web_ui_enabled:
         # Quiet websockets per-connection INFO logs in Web UI mode
         # (HTTP asset serving and open/close messages are not useful at INFO).
         logging.getLogger("websockets.server").setLevel(logging.WARNING)
+
+        dist_dir = Path(getattr(CFG, "WEB_UI_FRONTEND_DIST_DIR", ""))
+        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
+            logging.warning(
+                "Web UI frontend dist not found at %s. "
+                "Run: cd web_ui/frontend && npm run build",
+                dist_dir,
+            )
+
+        if use_window:
+            try:
+                import webview  # type: ignore[import-untyped]  # noqa: F401
+            except ImportError:
+                logging.warning(
+                    "pywebview not installed; falling back to browser mode. "
+                    "Open http://%s:%s/ manually, or install pywebview for desktop window.",
+                    getattr(CFG, "WEB_UI_HOST", "127.0.0.1"),
+                    getattr(CFG, "WEB_UI_PORT", 8787),
+                )
+                use_window = False
+
         exit_code = controller.run_web(
             host=getattr(CFG, "WEB_UI_HOST", "127.0.0.1"),
             port=getattr(CFG, "WEB_UI_PORT", 8787),
             ws_path=getattr(CFG, "WEB_UI_WS_PATH", "/ws"),
+            use_window=use_window,
         )
     else:
         exit_code = controller.run()

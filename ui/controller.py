@@ -1539,7 +1539,14 @@ class PiperController:
         else:
             self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
 
-    def run_web(self, host: str = "127.0.0.1", port: int = 8787, ws_path: str = "/ws") -> int:
+    def run_web(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8787,
+        ws_path: str = "/ws",
+        *,
+        use_window: bool | None = None,
+    ) -> int:
         """Run Piper in Web UI bridge mode (no DearPyGui)."""
         CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.agent_brain.cleanup_old_events()
@@ -1619,7 +1626,8 @@ class PiperController:
         _orig_dpg_exists = dpg.does_item_exist
         dpg.does_item_exist = lambda _tag: False
 
-        use_window = getattr(CFG, "WEB_UI_WINDOW", False)
+        if use_window is None:
+            use_window = getattr(CFG, "WEB_UI_WINDOW", False)
         stop_event = threading.Event()
         previous_tts_status: tuple[str, str] | None = None
 
