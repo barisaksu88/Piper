@@ -8,6 +8,8 @@ import AvatarStage from "./components/AvatarStage";
 import ModeSelector from "./components/ModeSelector";
 import VoiceStrip from "./components/VoiceStrip";
 import StatusFooter from "./components/StatusFooter";
+import OperationScreen from "./components/OperationScreen";
+import { useOperationMode } from "./hooks/useOperationMode";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
@@ -124,6 +126,8 @@ function formatFromMimeType(mime: string): "webm" | "wav" {
 }
 
 export default function App() {
+  const { steps, bootMessage, handleBootLog, handleBootReady, handleBootProgress, isOperational } = useOperationMode();
+
   const [connState, setConnState] = useState<ConnectionState>("disconnected");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [statusText, setStatusText] = useState("IDLE");
@@ -600,12 +604,15 @@ export default function App() {
         }
 
         case "boot.log": {
-          appendLog(`[Boot] ${String((payload as { text?: string }).text || "")}`);
+          const bootText = String((payload as { text?: string }).text || "");
+          appendLog(`[Boot] ${bootText}`);
+          handleBootLog(bootText);
           break;
         }
 
         case "boot.ready": {
           appendLog("[Boot] Ready");
+          handleBootReady();
           break;
         }
 
@@ -620,6 +627,9 @@ export default function App() {
           appendActivity(
             `[Error] ${String((payload as { message?: string }).message || "Unknown error")}`
           );
+          if (!isOperational) {
+            handleBootProgress("Error", "error");
+          }
           break;
         }
 
@@ -796,7 +806,7 @@ export default function App() {
           break;
       }
     },
-    [appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta, appendCodeOutput]
+    [appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta, appendCodeOutput, handleBootLog, handleBootReady, handleBootProgress, isOperational]
   );
 
   useEffect(() => {
@@ -1015,17 +1025,21 @@ export default function App() {
           </div>
         )}
 
-        <ChatPanel
-          messages={messages}
-          inputText={inputText}
-          setInputText={setInputText}
-          onSend={handleSend}
-          onKeyDown={handleKeyDown}
-          chatBoxRef={chatBoxRef}
-          connState={connState}
-          userName={userName}
-          authWaiting={authWaiting}
-        />
+        {isOperational ? (
+          <ChatPanel
+            messages={messages}
+            inputText={inputText}
+            setInputText={setInputText}
+            onSend={handleSend}
+            onKeyDown={handleKeyDown}
+            chatBoxRef={chatBoxRef}
+            connState={connState}
+            userName={userName}
+            authWaiting={authWaiting}
+          />
+        ) : (
+          <OperationScreen steps={steps} message={bootMessage} title="Booting" />
+        )}
 
         <div className="center-stage">
           <AvatarStage state={avatarState} />
