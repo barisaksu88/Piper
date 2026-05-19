@@ -10,7 +10,9 @@ import VoiceStrip from "./components/VoiceStrip";
 import StatusFooter from "./components/StatusFooter";
 import OperationScreen from "./components/OperationScreen";
 import SystemDrawer from "./components/SystemDrawer";
+import Workspace from "./components/Workspace";
 import { useOperationMode } from "./hooks/useOperationMode";
+import { useWorkspace } from "./hooks/useWorkspace";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
@@ -167,6 +169,8 @@ export default function App() {
   const [authWaiting, setAuthWaiting] = useState(false);
 
   const [systemDrawerOpen, setSystemDrawerOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const workspace = useWorkspace();
 
   const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
     code: false,
@@ -625,29 +629,43 @@ export default function App() {
           setCodeStatus("launched");
           if (p.path) {
             setCodePathInput(p.path);
+            workspace.openFile(p.path, "code");
           }
+          workspace.setCodeRunning(true);
+          setWorkspaceOpen(true);
           break;
         }
 
         case "code.reset": {
           setCodeOutput([]);
           setCodePreview("");
+          workspace.clearCodeOutput();
           break;
         }
 
         case "code.output": {
           const text = String((payload as { text?: string }).text || "");
-          if (text) appendCodeOutput(text);
+          if (text) {
+            appendCodeOutput(text);
+            workspace.appendCodeOutput(text);
+          }
           break;
         }
 
         case "code.status": {
-          setCodeStatus(String((payload as { text?: string }).text || ""));
+          const statusText = String((payload as { text?: string }).text || "");
+          setCodeStatus(statusText);
+          workspace.setCodeRunning(
+            !statusText.toLowerCase().includes("exited") &&
+            !statusText.toLowerCase().includes("stopped")
+          );
           break;
         }
 
         case "code.active": {
-          setCodeActive(Boolean((payload as { active?: boolean }).active));
+          const isActive = Boolean((payload as { active?: boolean }).active);
+          setCodeActive(isActive);
+          workspace.setCodeRunning(isActive);
           break;
         }
 
@@ -954,7 +972,20 @@ export default function App() {
         onRestart={handleRestart}
         onStop={handleStop}
         onOpenSystem={() => setSystemDrawerOpen(true)}
+        workspaceOpen={workspaceOpen}
+        onToggleWorkspace={() => setWorkspaceOpen(!workspaceOpen)}
       />
+
+      {workspaceOpen && (
+        <div className="workspace-panel">
+          <Workspace
+            mode={workspace.mode}
+            onOpenFile={() => {
+              sendAction("open_document_picker");
+            }}
+          />
+        </div>
+      )}
 
       <div className="app-body">
         {authWaiting && (

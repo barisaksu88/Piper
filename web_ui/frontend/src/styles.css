@@ -1664,3 +1664,31 @@ label {
   padding: 2px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
+
+/* Workspace panel sits between TopBar and app-body */
+.workspace-panel {
+  grid-column: 1 / -1;
+  height: 320px;
+  min-height: 200px;
+  max-height: 50vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 0 0 12px 12px;
+  border-top: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The workspace component inside fills the panel */
+.workspace-panel .workspace {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+
+/* Toggle button active state */
+.icon-btn.active {
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+}

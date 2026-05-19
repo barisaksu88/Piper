@@ -8,6 +8,8 @@ interface TopBarProps {
   onRestart: () => void;
   onStop: () => void;
   onOpenSystem: () => void;
+  workspaceOpen: boolean;
+  onToggleWorkspace: () => void;
 }
 
 export default function TopBar({
@@ -18,6 +20,8 @@ export default function TopBar({
   onRestart,
   onStop,
   onOpenSystem,
+  workspaceOpen,
+  onToggleWorkspace,
 }: TopBarProps) {
   const connBadge =
     connState === "connected"
@@ -90,6 +94,14 @@ export default function TopBar({
           disabled={connState !== "connected"}
         >
           ↻
+        </button>
+        <button
+          className={`icon-btn ${workspaceOpen ? "active" : ""}`}
+          onClick={onToggleWorkspace}
+          title="Workspace"
+          type="button"
+        >
+          ≡
         </button>
         <button
           className="icon-btn"
