@@ -1665,60 +1665,51 @@ label {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Workspace panel sits between TopBar and app-body */
-.workspace-panel {
-  grid-column: 1 / -1;
-  height: 320px;
-  min-height: 200px;
-  max-height: 50vh;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 0 0 12px 12px;
-  border-top: none;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* The workspace component inside fills the panel */
-.workspace-panel .workspace {
-  height: 100%;
-  border: none;
-  border-radius: 0;
-}
-
-/* Toggle button active state */
-.icon-btn.active {
-  color: var(--accent);
-  background: rgba(59, 130, 246, 0.1);
-}
-
-/* Workspace toggle button */
-.workspace-btn {
-  padding: 4px 10px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  cursor: pointer;
+/* Right-rail workspace toggle */
+.rail-workspace-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
   transition: all 0.15s;
-  white-space: nowrap;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
-.workspace-btn:hover:not(:disabled) {
-  background: var(--border-light);
-  border-color: var(--text-dim);
+.rail-workspace-toggle:hover {
+  border-color: var(--border-active);
 }
 
-.workspace-btn.active {
-  color: var(--accent);
-  background: rgba(59, 130, 246, 0.1);
+.rail-workspace-toggle.active {
   border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.rail-ws-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text);
+}
+
+.rail-ws-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* Workspace overlay — covers center-stage */
+.workspace-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
 }

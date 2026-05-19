@@ -972,20 +972,7 @@ export default function App() {
         onRestart={handleRestart}
         onStop={handleStop}
         onOpenSystem={() => setSystemDrawerOpen(true)}
-        workspaceOpen={workspaceOpen}
-        onToggleWorkspace={() => setWorkspaceOpen(!workspaceOpen)}
       />
-
-      {workspaceOpen && (
-        <div className="workspace-panel">
-          <Workspace
-            mode={workspace.mode}
-            onOpenFile={() => {
-              sendAction("open_document_picker");
-            }}
-          />
-        </div>
-      )}
 
       <div className="app-body">
         {authWaiting && (
@@ -1011,12 +998,45 @@ export default function App() {
           <OperationScreen steps={steps} message={bootMessage} title="Booting" />
         )}
 
-        <div className="center-stage">
-          <AvatarStage state={avatarState} />
-          <ModeSelector styleLabel={styleLabel} userName={userName} />
+        <div className="center-stage" style={{ position: "relative" }}>
+          {!workspaceOpen ? (
+            <>
+              <AvatarStage state={avatarState} />
+              <ModeSelector styleLabel={styleLabel} userName={userName} />
+              <VoiceStrip
+                micState={micState}
+                micButtonLabel={micButtonLabel}
+                micButtonClass={micButtonClass}
+                micDisabled={micDisabled}
+                micStatusText={micStatusText}
+                onMicClick={handleMicClick}
+                connState={connState}
+                isGenerating={isGenerating}
+                isSpeaking={isSpeaking}
+              />
+            </>
+          ) : (
+            <div className="workspace-overlay">
+              <Workspace
+                mode={workspace.mode}
+                onOpenFile={() => {
+                  sendAction("open_document_picker");
+                }}
+              />
+            </div>
+          )}
         </div>
 
         <aside className="right-rail">
+          <div
+            className={`rail-workspace-toggle ${workspaceOpen ? "active" : ""}`}
+            onClick={() => setWorkspaceOpen(!workspaceOpen)}
+            role="button"
+            tabIndex={0}
+          >
+            <span className="rail-ws-label">WS</span>
+            <span className="rail-ws-hint">{workspaceOpen ? "Close" : "Open"}</span>
+          </div>
           <RailCard
             title="Capture"
             collapsible
@@ -1144,18 +1164,6 @@ export default function App() {
           </RailCard>
         </aside>
       </div>
-
-      <VoiceStrip
-        micState={micState}
-        micButtonLabel={micButtonLabel}
-        micButtonClass={micButtonClass}
-        micDisabled={micDisabled}
-        micStatusText={micStatusText}
-        onMicClick={handleMicClick}
-        connState={connState}
-        isGenerating={isGenerating}
-        isSpeaking={isSpeaking}
-      />
 
       <StatusFooter statsText="" />
 
