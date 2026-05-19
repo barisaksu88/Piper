@@ -19,7 +19,7 @@ const MAX_CODE_OUTPUT_LINES = 500;
 
 type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
 type TtsState = "idle" | "synthesizing" | "playing" | "error";
-type RailPanelId = "code" | "vision" | "documents" | "system" | "activity" | "raw";
+type RailPanelId = "code" | "vision" | "documents" | "system" | "activity" | "raw" | "capture";
 
 interface RailCardProps {
   title: string;
@@ -135,7 +135,7 @@ export default function App() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [ttsState, setTtsState] = useState<TtsState>("idle");
-  const [ttsError, setTtsError] = useState("");
+
   const [styleLabel, setStyleLabel] = useState("Default");
   const [activities, setActivities] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -165,22 +165,18 @@ export default function App() {
   const [imageLoadError, setImageLoadError] = useState(false);
 
   // System / identity state
-  const [activeUserLabel, setActiveUserLabel] = useState("");
-  const [identityStatus, setIdentityStatus] = useState("");
+
   const [userName, setUserName] = useState("User");
   const [authWaiting, setAuthWaiting] = useState(false);
-  const [statsText, setStatsText] = useState("");
-  const [configReloads, setConfigReloads] = useState<string[]>([]);
-  const [controlsRefreshCount, setControlsRefreshCount] = useState(0);
-  const [lastControlsRefreshAt, setLastControlsRefreshAt] = useState("");
-  const [lastStatsRefreshAt, setLastStatsRefreshAt] = useState("");
+
   const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
     code: false,
     vision: false,
     documents: false,
-    system: true,
+    system: false,
     activity: false,
     raw: false,
+    capture: false,
   });
 
   // Mic state
@@ -715,11 +711,9 @@ export default function App() {
 
         // System / identity events
         case "user.changed": {
-          const p = payload as { preserve_transcript?: boolean; user_name?: string; user_id?: string; role?: string };
+          const p = payload as { user_name?: string; user_id?: string };
           const name = p.user_name || p.user_id || "User";
-          setActiveUserLabel(name);
           setUserName(name);
-          setIdentityStatus(p.preserve_transcript ? "Transcript preserved" : "");
           break;
         }
 
@@ -736,36 +730,9 @@ export default function App() {
         }
 
         case "tts.status": {
-          const p = payload as { state?: string; error?: string };
+          const p = payload as { state?: string };
           const state = String(p.state || "idle") as TtsState;
           setTtsState(["idle", "synthesizing", "playing", "error"].includes(state) ? state : "idle");
-          setTtsError(String(p.error || ""));
-          break;
-        }
-
-        case "stats.refresh": {
-          const p = payload as { text?: string };
-          setStatsText(String(p.text || "Stats refreshed"));
-          setLastStatsRefreshAt(new Date().toLocaleTimeString());
-          break;
-        }
-
-        case "config.reloaded": {
-          const p = payload as { changed_keys?: string[] };
-          const keys = p.changed_keys || [];
-          if (keys.length > 0) {
-            setConfigReloads((prev) => {
-              const entry = `${new Date().toLocaleTimeString()}: ${keys.join(", ")}`;
-              const next = [...prev, entry];
-              return next.slice(-50);
-            });
-          }
-          break;
-        }
-
-        case "controls.refresh": {
-          setControlsRefreshCount((c) => c + 1);
-          setLastControlsRefreshAt(new Date().toLocaleTimeString());
           break;
         }
 
@@ -900,15 +867,6 @@ export default function App() {
 
   const handleClearVisionNotes = useCallback(() => {
     setVisionNotes([]);
-  }, []);
-
-  const handleClearConfigReloads = useCallback(() => {
-    setConfigReloads([]);
-  }, []);
-
-  const handleClearStats = useCallback(() => {
-    setStatsText("");
-    setLastStatsRefreshAt("");
   }, []);
 
   const handleStop = useCallback(() => {
@@ -1047,7 +1005,12 @@ export default function App() {
         </div>
 
         <aside className="right-rail">
-          <RailCard title="Capture" compact>
+          <RailCard
+            title="Capture"
+            collapsible
+            expanded={expandedRailPanels.capture}
+            onToggle={() => toggleRailPanel("capture")}
+          >
             <div className="settings-row">
               <label className="setting-label">
                 Event Speech
@@ -1163,54 +1126,6 @@ export default function App() {
                     <button onClick={handleClearDocumentSelection} disabled={connState !== "connected"}>Clear</button>
                     <button onClick={() => sendAction("document_picker_cancel")} disabled={connState !== "connected" || !documentIngestActive}>Cancel</button>
                   </div>
-                </div>
-              </div>
-          </RailCard>
-
-          <RailCard
-            title="System Overview"
-            compact
-            collapsible
-            expanded={expandedRailPanels.system}
-            onToggle={() => toggleRailPanel("system")}
-          >
-              <div className="sys-panel">
-                <div className="sys-block">
-                  <div className="sys-label">Identity</div>
-                  <div className="sys-value">{activeUserLabel || "—"} {identityStatus && <span className="sys-sub">({identityStatus})</span>}</div>
-                </div>
-                <div className="sys-block">
-                  <div className="sys-label">Style</div>
-                  <div className="sys-value">{styleLabel || "Default"}</div>
-                </div>
-                <div className="sys-block">
-                  <div className="sys-label">TTS</div>
-                  <div className="sys-value">{ttsState}</div>
-                  {ttsError && <div className="sys-sub">{ttsError}</div>}
-                </div>
-                <div className="sys-block">
-                  <div className="sys-label">Stats</div>
-                  <div className="sys-value">{statsText || "—"}</div>
-                  {lastStatsRefreshAt && <div className="sys-sub">Refreshed: {lastStatsRefreshAt}</div>}
-                </div>
-                <div className="sys-block">
-                  <div className="sys-label">Controls Refresh</div>
-                  <div className="sys-value">{controlsRefreshCount} events</div>
-                  {lastControlsRefreshAt && <div className="sys-sub">Last: {lastControlsRefreshAt}</div>}
-                </div>
-                {configReloads.length > 0 && (
-                  <div className="sys-block">
-                    <div className="sys-label">Config Reloads</div>
-                    <div className="sys-list">
-                      {configReloads.map((entry, i) => (
-                        <div key={`cr-${i}`} className="sys-list-item">{entry}</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="sys-controls">
-                  <button onClick={handleClearStats} disabled={!statsText && !lastStatsRefreshAt}>Clear Stats</button>
-                  <button onClick={handleClearConfigReloads} disabled={configReloads.length === 0}>Clear Config Log</button>
                 </div>
               </div>
           </RailCard>
