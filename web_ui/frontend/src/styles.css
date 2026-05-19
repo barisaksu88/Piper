@@ -56,12 +56,23 @@ body,
 .app-body {
   display: grid;
   grid-template-columns: minmax(440px, 1.45fr) minmax(300px, 0.9fr) minmax(220px, 240px);
+  grid-template-rows: 1fr auto;
   gap: 10px;
   padding: 10px 10px 8px;
   flex: 1;
   overflow: hidden;
   min-height: 0;
   position: relative;
+}
+
+/* Column 1: chat spans both rows */
+.chat-col {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Auth banner overlay */
@@ -512,9 +523,11 @@ body,
 
 /* ========== CENTER STAGE ========== */
 .center-stage {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
   overflow: hidden;
   justify-content: center;
@@ -728,11 +741,20 @@ body,
 
 /* ========== RIGHT RAIL ========== */
 .right-rail {
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   gap: 7px;
   overflow-y: auto;
   padding-right: 2px;
+  min-width: 0;
+}
+
+/* Columns 2+3, Row 2: voice strip — always visible */
+.voice-strip-col {
+  grid-column: 2 / 4;
+  grid-row: 2;
   min-width: 0;
 }
 

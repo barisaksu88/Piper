@@ -975,43 +975,35 @@ export default function App() {
       />
 
       <div className="app-body">
-        {authWaiting && (
-          <div className="auth-banner">
-            <span className="auth-icon">🔒</span>
-            <span className="auth-text">Password required. Type the password below or /cancel.</span>
-          </div>
-        )}
+        {/* Column 1: Chat — spans both rows */}
+        <div className="chat-col">
+          {authWaiting && (
+            <div className="auth-banner">
+              <span className="auth-icon">🔒</span>
+              <span className="auth-text">Password required. Type the password below or /cancel.</span>
+            </div>
+          )}
+          {isOperational ? (
+            <ChatPanel
+              messages={messages}
+              inputText={inputText}
+              setInputText={setInputText}
+              onSend={handleSend}
+              onKeyDown={handleKeyDown}
+              chatBoxRef={chatBoxRef}
+              connState={connState}
+              userName={userName}
+              authWaiting={authWaiting}
+            />
+          ) : (
+            <OperationScreen steps={steps} message={bootMessage} title="Booting" />
+          )}
+        </div>
 
-        {isOperational ? (
-          <ChatPanel
-            messages={messages}
-            inputText={inputText}
-            setInputText={setInputText}
-            onSend={handleSend}
-            onKeyDown={handleKeyDown}
-            chatBoxRef={chatBoxRef}
-            connState={connState}
-            userName={userName}
-            authWaiting={authWaiting}
-          />
-        ) : (
-          <OperationScreen steps={steps} message={bootMessage} title="Booting" />
-        )}
-
+        {/* Column 2, Row 1: Center stage — avatar + mode selector only */}
         <div className="center-stage">
           <AvatarStage state={avatarState} />
           <ModeSelector styleLabel={styleLabel} userName={userName} />
-          <VoiceStrip
-            micState={micState}
-            micButtonLabel={micButtonLabel}
-            micButtonClass={micButtonClass}
-            micDisabled={micDisabled}
-            micStatusText={micStatusText}
-            onMicClick={handleMicClick}
-            connState={connState}
-            isGenerating={isGenerating}
-            isSpeaking={isSpeaking}
-          />
         </div>
 
         <aside className="right-rail">
@@ -1151,6 +1143,22 @@ export default function App() {
           </RailCard>
         </aside>
 
+        {/* Columns 2+3, Row 2: Voice strip — always visible */}
+        <div className="voice-strip-col">
+          <VoiceStrip
+            micState={micState}
+            micButtonLabel={micButtonLabel}
+            micButtonClass={micButtonClass}
+            micDisabled={micDisabled}
+            micStatusText={micStatusText}
+            onMicClick={handleMicClick}
+            connState={connState}
+            isGenerating={isGenerating}
+            isSpeaking={isSpeaking}
+          />
+        </div>
+
+        {/* Overlay: covers row 1 only, columns 2+3 */}
         {workspaceOpen && (
           <div className="workspace-overlay-full">
             <div className="workspace-overlay-header">
