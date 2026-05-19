@@ -96,12 +96,12 @@ export default function TopBar({
           ↻
         </button>
         <button
-          className={`icon-btn ${workspaceOpen ? "active" : ""}`}
+          className={`workspace-btn ${workspaceOpen ? "active" : ""}`}
           onClick={onToggleWorkspace}
           title="Workspace"
           type="button"
         >
-          W
+          WS
         </button>
         <button
           className="icon-btn"
