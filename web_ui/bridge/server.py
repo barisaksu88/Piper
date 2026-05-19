@@ -210,6 +210,13 @@ class BridgeServer:
             if path == self._ws_path:
                 return None
 
+            # Image file serving (GET only, safe image extensions)
+            if method == "GET" and path.startswith("/images/"):
+                response = await self._serve_image_file(path)
+                if response is not None:
+                    return response
+                return connection.respond(404, "Not Found")
+
             # Static file serving (GET only, safe image extensions)
             if method == "GET" and path.startswith("/workspace/"):
                 response = await self._serve_static_file(path)
@@ -283,6 +290,58 @@ class BridgeServer:
         # Strip prefix and reject empty or suspicious paths
         raw = path[len("/workspace/") :]
         if not raw or raw.startswith(".") or ".." in raw or "\\" in raw:
+            return None
+
+        # Only allow safe image extensions
+        suffix = Path(raw).suffix.lower()
+        if suffix not in _SAFE_IMAGE_EXTENSIONS:
+            return None
+
+        base_dir = Path(self._static_dir).resolve()
+        try:
+            target = (base_dir / raw).resolve()
+        except (OSError, ValueError):
+            return None
+
+        # Containment check: target must be inside base_dir
+        try:
+            target.relative_to(base_dir)
+        except ValueError:
+            return None
+
+        if not target.is_file():
+            return None
+
+        try:
+            data = target.read_bytes()
+        except (OSError, PermissionError):
+            return None
+
+        content_type, _ = mimetypes.guess_type(str(target))
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        headers = websockets.Headers()
+        headers["Content-Type"] = content_type
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cache-Control"] = "no-cache"
+
+        return websockets.Response(200, "OK", headers, body=data)
+
+    async def _serve_image_file(
+        self, path: str
+    ) -> websockets.Response | None:
+        """Serve a safe image file from ``self._static_dir`` at ``/images/{filename}``.
+
+        Returns a Response on success, None to fall through to 404.
+        Guards against directory traversal and unsafe extensions.
+        """
+        if not self._static_dir:
+            return None
+
+        # Strip prefix and reject empty or suspicious paths
+        raw = path[len("/images/") :]
+        if not raw or raw.startswith(".") or ".." in raw or "\\" in raw or "/" in raw:
             return None
 
         # Only allow safe image extensions

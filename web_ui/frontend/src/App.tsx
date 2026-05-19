@@ -19,7 +19,7 @@ const MAX_CODE_OUTPUT_LINES = 500;
 
 type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
 type TtsState = "idle" | "synthesizing" | "playing" | "error";
-type RailPanelId = "code" | "vision" | "documents" | "system" | "activity" | "raw" | "capture";
+type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
 
 interface RailCardProps {
   title: string;
@@ -158,11 +158,7 @@ export default function App() {
   // documentStatus placeholder removed — not currently used by backend events
 
   // Image / vision state
-  const [imageCaption, setImageCaption] = useState("");
-  const [imagePath, setImagePath] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [visionNotes, setVisionNotes] = useState<string[]>([]);
-  const [imageLoadError, setImageLoadError] = useState(false);
+
 
   // System / identity state
 
@@ -171,7 +167,6 @@ export default function App() {
 
   const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
     code: false,
-    vision: false,
     documents: false,
     system: false,
     activity: false,
@@ -224,7 +219,7 @@ export default function App() {
   const codeOutputRef = useRef<HTMLDivElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
   const documentsViewRef = useRef<HTMLDivElement | null>(null);
-  const visionNotesRef = useRef<HTMLDivElement | null>(null);
+
   const pendingDeltasRef = useRef("");
   const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -251,14 +246,6 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [documentsView]);
-
-  // Auto-scroll vision notes to bottom
-  useEffect(() => {
-    const el = visionNotesRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [visionNotes]);
 
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
@@ -683,28 +670,22 @@ export default function App() {
           break;
         }
 
-        // Image / vision events
+        // Image events
         case "image.show": {
           const p = payload as { caption?: string; path?: string; url?: string };
-          setImageCaption(String(p.caption || ""));
-          setImagePath(String(p.path || ""));
-          setImageLoadError(false);
-          if (p.url) {
-            setImageUrl(`${IMAGE_BASE_URL}${p.url}`);
-          } else {
-            setImageUrl("");
-          }
-          break;
-        }
-
-        case "vision.note": {
-          const p = payload as { text?: string; speak?: boolean };
-          const note = String(p.text || "");
-          if (note) {
-            setVisionNotes((prev) => {
-              const next = [...prev, note];
-              return next.slice(-100);
-            });
+          const imageUrl = p.url ? `${IMAGE_BASE_URL}${p.url}` : (p.path || "");
+          const caption = String(p.caption || "");
+          if (imageUrl) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: generateId(),
+                role: "assistant",
+                content: caption || "Image",
+                imageUrl,
+                streaming: false,
+              },
+            ]);
           }
           break;
         }
@@ -863,10 +844,6 @@ export default function App() {
 
   const handleClearDocumentSelection = useCallback(() => {
     setSelectedDocumentPaths([]);
-  }, []);
-
-  const handleClearVisionNotes = useCallback(() => {
-    setVisionNotes([]);
   }, []);
 
   const handleStop = useCallback(() => {
@@ -1063,37 +1040,6 @@ export default function App() {
                     <button onClick={handleCodeSend} disabled={connState !== "connected" || !codeActive || !codeInputText.trim()}>Send</button>
                     <button onClick={() => sendAction("code_clear")} disabled={connState !== "connected"}>Clear</button>
                   </div>
-                </div>
-              </div>
-          </RailCard>
-
-          <RailCard
-            title="Image / Vision"
-            collapsible
-            expanded={expandedRailPanels.vision}
-            onToggle={() => toggleRailPanel("vision")}
-          >
-              <div className="image-panel">
-                <div className="image-preview-area">
-                  {imageUrl && !imageLoadError ? (
-                    <img src={imageUrl} alt={imageCaption || "Generated image"} className="image-preview-img" onError={() => setImageLoadError(true)} onLoad={() => setImageLoadError(false)} />
-                  ) : imagePath ? (
-                    <div className="image-meta">
-                      <div className="image-meta-caption">{imageCaption}</div>
-                      <div className="image-meta-path">{imagePath}</div>
-                      {imageLoadError && <div className="image-meta-hint">Image preview unavailable. Ensure the backend is serving static files.</div>}
-                    </div>
-                  ) : (
-                    <div className="image-meta"><div className="image-meta-hint">No image yet.</div></div>
-                  )}
-                </div>
-                <div className="vision-notes" ref={visionNotesRef}>
-                  {visionNotes.map((note, i) => (
-                    <div key={`v-${i}`} className="vision-note">{note}</div>
-                  ))}
-                </div>
-                <div className="image-controls">
-                  <button onClick={handleClearVisionNotes} disabled={connState !== "connected" || visionNotes.length === 0}>Clear Notes</button>
                 </div>
               </div>
           </RailCard>

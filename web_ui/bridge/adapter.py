@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from web_ui.bridge.message_schema import (
@@ -92,37 +93,43 @@ _SAFE_IMAGE_EXTS: set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
 def _normalize_show_image_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        result: dict[str, Any] = {
+            "caption": str(payload.get("caption") or ""),
+            "path": str(payload.get("path") or ""),
+            "filename": str(payload.get("filename") or ""),
+        }
+        url = str(payload.get("url") or "")
+        if url:
+            result["url"] = url
+        return result
+
+    # Legacy string payload fallback
     text = str(payload or "")
-    # Extract path from "Image saved to: path" message.
     path = text
     if "Image saved to:" in text:
         path = text.split("Image saved to:")[-1].strip()
-    result: dict[str, Any] = {"caption": text, "path": path}
+    result = {"caption": text, "path": path, "filename": ""}
 
-    # Build a safe workspace URL.
     norm = path.replace("\\", "/")
-
-    # Safety: reject empty, traversal, absolute, or hidden paths.
     if not norm or ".." in norm or norm.startswith("/") or "/." in norm:
         return result
 
-    # Determine the relative path under workspace.
     relative = norm
     lower_norm = norm.lower()
     if "workspace/" in lower_norm:
         idx = lower_norm.rfind("workspace/") + len("workspace/")
         relative = norm[idx:]
 
-    # After extraction, reject any remaining traversal or empty result.
     if not relative or ".." in relative or relative.startswith("/"):
         return result
 
-    # Extension safety check.
     lower_rel = relative.lower()
     if not any(lower_rel.endswith(ext) for ext in _SAFE_IMAGE_EXTS):
         return result
 
-    result["url"] = f"/workspace/{relative}"
+    result["url"] = f"/images/{Path(relative).name}"
+    result["filename"] = Path(relative).name
     return result
 
 
@@ -371,7 +378,7 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["internal"],
     },
     "show_image": {
-        "payload_fields": {"caption": "str", "path": "str"},
+        "payload_fields": {"caption": "str", "path": "str", "url": "str", "filename": "str"},
         "visibility": ["image"],
     },
     "vision_snapshot_note": {

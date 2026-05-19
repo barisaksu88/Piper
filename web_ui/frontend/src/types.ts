@@ -40,6 +40,7 @@ export interface ChatMessage {
   content: string;
   streaming?: boolean;
   suppressed?: boolean;
+  imageUrl?: string;
 }
 
 export interface RawEvent {

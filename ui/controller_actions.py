@@ -937,7 +937,12 @@ def refresh_live_screen_ui(controller) -> None:
 def _start_live_screen(controller) -> None:
     def on_capture(path: Path) -> None:
         rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", f"Image saved to: {rel_path}"))
+        controller.ui_queue.put(("show_image", {
+            "path": str(rel_path),
+            "url": f"/images/{path.name}",
+            "filename": path.name,
+            "caption": f"Image saved to: {rel_path}",
+        }))
 
     def on_error(message: str) -> None:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen capture error: {message}"))
@@ -977,7 +982,12 @@ def _recapture_live_screen(controller) -> None:
     try:
         path = controller.live_screen.capture_once()
         rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", f"Image saved to: {rel_path}"))
+        controller.ui_queue.put(("show_image", {
+            "path": str(rel_path),
+            "url": f"/images/{path.name}",
+            "filename": path.name,
+            "caption": f"Image saved to: {rel_path}",
+        }))
     except Exception as exc:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen refresh error: {exc}"))
 
@@ -1411,9 +1421,12 @@ def on_event_speech_mode_changed(controller, sender=None, app_data=None, user_da
     controller.set_event_speech_mode(normalize_event_speech_mode(app_data), announce=True)
 
 
-def handle_show_image(controller, payload: str) -> None:
+def handle_show_image(controller, payload) -> None:
     try:
-        fname = payload.split(": ")[-1].strip()
+        if isinstance(payload, dict):
+            fname = str(payload.get("path") or payload.get("filename") or "").strip()
+        else:
+            fname = str(payload).split(": ")[-1].strip()
         img_path = _resolve_ui_image_path(fname)
 
         print(f"[UI] Attempting to load image: {img_path}")

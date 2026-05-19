@@ -148,32 +148,37 @@ class TestImageVisionEvents:
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: workspace/out.png"))
         assert frame["kind"] == "image.show"
         assert frame["payload"]["path"] == "workspace/out.png"
-        assert frame["payload"]["url"] == "/workspace/out.png"
+        assert frame["payload"]["url"] == "/images/out.png"
+        assert frame["payload"]["filename"] == "out.png"
         assert "caption" in frame["payload"]
 
     def test_show_image_raw_path(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "out.png"))
         assert frame["payload"]["path"] == "out.png"
-        assert frame["payload"]["url"] == "/workspace/out.png"
+        assert frame["payload"]["url"] == "/images/out.png"
+        assert frame["payload"]["filename"] == "out.png"
 
     def test_show_image_subdir(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "images/sub/test.png"))
         assert frame["payload"]["path"] == "images/sub/test.png"
-        assert frame["payload"]["url"] == "/workspace/images/sub/test.png"
+        assert frame["payload"]["url"] == "/images/test.png"
+        assert frame["payload"]["filename"] == "test.png"
 
     def test_show_image_windows_absolute_workspace(self):
         frame = _decode_frame(
             adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: C:\\Projects\\Piper\\data\\workspace\\foo.png")
         )
         assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\foo.png"
-        assert frame["payload"]["url"] == "/workspace/foo.png"
+        assert frame["payload"]["url"] == "/images/foo.png"
+        assert frame["payload"]["filename"] == "foo.png"
 
     def test_show_image_windows_absolute_workspace_subdir(self):
         frame = _decode_frame(
             adapter.ui_tuple_to_ws_frame("show_image", "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg")
         )
         assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg"
-        assert frame["payload"]["url"] == "/workspace/images/bar.jpg"
+        assert frame["payload"]["url"] == "/images/bar.jpg"
+        assert frame["payload"]["filename"] == "bar.jpg"
 
     def test_show_image_unsafe_extension_no_url(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("show_image", "evil.exe"))

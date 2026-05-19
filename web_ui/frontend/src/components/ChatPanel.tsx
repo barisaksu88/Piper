@@ -70,6 +70,17 @@ export default function ChatPanel({
                 <span className="message-author">{displayRole(m.role, userName)}</span>
               </div>
               <pre className="message-content">{m.content}</pre>
+              {m.imageUrl && (
+                <div className="message-image">
+                  <img
+                    src={m.imageUrl}
+                    alt={m.content || "Image"}
+                    className="chat-image-thumb"
+                    onClick={() => window.open(m.imageUrl, "_blank")}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ))}

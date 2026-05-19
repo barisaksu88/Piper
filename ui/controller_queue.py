@@ -186,7 +186,7 @@ def pump_ui_queue(controller, forward_queue: queue.Queue | None = None) -> None:
             controller.maybe_speak_ui_event(kind, payload)
             continue
         if kind == "show_image":
-            handle_show_image(controller, str(payload))
+            handle_show_image(controller, payload)
             continue
         if kind == "code_session_launch":
             try:
