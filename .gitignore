@@ -77,3 +77,12 @@ scripts/check_checkpoint*.py
 scripts/debug_*.py
 scripts/phase8_debug_*.py
 scripts/phase8_approval_only.py
+
+# Local runtime data (auto-generated, not source)
+data/styles/active_style.txt
+data/users.json
+notes/coder-log.md
+data/*.png
+data/*.jpg
+data/*.jpeg
+scripts/web_ui_e2e_smoke_test.py
