@@ -7,6 +7,7 @@ interface TopBarProps {
   onNewSession: () => void;
   onRestart: () => void;
   onStop: () => void;
+  onOpenSystem: () => void;
 }
 
 export default function TopBar({
@@ -16,6 +17,7 @@ export default function TopBar({
   onNewSession,
   onRestart,
   onStop,
+  onOpenSystem,
 }: TopBarProps) {
   const connBadge =
     connState === "connected"
@@ -88,6 +90,14 @@ export default function TopBar({
           disabled={connState !== "connected"}
         >
           ↻
+        </button>
+        <button
+          className="icon-btn"
+          onClick={onOpenSystem}
+          title="System"
+          type="button"
+        >
+          ⚙
         </button>
       </div>
     </header>

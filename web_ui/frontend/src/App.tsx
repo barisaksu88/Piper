@@ -9,6 +9,7 @@ import ModeSelector from "./components/ModeSelector";
 import VoiceStrip from "./components/VoiceStrip";
 import StatusFooter from "./components/StatusFooter";
 import OperationScreen from "./components/OperationScreen";
+import SystemDrawer from "./components/SystemDrawer";
 import { useOperationMode } from "./hooks/useOperationMode";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
@@ -164,6 +165,8 @@ export default function App() {
 
   const [userName, setUserName] = useState("User");
   const [authWaiting, setAuthWaiting] = useState(false);
+
+  const [systemDrawerOpen, setSystemDrawerOpen] = useState(false);
 
   const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
     code: false,
@@ -950,6 +953,7 @@ export default function App() {
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}
+        onOpenSystem={() => setSystemDrawerOpen(true)}
       />
 
       <div className="app-body">
@@ -1123,6 +1127,16 @@ export default function App() {
       />
 
       <StatusFooter statsText="" />
+
+      <SystemDrawer
+        isOpen={systemDrawerOpen}
+        onClose={() => setSystemDrawerOpen(false)}
+        connState={connState}
+        ttsState={ttsState}
+        logs={logs}
+        userName={userName}
+        backendVersion="Piper v2.0"
+      />
     </div>
   );
 }
