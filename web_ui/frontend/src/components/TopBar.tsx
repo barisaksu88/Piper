@@ -4,7 +4,6 @@ interface TopBarProps {
   connState: ConnectionState;
   statusText: string;
   modeText: string;
-  styleText: string;
   onNewSession: () => void;
   onRestart: () => void;
   onStop: () => void;
@@ -14,7 +13,6 @@ export default function TopBar({
   connState,
   statusText,
   modeText,
-  styleText,
   onNewSession,
   onRestart,
   onStop,
@@ -62,20 +60,10 @@ export default function TopBar({
 
       <nav className="top-bar-nav">
         <button className="nav-tab active">Chat</button>
-        <button className="nav-tab" disabled>
-          Memory
-        </button>
-        <button className="nav-tab" disabled>
-          Tasks
-        </button>
-        <button className="nav-tab" disabled>
-          System
-        </button>
       </nav>
 
       <div className="top-bar-actions">
         <span className={connBadge}>{connState}</span>
-        {styleText && <span className="style-pill">{styleText}</span>}
         {modeText && <span className="mode-pill">{modeText}</span>}
         <button
           className="icon-btn"

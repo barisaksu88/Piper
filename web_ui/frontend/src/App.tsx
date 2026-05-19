@@ -128,7 +128,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [statusText, setStatusText] = useState("IDLE");
   const [modeText, setModeText] = useState("");
-  const [stepText, setStepText] = useState("");
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [ttsState, setTtsState] = useState<TtsState>("idle");
   const [ttsError, setTtsError] = useState("");
@@ -592,10 +592,7 @@ export default function App() {
           break;
         }
 
-        case "status.step": {
-          setStepText(String((payload as { text?: string }).text || ""));
-          break;
-        }
+
 
         case "activity.append": {
           appendActivity(String((payload as { text?: string }).text || ""));
@@ -1005,7 +1002,6 @@ export default function App() {
         connState={connState}
         statusText={primaryStatusText}
         modeText={detailModeText}
-        styleText={styleLabel}
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}
@@ -1033,16 +1029,11 @@ export default function App() {
 
         <div className="center-stage">
           <AvatarStage state={avatarState} />
-          <ModeSelector styleLabel={styleLabel} />
+          <ModeSelector styleLabel={styleLabel} userName={userName} />
         </div>
 
         <aside className="right-rail">
-          <RailCard title="Quick Actions" compact>
-            <div className="quick-actions-grid">
-              <button className="action-btn" onClick={handleStop} disabled={connState !== "connected"}>Stop</button>
-              <button className="action-btn" onClick={handleNewSession} disabled={connState !== "connected"}>New Session</button>
-              <button className="action-btn danger" onClick={handleRestart} disabled={connState !== "connected"}>Restart</button>
-            </div>
+          <RailCard title="Capture" compact>
             <div className="settings-row">
               <label className="setting-label">
                 Event Speech
@@ -1065,16 +1056,7 @@ export default function App() {
             </div>
           </RailCard>
 
-          <RailCard title="Status" compact>
-            <div className="status-pills">
-              <div className="status-pill">{primaryStatusText}</div>
-              {detailModeText && <div className="status-pill mode">{detailModeText}</div>}
-              <div className="status-pill mode">Style {styleLabel}</div>
-              {ttsState === "synthesizing" && <div className="status-pill step">TTS synthesizing</div>}
-              {ttsState === "error" && <div className="status-pill error">TTS error</div>}
-              {stepText && <div className="status-pill step">{stepText}</div>}
-            </div>
-          </RailCard>
+
 
           <RailCard
             title="Code Session"
@@ -1265,7 +1247,7 @@ export default function App() {
         isSpeaking={isSpeaking}
       />
 
-      <StatusFooter statsText={statsText} modeText={detailModeText} styleText={styleLabel} />
+      <StatusFooter statsText="" />
     </div>
   );
 }
