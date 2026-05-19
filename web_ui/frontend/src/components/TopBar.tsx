@@ -101,7 +101,7 @@ export default function TopBar({
           title="Workspace"
           type="button"
         >
-          ≡
+          W
         </button>
         <button
           className="icon-btn"
