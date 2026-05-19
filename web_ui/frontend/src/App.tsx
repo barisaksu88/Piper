@@ -998,33 +998,20 @@ export default function App() {
           <OperationScreen steps={steps} message={bootMessage} title="Booting" />
         )}
 
-        <div className="center-stage" style={{ position: "relative" }}>
-          {!workspaceOpen ? (
-            <>
-              <AvatarStage state={avatarState} />
-              <ModeSelector styleLabel={styleLabel} userName={userName} />
-              <VoiceStrip
-                micState={micState}
-                micButtonLabel={micButtonLabel}
-                micButtonClass={micButtonClass}
-                micDisabled={micDisabled}
-                micStatusText={micStatusText}
-                onMicClick={handleMicClick}
-                connState={connState}
-                isGenerating={isGenerating}
-                isSpeaking={isSpeaking}
-              />
-            </>
-          ) : (
-            <div className="workspace-overlay">
-              <Workspace
-                mode={workspace.mode}
-                onOpenFile={() => {
-                  sendAction("open_document_picker");
-                }}
-              />
-            </div>
-          )}
+        <div className="center-stage">
+          <AvatarStage state={avatarState} />
+          <ModeSelector styleLabel={styleLabel} userName={userName} />
+          <VoiceStrip
+            micState={micState}
+            micButtonLabel={micButtonLabel}
+            micButtonClass={micButtonClass}
+            micDisabled={micDisabled}
+            micStatusText={micStatusText}
+            onMicClick={handleMicClick}
+            connState={connState}
+            isGenerating={isGenerating}
+            isSpeaking={isSpeaking}
+          />
         </div>
 
         <aside className="right-rail">
@@ -1034,7 +1021,7 @@ export default function App() {
             role="button"
             tabIndex={0}
           >
-            <span className="rail-ws-label">WS</span>
+            <span className="rail-ws-label">Workspace</span>
             <span className="rail-ws-hint">{workspaceOpen ? "Close" : "Open"}</span>
           </div>
           <RailCard
@@ -1163,6 +1150,30 @@ export default function App() {
               </div>
           </RailCard>
         </aside>
+
+        {workspaceOpen && (
+          <div className="workspace-overlay-full">
+            <div className="workspace-overlay-header">
+              <span className="workspace-overlay-title">Workspace</span>
+              <button
+                className="workspace-overlay-close"
+                onClick={() => setWorkspaceOpen(false)}
+                title="Close workspace"
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="workspace-overlay-body">
+              <Workspace
+                mode={workspace.mode}
+                onOpenFile={() => {
+                  sendAction("open_document_picker");
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <StatusFooter statsText="" />

@@ -1701,15 +1701,61 @@ label {
   color: var(--text-dim);
 }
 
-/* Workspace overlay — covers center-stage */
-.workspace-overlay {
-  position: absolute;
-  inset: 0;
+/* Full workspace overlay — spans center-stage + right-rail */
+.workspace-overlay-full {
+  grid-column: 2 / 4;
+  grid-row: 1;
   background: var(--bg-primary);
-  border-radius: 12px;
   border: 1px solid var(--border);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   z-index: 10;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.workspace-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.workspace-overlay-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.workspace-overlay-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.workspace-overlay-close:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.workspace-overlay-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
