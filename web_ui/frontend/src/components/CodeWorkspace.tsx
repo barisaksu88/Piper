@@ -12,6 +12,10 @@ interface CodeWorkspaceProps {
   onCodeStop: () => void;
   onCodeClear: () => void;
   connState: string;
+  // Stdin
+  stdinText: string;
+  onStdinChange: (text: string) => void;
+  onStdinSend: () => void;
 }
 
 export default function CodeWorkspace({
@@ -26,6 +30,9 @@ export default function CodeWorkspace({
   onCodeStop,
   onCodeClear,
   connState,
+  stdinText,
+  onStdinChange,
+  onStdinSend,
 }: CodeWorkspaceProps) {
   const outputRef = useRef<HTMLDivElement>(null);
   const isConnected = connState === "connected";
@@ -42,6 +49,14 @@ export default function CodeWorkspace({
     if (e.ctrlKey && e.key === "Enter") {
       e.preventDefault();
       onCodeRun();
+    }
+  };
+
+  // Enter sends stdin
+  const handleStdinKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onStdinSend();
     }
   };
 
@@ -115,6 +130,27 @@ export default function CodeWorkspace({
           type="button"
         >
           {codeRunning ? "Stop" : "Run"}
+        </button>
+      </div>
+
+      {/* Stdin */}
+      <div className="code-stdin-row">
+        <input
+          className="input-text"
+          type="text"
+          value={stdinText}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onStdinChange(e.target.value)}
+          onKeyDown={handleStdinKeyDown}
+          placeholder="Stdin input..."
+          disabled={!codeRunning}
+        />
+        <button
+          className="action-btn"
+          onClick={onStdinSend}
+          disabled={!codeRunning || !stdinText.trim()}
+          type="button"
+        >
+          Send
         </button>
       </div>
     </div>

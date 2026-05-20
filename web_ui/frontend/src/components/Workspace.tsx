@@ -19,6 +19,10 @@ interface WorkspaceProps {
   onCodeStop?: () => void;
   onCodeClear?: () => void;
   connState?: string;
+  // Stdin
+  stdinText?: string;
+  onStdinChange?: (text: string) => void;
+  onStdinSend?: () => void;
 }
 
 export default function Workspace({
@@ -37,6 +41,9 @@ export default function Workspace({
   onCodeStop,
   onCodeClear,
   connState,
+  stdinText,
+  onStdinChange,
+  onStdinSend,
 }: WorkspaceProps) {
   const displayName = filePath ? filePath.split("/").pop() || filePath : mode;
 
@@ -74,6 +81,9 @@ export default function Workspace({
             onCodeStop={onCodeStop ?? (() => {})}
             onCodeClear={onCodeClear ?? (() => {})}
             connState={connState ?? "disconnected"}
+            stdinText={stdinText ?? ""}
+            onStdinChange={onStdinChange ?? (() => {})}
+            onStdinSend={onStdinSend ?? (() => {})}
           />
         )}
         {mode === "text" && <div className="workspace-placeholder">Text workspace — coming in next commit</div>}

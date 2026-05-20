@@ -2029,3 +2029,12 @@ label {
 .code-controls .input-text {
   flex: 1;
 }
+
+
+/* Stdin row */
+.code-stdin-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}

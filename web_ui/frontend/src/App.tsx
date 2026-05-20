@@ -226,7 +226,6 @@ export default function App() {
   const streamingRef = useRef(false);
   const bridgeRef = useRef<PiperBridge | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
-  const codeOutputRef = useRef<HTMLDivElement | null>(null);
   const codeInputRef = useRef<HTMLInputElement | null>(null);
   const documentsViewRef = useRef<HTMLDivElement | null>(null);
 
@@ -240,14 +239,6 @@ export default function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [messages]);
-
-  // Auto-scroll code output to bottom
-  useEffect(() => {
-    const el = codeOutputRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [codeOutput]);
 
   // Auto-scroll documents view to bottom
   useEffect(() => {
@@ -641,7 +632,6 @@ export default function App() {
 
         case "code.reset": {
           setCodeOutput([]);
-          setCodePreview("");
           workspace.clearCodeOutput();
           break;
         }
@@ -833,16 +823,6 @@ export default function App() {
     setCodeInputText("");
     sendAction("code_send", { text });
   }, [codeInputText, codeActive, sendAction]);
-
-  const handleCodeKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleCodeSend();
-      }
-    },
-    [handleCodeSend]
-  );
 
   const handleCodeRun = useCallback(() => {
     const path = codePathInput.trim();
@@ -1056,38 +1036,6 @@ export default function App() {
 
 
           <RailCard
-            title="Code Session"
-            collapsible
-            expanded={expandedRailPanels.code}
-            onToggle={() => toggleRailPanel("code")}
-            badge={<span className={codeActive ? "rail-badge active" : codeStatus.includes("error") || codeStatus.includes("fail") ? "rail-badge error" : "rail-badge"}>{codeStatus}</span>}
-          >
-              <div className="code-panel">
-                {codePreview && (
-                  <div className="code-preview">
-                    <pre>{codePreview}</pre>
-                  </div>
-                )}
-                <div className="code-output" ref={codeOutputRef}>
-                  {codeOutput.map((line, i) => (
-                    <div key={`c-${i}`} className="code-line">{line}</div>
-                  ))}
-                </div>
-                <div className="code-controls">
-                  <div className="code-control-row">
-                    <input className="input-text code-path" type="text" value={codePathInput} onChange={(e) => setCodePathInput(e.target.value)} placeholder="Script path..." disabled={connState !== "connected"} />
-                    <button onClick={handleCodeRun} disabled={connState !== "connected" || !codePathInput.trim()}>Run</button>
-                  </div>
-                  <div className="code-control-row">
-                    <input ref={codeInputRef} className="input-text" type="text" value={codeInputText} onChange={(e) => setCodeInputText(e.target.value)} onKeyDown={handleCodeKeyDown} placeholder="Stdin..." disabled={connState !== "connected" || !codeActive} />
-                    <button onClick={handleCodeSend} disabled={connState !== "connected" || !codeActive || !codeInputText.trim()}>Send</button>
-                    <button onClick={() => sendAction("code_clear")} disabled={connState !== "connected"}>Clear</button>
-                  </div>
-                </div>
-              </div>
-          </RailCard>
-
-          <RailCard
             title="Documents"
             collapsible
             expanded={expandedRailPanels.documents}
@@ -1227,6 +1175,9 @@ export default function App() {
                 onCodeStop={handleCodeStop}
                 onCodeClear={() => setCodeOutput([])}
                 connState={connState}
+                stdinText={codeInputText}
+                onStdinChange={setCodeInputText}
+                onStdinSend={handleCodeSend}
               />
             </div>
           </div>
