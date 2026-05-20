@@ -12,6 +12,7 @@ import OperationScreen from "./components/OperationScreen";
 import SystemDrawer from "./components/SystemDrawer";
 import Workspace from "./components/Workspace";
 import { useOperationMode } from "./hooks/useOperationMode";
+import { usePiperUI } from "./hooks/usePiperUI";
 import { useWorkspace } from "./hooks/useWorkspace";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
@@ -133,13 +134,19 @@ export default function App() {
 
   const [connState, setConnState] = useState<ConnectionState>("disconnected");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [statusText, setStatusText] = useState("IDLE");
-  const [modeText, setModeText] = useState("");
+  const ui = usePiperUI();
+  const {
+    mode: modeText, setMode: setModeText,
+    statusText, setStatusText,
+    styleLabel, setStyleLabel,
+    userName, setUserName,
+    authWaiting, setAuthWaiting,
+    ttsState, setTtsState,
+    workspaceOpen, setWorkspaceOpen,
+    resetUI,
+  } = ui;
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [ttsState, setTtsState] = useState<TtsState>("idle");
-
-  const [styleLabel, setStyleLabel] = useState("Default");
   const [activities, setActivities] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
@@ -165,11 +172,7 @@ export default function App() {
 
   // System / identity state
 
-  const [userName, setUserName] = useState("User");
-  const [authWaiting, setAuthWaiting] = useState(false);
-
   const [systemDrawerOpen, setSystemDrawerOpen] = useState(false);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const workspace = useWorkspace();
 
   const [expandedRailPanels, setExpandedRailPanels] = useState<Record<RailPanelId, boolean>>({
@@ -876,7 +879,9 @@ export default function App() {
     abortMicRecording(true);
     setMessages([]);
     sendAction("new_session");
-  }, [abortMicRecording, sendAction]);
+    resetUI();
+    workspace.closeFile();
+  }, [abortMicRecording, sendAction, resetUI, workspace]);
 
   const handleRestart = useCallback(() => {
     abortMicRecording(true);
