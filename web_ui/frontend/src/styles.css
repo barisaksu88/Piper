@@ -1506,7 +1506,8 @@ label {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  height: 100%;
+  max-height: 100%;
 }
 
 .operation-avatar {
@@ -1542,12 +1543,30 @@ label {
   text-align: center;
 }
 
+.operation-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
+.operation-steps-scroll {
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .operation-steps {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
 }
 
 .operation-step {
@@ -1571,7 +1590,7 @@ label {
 }
 
 .operation-input-disabled {
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 8px 16px;
   border-radius: 8px;
   background: var(--bg-panel);
@@ -1579,6 +1598,7 @@ label {
   font-size: 12px;
   color: var(--text-dim);
   text-align: center;
+  flex-shrink: 0;
 }
 
 /* System drawer */
@@ -1737,6 +1757,8 @@ label {
   flex-direction: column;
   overflow: hidden;
   z-index: 10;
+  height: 100%;
+  min-height: 100%;
 }
 
 .workspace-overlay-header {
@@ -1782,4 +1804,5 @@ label {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: var(--bg-primary);
 }
