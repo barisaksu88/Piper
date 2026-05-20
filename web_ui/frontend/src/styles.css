@@ -1590,7 +1590,8 @@ label {
 }
 
 .operation-input-disabled {
-  margin-top: 16px;
+  margin-top: auto;
+  margin-bottom: 16px;
   padding: 8px 16px;
   border-radius: 8px;
   background: var(--bg-panel);
@@ -1750,7 +1751,7 @@ label {
 .workspace-overlay-full {
   grid-column: 2 / 4;
   grid-row: 1;
-  background: var(--bg-primary);
+  background: #0d1117;
   border: 1px solid var(--border-active);
   border-radius: 12px;
   display: flex;
@@ -1758,7 +1759,6 @@ label {
   overflow: hidden;
   z-index: 10;
   height: 100%;
-  min-height: 100%;
 }
 
 .workspace-overlay-header {
@@ -1804,5 +1804,5 @@ label {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
+  background: #0d1117;
 }
