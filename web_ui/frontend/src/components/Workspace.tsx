@@ -15,7 +15,7 @@ export default function Workspace({ mode, filePath, onFileSelected, onClose }: W
     <div className="workspace" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div className="workspace-toolbar">
         <span className="workspace-title">
-          {mode === "empty" ? "Workspace" : displayName}
+          {mode === "empty" ? "" : displayName}
         </span>
         <div className="workspace-toolbar-actions">
           {mode !== "empty" && (
