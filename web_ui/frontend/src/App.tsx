@@ -850,6 +850,10 @@ export default function App() {
     sendAction("code_run", { path });
   }, [codePathInput, sendAction]);
 
+  const handleCodeStop = useCallback(() => {
+    sendAction("stop");
+  }, [sendAction]);
+
   const handleAddDocumentPaths = useCallback(() => {
     const input = documentPathInput.trim();
     if (!input) return;
@@ -1204,6 +1208,17 @@ export default function App() {
                   workspace.closeFile();
                   setWorkspaceOpen(false);
                 }}
+                codeContent={codePreview}
+                onCodeChange={setCodePreview}
+                codeOutput={codeOutput}
+                codeRunning={codeActive}
+                codeStatus={codeStatus}
+                codePath={codePathInput}
+                onCodePathChange={setCodePathInput}
+                onCodeRun={handleCodeRun}
+                onCodeStop={handleCodeStop}
+                onCodeClear={() => setCodeOutput([])}
+                connState={connState}
               />
             </div>
           </div>
