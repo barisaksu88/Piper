@@ -1192,12 +1192,19 @@ export default function App() {
                   if (name.endsWith(".py")) {
                     workspace.openFile(file.name, "code");
                     const reader = new FileReader();
-                    reader.onload = (e) => workspace.setCodeContent(String(e.target?.result || ""));
+                    reader.onload = (e) => {
+                      const content = String(e.target?.result || "");
+                      setCodePreview(content);
+                      workspace.setCodeContent(content);
+                    };
                     reader.readAsText(file);
                   } else if (name.endsWith(".txt") || name.endsWith(".md")) {
                     workspace.openFile(file.name, "text");
                     const reader = new FileReader();
-                    reader.onload = (e) => workspace.setTextContent(String(e.target?.result || ""));
+                    reader.onload = (e) => {
+                      const content = String(e.target?.result || "");
+                      workspace.setTextContent(content);
+                    };
                     reader.readAsText(file);
                   } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
                     workspace.openFile(file.name, "vision");
