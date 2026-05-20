@@ -1939,6 +1939,27 @@ label {
   color: var(--text-dim);
 }
 
+.code-finished-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.code-finished-badge.success {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.code-finished-badge.error {
+  background: rgba(248, 81, 49, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(248, 81, 49, 0.25);
+}
+
 /* Body: editor + output side by side */
 .code-body {
   display: grid;
@@ -2014,6 +2035,11 @@ label {
 
 .code-output-line.error {
   color: var(--danger);
+}
+
+.code-output-line.success {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* Controls */

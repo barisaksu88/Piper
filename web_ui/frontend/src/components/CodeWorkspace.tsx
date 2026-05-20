@@ -66,10 +66,13 @@ export default function CodeWorkspace({
       <div className="workspace-toolbar">
         <div className="code-toolbar-left">
           <span className="workspace-title">Code</span>
-          {codeRunning && <span className="code-running-badge">Running</span>}
-          {codeStatus && !codeRunning && (
-            <span className="code-status-badge">{codeStatus}</span>
-          )}
+          {codeRunning ? (
+            <span className="code-running-badge">Running</span>
+          ) : codeStatus ? (
+            <span className={`code-finished-badge ${codeStatus.includes("code 0") ? "success" : "error"}`}>
+              {codeStatus.includes("code 0") ? "Finished" : codeStatus}
+            </span>
+          ) : null}
         </div>
         <div className="code-toolbar-right">
           <button
@@ -101,14 +104,18 @@ export default function CodeWorkspace({
             {codeOutput.length === 0 ? (
               <div className="code-output-empty">No output yet</div>
             ) : (
-              codeOutput.map((line, i) => (
-                <div
-                  key={i}
-                  className={`code-output-line ${line.startsWith("Error") || line.startsWith("Traceback") ? "error" : ""}`}
-                >
-                  {line}
-                </div>
-              ))
+              codeOutput.map((line, i) => {
+                const isExitSuccess = line.includes("code 0");
+                const isExitError = line.includes("exited") && !line.includes("code 0");
+                return (
+                  <div
+                    key={i}
+                    className={`code-output-line ${isExitError ? "error" : isExitSuccess ? "success" : ""}`}
+                  >
+                    {isExitSuccess ? "✓ Finished successfully" : line}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -143,6 +150,7 @@ export default function CodeWorkspace({
           onKeyDown={handleStdinKeyDown}
           placeholder="Stdin input..."
           disabled={!codeRunning}
+          title={codeRunning ? "Type input and press Enter" : "Process finished — click Run to start again"}
         />
         <button
           className="action-btn"
