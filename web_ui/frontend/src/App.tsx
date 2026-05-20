@@ -1175,6 +1175,7 @@ export default function App() {
             <div className="workspace-overlay-body">
               <Workspace
                 mode={workspace.mode}
+                filePath={workspace.filePath}
                 onFileSelected={(files) => {
                   const file = files[0];
                   if (!file) return;
@@ -1193,6 +1194,10 @@ export default function App() {
                     workspace.openFile(file.name, "vision");
                     workspace.setVisionImage(URL.createObjectURL(file));
                   }
+                }}
+                onClose={() => {
+                  workspace.closeFile();
+                  setWorkspaceOpen(false);
                 }}
               />
             </div>

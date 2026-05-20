@@ -3,16 +3,32 @@ import EmptyWorkspace from "./EmptyWorkspace";
 
 interface WorkspaceProps {
   mode: WorkspaceMode;
+  filePath: string;
   onFileSelected?: (files: FileList) => void;
+  onClose?: () => void;
 }
 
-export default function Workspace({ mode, onFileSelected }: WorkspaceProps) {
+export default function Workspace({ mode, filePath, onFileSelected, onClose }: WorkspaceProps) {
+  const displayName = filePath ? filePath.split("/").pop() || filePath : mode;
+
   return (
     <div className="workspace" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div className="workspace-toolbar">
         <span className="workspace-title">
-          {mode === "empty" ? "Workspace" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+          {mode === "empty" ? "Workspace" : displayName}
         </span>
+        <div className="workspace-toolbar-actions">
+          {mode !== "empty" && (
+            <button
+              className="workspace-close-btn"
+              onClick={onClose}
+              title="Close workspace file"
+              type="button"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
       <div className="workspace-body" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         {mode === "empty" && <EmptyWorkspace onFileSelected={onFileSelected} />}
