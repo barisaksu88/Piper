@@ -1191,6 +1191,7 @@ export default function App() {
                   const name = file.name.toLowerCase();
                   if (name.endsWith(".py")) {
                     workspace.openFile(file.name, "code");
+                    setCodePathInput(file.name);
                     const reader = new FileReader();
                     reader.onload = (e) => {
                       const content = String(e.target?.result || "");
