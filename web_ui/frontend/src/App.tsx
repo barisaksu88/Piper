@@ -824,11 +824,10 @@ export default function App() {
     sendAction("code_send", { text });
   }, [codeInputText, codeActive, sendAction]);
 
-  const handleCodeRun = useCallback(() => {
-    const path = codePathInput.trim();
+  const handleCodeRun = useCallback((content: string, path: string) => {
     if (!path) return;
-    sendAction("code_run", { path });
-  }, [codePathInput, sendAction]);
+    sendAction("code_run", { path, content });
+  }, [sendAction]);
 
   const handleCodeStop = useCallback(() => {
     sendAction("stop");

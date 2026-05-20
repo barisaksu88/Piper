@@ -15,7 +15,7 @@ interface WorkspaceProps {
   codeStatus?: string;
   codePath?: string;
   onCodePathChange?: (path: string) => void;
-  onCodeRun?: () => void;
+  onCodeRun?: (content: string, path: string) => void;
   onCodeStop?: () => void;
   onCodeClear?: () => void;
   connState?: string;

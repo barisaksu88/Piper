@@ -8,7 +8,7 @@ interface CodeWorkspaceProps {
   codeStatus: string;
   codePath: string;
   onCodePathChange: (path: string) => void;
-  onCodeRun: () => void;
+  onCodeRun: (content: string, path: string) => void;
   onCodeStop: () => void;
   onCodeClear: () => void;
   connState: string;
@@ -48,7 +48,7 @@ export default function CodeWorkspace({
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.ctrlKey && e.key === "Enter") {
       e.preventDefault();
-      onCodeRun();
+      onCodeRun(codeContent, codePath);
     }
   };
 
@@ -132,7 +132,7 @@ export default function CodeWorkspace({
         />
         <button
           className="action-btn primary"
-          onClick={codeRunning ? onCodeStop : onCodeRun}
+          onClick={codeRunning ? onCodeStop : () => onCodeRun(codeContent, codePath)}
           disabled={!isConnected || (!codeRunning && !codePath.trim())}
           type="button"
         >

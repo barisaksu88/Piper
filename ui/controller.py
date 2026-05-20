@@ -1519,6 +1519,13 @@ class PiperController:
                 self.send_code_session_input(text)
         elif action_name == "code_run":
             path = str(payload.get("path", "")).strip()
+            content = str(payload.get("content", ""))
+            if content and path:
+                from pathlib import Path
+                script_path = Path(self.code_session.workspace) / path
+                script_path.parent.mkdir(parents=True, exist_ok=True)
+                script_path.write_text(content, encoding="utf-8")
+                self.safe_log(f"[Code] Saved {path} ({len(content)} chars)")
             if path:
                 self.start_code_session(path)
                 self.set_code_status(f"Launching: {path}")
