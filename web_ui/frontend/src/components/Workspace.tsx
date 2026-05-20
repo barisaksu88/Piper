@@ -3,10 +3,10 @@ import EmptyWorkspace from "./EmptyWorkspace";
 
 interface WorkspaceProps {
   mode: WorkspaceMode;
-  onOpenFile: () => void;
+  onFileSelected?: (files: FileList) => void;
 }
 
-export default function Workspace({ mode, onOpenFile }: WorkspaceProps) {
+export default function Workspace({ mode, onFileSelected }: WorkspaceProps) {
   return (
     <div className="workspace" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div className="workspace-toolbar">
@@ -15,7 +15,7 @@ export default function Workspace({ mode, onOpenFile }: WorkspaceProps) {
         </span>
       </div>
       <div className="workspace-body" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        {mode === "empty" && <EmptyWorkspace onOpenFile={onOpenFile} />}
+        {mode === "empty" && <EmptyWorkspace onFileSelected={onFileSelected} />}
         {mode === "code" && <div className="workspace-placeholder">Code workspace — coming in next commit</div>}
         {mode === "text" && <div className="workspace-placeholder">Text workspace — coming in next commit</div>}
         {mode === "vision" && <div className="workspace-placeholder">Vision workspace — coming in next commit</div>}

@@ -1,8 +1,24 @@
+import { useRef } from "react";
+
 interface EmptyWorkspaceProps {
-  onOpenFile: () => void;
+  onFileSelected?: (files: FileList) => void;
 }
 
-export default function EmptyWorkspace({ onOpenFile }: EmptyWorkspaceProps) {
+export default function EmptyWorkspace({ onFileSelected }: EmptyWorkspaceProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0 && onFileSelected) {
+      onFileSelected(files);
+    }
+    e.target.value = "";
+  };
+
   return (
     <div className="workspace-empty">
       <div className="workspace-empty-icon">
@@ -16,9 +32,16 @@ export default function EmptyWorkspace({ onOpenFile }: EmptyWorkspaceProps) {
       </div>
       <p className="workspace-empty-text">Open a file to begin</p>
       <p className="workspace-empty-hint">.py for code · .txt/.md for text · images for vision</p>
-      <button className="action-btn" onClick={onOpenFile} type="button">
+      <button className="action-btn" onClick={handleOpenFile} type="button">
         Open File
       </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={handleFileChange}
+        accept=".py,.txt,.md,.jpg,.jpeg,.png,.webp"
+      />
     </div>
   );
 }

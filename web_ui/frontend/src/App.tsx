@@ -1175,8 +1175,24 @@ export default function App() {
             <div className="workspace-overlay-body">
               <Workspace
                 mode={workspace.mode}
-                onOpenFile={() => {
-                  sendAction("open_document_picker");
+                onFileSelected={(files) => {
+                  const file = files[0];
+                  if (!file) return;
+                  const name = file.name.toLowerCase();
+                  if (name.endsWith(".py")) {
+                    workspace.openFile(file.name, "code");
+                    const reader = new FileReader();
+                    reader.onload = (e) => workspace.setCodeContent(String(e.target?.result || ""));
+                    reader.readAsText(file);
+                  } else if (name.endsWith(".txt") || name.endsWith(".md")) {
+                    workspace.openFile(file.name, "text");
+                    const reader = new FileReader();
+                    reader.onload = (e) => workspace.setTextContent(String(e.target?.result || ""));
+                    reader.readAsText(file);
+                  } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
+                    workspace.openFile(file.name, "vision");
+                    workspace.setVisionImage(URL.createObjectURL(file));
+                  }
                 }}
               />
             </div>

@@ -1751,8 +1751,8 @@ label {
 .workspace-overlay-full {
   grid-column: 2 / 4;
   grid-row: 1;
-  background: #0d1117;
-  border: 1px solid var(--border-active);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -1804,5 +1804,5 @@ label {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: #0d1117;
+  background: var(--bg-panel);
 }

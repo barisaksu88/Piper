@@ -462,7 +462,7 @@ class BridgeServer:
                     exc_msg = str(exc)
                     # Normal close codes (1000 = normal, 1001 = going away) are not errors.
                     close_code = getattr(getattr(exc, "rcvd", None), "code", 0)
-                    if isinstance(exc, ConnectionClosedOK) and close_code in (1000, 1001):
+                    if isinstance(exc, ConnectionClosedOK) and close_code in (1000, 1001, 1005):
                         _LOG.debug("Bridge connection closed normally: %s", exc_msg)
                     else:
                         hint = ""
