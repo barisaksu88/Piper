@@ -121,7 +121,7 @@ body,
 }
 
 .brand-logo-img {
-  height: 28px;
+  height: 42px;
   width: auto;
   object-fit: contain;
   flex-shrink: 0;
@@ -572,10 +572,25 @@ body,
 }
 
 .avatar-img {
-  width: 100%;
-  height: 100%;
+  width: 140%;
+  height: 140%;
   object-fit: cover;
-  border-radius: 50%;
+  transform: translate(-15%, -20%);
+  animation: avatar-slow-spin 24s linear infinite;
+}
+
+@keyframes avatar-slow-spin {
+  from { transform: translate(-15%, -20%) rotate(0deg); }
+  to { transform: translate(-15%, -20%) rotate(360deg); }
+}
+
+.avatar-stage.thinking .avatar-img {
+  animation-duration: 8s;
+}
+
+.avatar-stage.listening .avatar-img,
+.avatar-stage.generating .avatar-img {
+  animation-duration: 12s;
 }
 
 .avatar-ring {
