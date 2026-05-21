@@ -1522,7 +1522,7 @@ class PiperController:
             content = str(payload.get("content", ""))
             if content and path:
                 from pathlib import Path
-                script_path = Path(self.code_session.workspace) / path
+                script_path = CFG.DATA_DIR / "workspace" / path
                 script_path.parent.mkdir(parents=True, exist_ok=True)
                 script_path.write_text(content, encoding="utf-8")
                 self.safe_log(f"[Code] Saved {path} ({len(content)} chars)")
@@ -1545,7 +1545,7 @@ class PiperController:
             self.on_code_clear()
         elif action_name == "list_workspace_files":
             from pathlib import Path
-            workspace_dir = Path(self.code_session.workspace)
+            workspace_dir = CFG.DATA_DIR / "workspace"
             files = []
             if workspace_dir.exists():
                 for f in sorted(workspace_dir.iterdir()):
