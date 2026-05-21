@@ -55,7 +55,7 @@ export default function ChatPanel({
                 {isAssistant(m.role) ? (
                   <div className="avatar-thumb assistant-thumb">
                     <img
-                      src="/piper-avatar.png"
+                      src="/piper-face.png"
                       alt="Piper"
                       style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
                     />

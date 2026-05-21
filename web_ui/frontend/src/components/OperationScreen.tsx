@@ -13,7 +13,7 @@ export default function OperationScreen({ steps, message, title = "Booting" }: O
         {/* Top: avatar + title + message — stays fixed */}
         <div className="operation-top">
           <div className="operation-avatar">
-            <img src="/piper-avatar.png" alt="Piper" />
+            <img src="/piper-face.png" alt="Piper" />
           </div>
           <h2>{title}</h2>
           {message && <p className="operation-message">{message}</p>}
