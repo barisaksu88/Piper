@@ -1,6 +1,8 @@
 import type { WorkspaceMode } from "../hooks/useWorkspace";
 import EmptyWorkspace from "./EmptyWorkspace";
 import CodeWorkspace from "./CodeWorkspace";
+import TextWorkspace from "./TextWorkspace";
+import VisionWorkspace from "./VisionWorkspace";
 
 interface WorkspaceProps {
   mode: WorkspaceMode;
@@ -23,6 +25,11 @@ interface WorkspaceProps {
   stdinText?: string;
   onStdinChange?: (text: string) => void;
   onStdinSend?: () => void;
+  // Text mode props
+  textContent?: string;
+  // Vision mode props
+  imageUrl?: string;
+  visionText?: string;
 }
 
 export default function Workspace({
@@ -44,6 +51,9 @@ export default function Workspace({
   stdinText,
   onStdinChange,
   onStdinSend,
+  textContent,
+  imageUrl,
+  visionText,
 }: WorkspaceProps) {
   const displayName = filePath ? filePath.split("/").pop() || filePath : mode;
 
@@ -77,7 +87,7 @@ export default function Workspace({
             codeStatus={codeStatus ?? ""}
             codePath={codePath ?? ""}
             onCodePathChange={onCodePathChange ?? (() => {})}
-            onCodeRun={onCodeRun ?? (() => {})}
+            onCodeRun={onCodeRun ?? ((_) => {})}
             onCodeStop={onCodeStop ?? (() => {})}
             onCodeClear={onCodeClear ?? (() => {})}
             connState={connState ?? "disconnected"}
@@ -86,8 +96,19 @@ export default function Workspace({
             onStdinSend={onStdinSend ?? (() => {})}
           />
         )}
-        {mode === "text" && <div className="workspace-placeholder">Text workspace — coming in next commit</div>}
-        {mode === "vision" && <div className="workspace-placeholder">Vision workspace — coming in next commit</div>}
+        {mode === "text" && (
+          <TextWorkspace
+            fileName={displayName}
+            content={textContent ?? ""}
+          />
+        )}
+        {mode === "vision" && (
+          <VisionWorkspace
+            fileName={displayName}
+            imageUrl={imageUrl ?? ""}
+            analysis={visionText}
+          />
+        )}
         {mode === "project" && <div className="workspace-placeholder">Project workspace — coming in next commit</div>}
       </div>
     </div>

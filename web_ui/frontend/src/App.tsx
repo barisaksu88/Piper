@@ -1177,6 +1177,9 @@ export default function App() {
                 stdinText={codeInputText}
                 onStdinChange={setCodeInputText}
                 onStdinSend={handleCodeSend}
+                textContent={workspace.textContent}
+                imageUrl={workspace.imageUrl}
+                visionText={workspace.visionText}
               />
             </div>
           </div>
