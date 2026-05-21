@@ -25,6 +25,14 @@ export default function EmptyWorkspace({
     fileInputRef.current?.click();
   };
 
+  const getFileIcon = (name: string): string => {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'py') return '🐍';
+    if (ext === 'txt' || ext === 'md') return '📄';
+    if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return '🖼️';
+    return '📎';
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0 && onFileSelected) {
@@ -42,15 +50,23 @@ export default function EmptyWorkspace({
           <p className="workspace-file-list-path">
             {workspacePath?.replace(/\\/g, "/").split("/").slice(-3).join("/") || "workspace"}
           </p>
+          <p className="workspace-file-list-hint">Click a file to open</p>
           <div className="workspace-file-list-scroll">
             {workspaceFiles.map((f) => (
               <div
                 key={f.path}
-                className="workspace-file-item"
+                className={`workspace-file-item workspace-file-${f.name.split('.').pop()?.toLowerCase() || 'file'}`}
                 onClick={() => onFileFromList?.(f.path)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onFileFromList?.(f.path);
+                  }
+                }}
                 role="button"
                 tabIndex={0}
               >
+                <span className="workspace-file-icon">{getFileIcon(f.name)}</span>
                 <span className="workspace-file-name">{f.name}</span>
                 <span className="workspace-file-size">{(f.size / 1024).toFixed(1)} KB</span>
               </div>
