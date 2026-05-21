@@ -52,7 +52,7 @@ export default function AvatarStage({ state }: AvatarStageProps) {
               boxShadow: `0 0 60px ${meta.glow}, inset 0 0 40px ${meta.glow}`,
             }}
           >
-            P
+            <img src="/piper-avatar.png" alt="Piper" className="avatar-img" />
           </div>
           <div className="avatar-ring ring-outer" />
           <div className="avatar-ring ring-mid" />
