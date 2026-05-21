@@ -1210,16 +1210,18 @@ export default function App() {
                 workspaceFiles={workspace.workspaceFiles}
                 workspacePath={workspace.workspacePath}
                 onFileFromList={(path) => {
-                  const name = path.toLowerCase();
+                  const fileName = path.split(/[\\/]/).pop() || path;
+                  const name = fileName.toLowerCase();
                   if (name.endsWith(".py")) {
                     workspace.openFile(path, "code");
+                    setCodePathInput(fileName);
                     sendAction("read_workspace_file", { path });
                   } else if (name.endsWith(".txt") || name.endsWith(".md")) {
                     workspace.openFile(path, "text");
                     sendAction("read_workspace_file", { path });
                   } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
                     workspace.openFile(path, "vision");
-                    workspace.setVisionImage(`/images/${path.split(/[\\/]/).pop() || ""}`);
+                    workspace.setVisionImage(`/images/${fileName}`);
                   }
                 }}
               />
