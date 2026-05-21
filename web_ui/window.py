@@ -62,3 +62,18 @@ def launch_window_thread(url: str, width: int = 1280, height: int = 820) -> thre
     )
     thread.start()
     return thread
+
+
+def close_piper_window() -> None:
+    try:
+        import webview
+        if webview.windows:
+            for window in webview.windows:
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+    except Exception:
+        pass

@@ -1481,6 +1481,12 @@ class PiperController:
             self.restart_requested = True
             self.set_status("Restarting...")
 
+            try:
+                from web_ui.window import close_piper_window
+                close_piper_window()
+            except Exception:
+                pass
+
             def _shutdown_worker() -> None:
                 try:
                     self.boot_mgr.shutdown()
