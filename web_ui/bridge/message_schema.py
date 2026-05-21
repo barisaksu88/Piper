@@ -72,6 +72,7 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     "auth_status": "auth.status",
     # Workspace
     "workspace_files": "workspace.files",
+    "file_contents": "file.contents",
 }
 
 # Set for O(1) membership checks.
@@ -102,6 +103,7 @@ KNOWN_ACTION_NAMES: set[str] = {
     "code_run",
     "code_clear",
     "list_workspace_files",
+    "read_workspace_file",
     "mic_audio_submit",
 }
 

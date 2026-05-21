@@ -1556,6 +1556,26 @@ class PiperController:
                             "size": f.stat().st_size,
                         })
             self.ui_queue.put(("workspace_files", {"files": files, "path": str(workspace_dir)}))
+        elif action_name == "read_workspace_file":
+            from pathlib import Path
+            file_path = Path(str(payload.get("path", "")))
+            workspace_dir = CFG.DATA_DIR / "workspace"
+            try:
+                resolved = file_path.resolve()
+                if not str(resolved).startswith(str(workspace_dir.resolve())):
+                    self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Access denied"}))
+                    return
+            except Exception:
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Invalid path"}))
+                return
+            if not file_path.exists() or not file_path.is_file():
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "File not found"}))
+                return
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": content}))
+            except Exception as exc:
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": str(exc)}))
         else:
             self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
 

@@ -149,6 +149,17 @@ def _normalize_code_session_launch_payload(payload: object) -> dict[str, Any]:
     return {}
 
 
+def _normalize_file_contents_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return {
+            "path": payload.get("path", ""),
+            "name": payload.get("name", ""),
+            "content": payload.get("content", ""),
+            "error": payload.get("error", ""),
+        }
+    return {"path": "", "name": "", "content": "", "error": ""}
+
+
 def _normalize_workspace_files_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
         return {
@@ -309,6 +320,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "tts_status": _normalize_tts_status_payload,
     "style_status": _normalize_style_status_payload,
     "workspace_files": _normalize_workspace_files_payload,
+    "file_contents": _normalize_file_contents_payload,
     "error": _normalize_error_payload,
     # All remaining events default to generic string payload
     "status": _normalize_generic_string_payload,
@@ -473,6 +485,10 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "workspace_files": {
         "payload_fields": {"files": "list[dict]", "path": "str"},
+        "visibility": ["workspace"],
+    },
+    "file_contents": {
+        "payload_fields": {"path": "str", "name": "str", "content": "str"},
         "visibility": ["workspace"],
     },
 }

@@ -711,6 +711,20 @@ export default function App() {
           break;
         }
 
+        case "file.contents": {
+          const p = payload as { path?: string; name?: string; content?: string; error?: string };
+          if (p.error) break;
+          const name = (p.name || "").toLowerCase();
+          const content = String(p.content || "");
+          if (name.endsWith(".py")) {
+            setCodePreview(content);
+            workspace.setCodeContent(content);
+          } else if (name.endsWith(".txt") || name.endsWith(".md")) {
+            workspace.setTextContent(content);
+          }
+          break;
+        }
+
         // System / identity events
         case "user.changed": {
           const p = payload as { user_name?: string; user_id?: string };
@@ -1199,8 +1213,10 @@ export default function App() {
                   const name = path.toLowerCase();
                   if (name.endsWith(".py")) {
                     workspace.openFile(path, "code");
+                    sendAction("read_workspace_file", { path });
                   } else if (name.endsWith(".txt") || name.endsWith(".md")) {
                     workspace.openFile(path, "text");
+                    sendAction("read_workspace_file", { path });
                   } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
                     workspace.openFile(path, "vision");
                     workspace.setVisionImage(`/images/${path.split(/[\\/]/).pop() || ""}`);
