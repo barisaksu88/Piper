@@ -458,7 +458,7 @@ body,
   border-radius: 8px;
   border: 1px solid var(--border);
   cursor: pointer;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 
