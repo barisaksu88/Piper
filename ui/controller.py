@@ -1621,8 +1621,7 @@ class PiperController:
         )
         self._pending_boot_ready = False
         self._pending_boot_ready_payload = ""
-        boot_thread = threading.Thread(target=self.boot_mgr.run_sequence, daemon=True)
-        boot_thread.start()
+        boot_thread: threading.Thread | None = None
 
         action_queue: "queue.Queue[tuple[str, dict]]" = queue.Queue()
         bridge_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
@@ -1741,6 +1740,13 @@ class PiperController:
                 )
                 pump_thread.start()
 
+                def _delayed_boot() -> None:
+                    time.sleep(1.5)
+                    self.boot_mgr.run_sequence()
+
+                boot_thread = threading.Thread(target=_delayed_boot, daemon=True)
+                boot_thread.start()
+
                 from web_ui.window import open_piper_window
 
                 open_piper_window(f"http://{host}:{port}")
@@ -1748,6 +1754,10 @@ class PiperController:
                 stop_event.set()
                 pump_thread.join(timeout=3.0)
             else:
+                boot_thread = threading.Thread(
+                    target=self.boot_mgr.run_sequence, daemon=True
+                )
+                boot_thread.start()
                 _pump_loop()
         except KeyboardInterrupt:
             pass
