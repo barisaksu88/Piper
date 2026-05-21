@@ -2,6 +2,12 @@ import { useState, useCallback } from "react";
 
 export type WorkspaceMode = "empty" | "code" | "text" | "vision" | "project";
 
+export interface WorkspaceFile {
+  name: string;
+  path: string;
+  size: number;
+}
+
 export interface WorkspaceState {
   mode: WorkspaceMode;
   filePath: string;
@@ -15,6 +21,9 @@ export interface WorkspaceState {
   // Vision mode
   imageUrl: string;
   visionText: string;
+  // File list
+  workspaceFiles: WorkspaceFile[];
+  workspacePath: string;
 }
 
 export function useWorkspace() {
@@ -28,6 +37,8 @@ export function useWorkspace() {
     textContent: "",
     imageUrl: "",
     visionText: "",
+    workspaceFiles: [],
+    workspacePath: "",
   });
 
   const openFile = useCallback((filePath: string, mode: WorkspaceMode) => {
@@ -84,6 +95,14 @@ export function useWorkspace() {
     setState((prev) => ({ ...prev, visionText: text }));
   }, []);
 
+  const setWorkspaceFiles = useCallback((files: WorkspaceFile[]) => {
+    setState((prev) => ({ ...prev, workspaceFiles: files }));
+  }, []);
+
+  const setWorkspacePath = useCallback((path: string) => {
+    setState((prev) => ({ ...prev, workspacePath: path }));
+  }, []);
+
   return {
     ...state,
     openFile,
@@ -96,5 +115,7 @@ export function useWorkspace() {
     setTextContent,
     setVisionImage,
     setVisionText,
+    setWorkspaceFiles,
+    setWorkspacePath,
   };
 }

@@ -3,6 +3,7 @@ import EmptyWorkspace from "./EmptyWorkspace";
 import CodeWorkspace from "./CodeWorkspace";
 import TextWorkspace from "./TextWorkspace";
 import VisionWorkspace from "./VisionWorkspace";
+import type { WorkspaceFile } from "./EmptyWorkspace";
 
 interface WorkspaceProps {
   mode: WorkspaceMode;
@@ -30,6 +31,10 @@ interface WorkspaceProps {
   // Vision mode props
   imageUrl?: string;
   visionText?: string;
+  // File list
+  workspaceFiles?: WorkspaceFile[];
+  workspacePath?: string;
+  onFileFromList?: (path: string) => void;
 }
 
 export default function Workspace({
@@ -54,6 +59,9 @@ export default function Workspace({
   textContent,
   imageUrl,
   visionText,
+  workspaceFiles,
+  workspacePath,
+  onFileFromList,
 }: WorkspaceProps) {
   const displayName = filePath ? filePath.split("/").pop() || filePath : mode;
 
@@ -77,7 +85,14 @@ export default function Workspace({
         </div>
       </div>
       <div className="workspace-body" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        {mode === "empty" && <EmptyWorkspace onFileSelected={onFileSelected} />}
+        {mode === "empty" && (
+          <EmptyWorkspace
+            onFileSelected={onFileSelected}
+            onFileFromList={onFileFromList}
+            workspaceFiles={workspaceFiles}
+            workspacePath={workspacePath}
+          />
+        )}
         {mode === "code" && (
           <CodeWorkspace
             codeContent={codeContent ?? ""}

@@ -704,6 +704,13 @@ export default function App() {
           break;
         }
 
+        case "workspace.files": {
+          const p = payload as { files?: Array<{ name: string; path: string; size: number }>; path?: string };
+          workspace.setWorkspaceFiles(p.files || []);
+          if (p.path) workspace.setWorkspacePath(p.path);
+          break;
+        }
+
         // System / identity events
         case "user.changed": {
           const p = payload as { user_name?: string; user_id?: string };
@@ -799,6 +806,13 @@ export default function App() {
   const sendAction = useCallback((action: string, payload: Record<string, unknown> = {}) => {
     return bridgeRef.current?.sendAction(action, payload) ?? false;
   }, []);
+
+  // Request workspace file list when empty workspace is shown
+  useEffect(() => {
+    if (workspaceOpen && workspace.mode === "empty") {
+      sendAction("list_workspace_files");
+    }
+  }, [workspaceOpen, workspace.mode, sendAction]);
 
   const handleSend = useCallback(() => {
     const text = inputText.trim();
@@ -1179,6 +1193,19 @@ export default function App() {
                 textContent={workspace.textContent}
                 imageUrl={workspace.imageUrl}
                 visionText={workspace.visionText}
+                workspaceFiles={workspace.workspaceFiles}
+                workspacePath={workspace.workspacePath}
+                onFileFromList={(path) => {
+                  const name = path.toLowerCase();
+                  if (name.endsWith(".py")) {
+                    workspace.openFile(path, "code");
+                  } else if (name.endsWith(".txt") || name.endsWith(".md")) {
+                    workspace.openFile(path, "text");
+                  } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
+                    workspace.openFile(path, "vision");
+                    workspace.setVisionImage(`/images/${path.split(/[\\/]/).pop() || ""}`);
+                  }
+                }}
               />
             </div>
           </div>

@@ -1543,6 +1543,19 @@ class PiperController:
             self.refresh_interaction_state()
         elif action_name == "code_clear":
             self.on_code_clear()
+        elif action_name == "list_workspace_files":
+            from pathlib import Path
+            workspace_dir = Path(self.code_session.workspace)
+            files = []
+            if workspace_dir.exists():
+                for f in sorted(workspace_dir.iterdir()):
+                    if f.is_file() and f.suffix.lower() in (".py", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"):
+                        files.append({
+                            "name": f.name,
+                            "path": str(f),
+                            "size": f.stat().st_size,
+                        })
+            self.ui_queue.put(("workspace_files", {"files": files, "path": str(workspace_dir)}))
         else:
             self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
 
