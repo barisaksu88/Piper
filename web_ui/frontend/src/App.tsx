@@ -861,6 +861,11 @@ export default function App() {
     sendAction("stop");
   }, [sendAction]);
 
+  const handleTextSave = useCallback((content: string, fileName: string) => {
+    if (!fileName) return;
+    sendAction("save_workspace_file", { path: fileName, content });
+  }, [sendAction]);
+
   const handleAddDocumentPaths = useCallback(() => {
     const input = documentPathInput.trim();
     if (!input) return;
@@ -1205,6 +1210,8 @@ export default function App() {
                 onStdinChange={setCodeInputText}
                 onStdinSend={handleCodeSend}
                 textContent={workspace.textContent}
+                onTextContentChange={workspace.setTextContent}
+                onTextSave={handleTextSave}
                 imageUrl={workspace.imageUrl}
                 visionText={workspace.visionText}
                 workspaceFiles={workspace.workspaceFiles}

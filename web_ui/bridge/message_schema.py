@@ -104,6 +104,7 @@ KNOWN_ACTION_NAMES: set[str] = {
     "code_clear",
     "list_workspace_files",
     "read_workspace_file",
+    "save_workspace_file",
     "mic_audio_submit",
 }
 

@@ -28,6 +28,8 @@ interface WorkspaceProps {
   onStdinSend?: () => void;
   // Text mode props
   textContent?: string;
+  onTextContentChange?: (content: string) => void;
+  onTextSave?: (content: string, fileName: string) => void;
   // Vision mode props
   imageUrl?: string;
   visionText?: string;
@@ -57,6 +59,8 @@ export default function Workspace({
   onStdinChange,
   onStdinSend,
   textContent,
+  onTextContentChange,
+  onTextSave,
   imageUrl,
   visionText,
   workspaceFiles,
@@ -115,6 +119,9 @@ export default function Workspace({
           <TextWorkspace
             fileName={displayName}
             content={textContent ?? ""}
+            onContentChange={onTextContentChange ?? (() => {})}
+            onSave={onTextSave ?? ((_) => {})}
+            connState={connState ?? "disconnected"}
           />
         )}
         {mode === "vision" && (

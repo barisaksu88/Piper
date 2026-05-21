@@ -1576,6 +1576,22 @@ class PiperController:
                 self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": content}))
             except Exception as exc:
                 self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": str(exc)}))
+        elif action_name == "save_workspace_file":
+            from pathlib import Path
+            file_path = Path(str(payload.get("path", "")))
+            content = str(payload.get("content", ""))
+            workspace_dir = CFG.DATA_DIR / "workspace"
+            try:
+                resolved = file_path.resolve()
+                if not str(resolved).startswith(str(workspace_dir.resolve())):
+                    self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save denied: {file_path.name}"}))
+                    return
+            except Exception:
+                self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save invalid path"}))
+                return
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            self.safe_log(f"[Text] Saved {file_path.name} ({len(content)} chars)")
         else:
             self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
 
