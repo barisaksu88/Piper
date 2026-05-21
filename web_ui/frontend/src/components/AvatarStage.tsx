@@ -52,11 +52,8 @@ export default function AvatarStage({ state }: AvatarStageProps) {
               boxShadow: `0 0 60px ${meta.glow}, inset 0 0 40px ${meta.glow}`,
             }}
           >
-            <img src="/piper-avatar.png" alt="Piper" className="avatar-img" />
+            <img src="/piper-avatar.png" alt="Piper" className="avatar-img" draggable={false} />
           </div>
-          <div className="avatar-ring ring-outer" />
-          <div className="avatar-ring ring-mid" />
-          <div className="avatar-ring ring-inner" />
         </div>
         <div
           className="avatar-state-badge"
