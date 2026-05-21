@@ -76,7 +76,15 @@ export default function ChatPanel({
                     src={m.imageUrl}
                     alt={m.content || "Image"}
                     className="chat-image-thumb"
-                    onClick={() => window.open(m.imageUrl, "_blank")}
+                    onClick={(e) => {
+                      const img = e.currentTarget;
+                      if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                      } else {
+                        img.requestFullscreen().catch(() => window.open(m.imageUrl, "_blank"));
+                      }
+                    }}
+                    title="Click to view fullscreen"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                   />
                 </div>
