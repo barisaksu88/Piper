@@ -2127,11 +2127,13 @@ label {
   object-fit: contain;
   border-radius: 8px;
   border: 1px solid var(--border);
-  cursor: pointer;
+  cursor: zoom-in;
+  transition: transform 0.2s ease, border-color 0.15s;
 }
 
 .vision-image:hover {
   border-color: var(--accent);
+  transform: scale(1.01);
 }
 
 .vision-analysis {
