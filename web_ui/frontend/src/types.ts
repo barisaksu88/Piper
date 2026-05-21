@@ -51,3 +51,7 @@ export interface RawEvent {
 }
 
 export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
+
+export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
+
+export type TtsState = "idle" | "synthesizing" | "playing" | "error";
