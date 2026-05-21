@@ -186,12 +186,52 @@ def main() -> int:
         logging.getLogger("websockets.server").setLevel(logging.WARNING)
 
         dist_dir = Path(getattr(CFG, "WEB_UI_FRONTEND_DIST_DIR", ""))
+        src_dir = Path(__file__).resolve().parent / "web_ui" / "frontend" / "src"
         if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
             logging.warning(
                 "Web UI frontend dist not found at %s. "
                 "Run: cd web_ui/frontend && npm run build",
                 dist_dir,
             )
+        elif src_dir.is_dir():
+            # Auto-rebuild frontend if source files are newer than dist
+            try:
+                dist_mtime = max(
+                    (f.stat().st_mtime for f in dist_dir.rglob("*") if f.is_file()),
+                    default=0,
+                )
+                src_mtime = max(
+                    (f.stat().st_mtime for f in src_dir.rglob("*") if f.is_file()),
+                    default=0,
+                )
+                if src_mtime > dist_mtime:
+                    import shutil
+                    import subprocess
+
+                    npm_cmd = shutil.which("npm")
+                    if npm_cmd:
+                        logging.info("Frontend source changed — rebuilding...")
+                        result = subprocess.run(
+                            [npm_cmd, "run", "build"],
+                            cwd=str(src_dir.parent),
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                        )
+                        if result.returncode == 0:
+                            logging.info("Frontend rebuilt successfully.")
+                        else:
+                            logging.warning(
+                                "Frontend rebuild failed: %s",
+                                result.stderr.strip()[-200:] if result.stderr else "unknown error",
+                            )
+                    else:
+                        logging.warning(
+                            "npm not found in PATH. Frontend may be stale. "
+                            "Run: cd web_ui/frontend && npm run build"
+                        )
+            except Exception as exc:
+                logging.debug("Frontend auto-build check failed: %s", exc)
 
         if use_window:
             try:
