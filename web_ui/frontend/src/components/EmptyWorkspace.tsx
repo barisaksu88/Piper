@@ -42,18 +42,23 @@ export default function EmptyWorkspace({
           <p className="workspace-file-list-path">
             {workspacePath?.replace(/\\/g, "/").split("/").slice(-3).join("/") || "workspace"}
           </p>
-          {workspaceFiles.map((f) => (
-            <div
-              key={f.path}
-              className="workspace-file-item"
-              onClick={() => onFileFromList?.(f.path)}
-              role="button"
-              tabIndex={0}
-            >
-              <span className="workspace-file-name">{f.name}</span>
-              <span className="workspace-file-size">{(f.size / 1024).toFixed(1)} KB</span>
-            </div>
-          ))}
+          <div className="workspace-file-list-scroll">
+            {workspaceFiles.map((f) => (
+              <div
+                key={f.path}
+                className="workspace-file-item"
+                onClick={() => onFileFromList?.(f.path)}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="workspace-file-name">{f.name}</span>
+                <span className="workspace-file-size">{(f.size / 1024).toFixed(1)} KB</span>
+              </div>
+            ))}
+          </div>
+          <button className="action-btn" onClick={handleOpenFile} type="button" style={{ marginTop: "12px" }}>
+            Open File from Computer
+          </button>
         </div>
       ) : (
         <>
@@ -68,11 +73,11 @@ export default function EmptyWorkspace({
           </div>
           <p className="workspace-empty-text">No files yet</p>
           <p className="workspace-empty-hint">Open a file to begin</p>
+          <button className="action-btn" onClick={handleOpenFile} type="button">
+            Open File
+          </button>
         </>
       )}
-      <button className="action-btn" onClick={handleOpenFile} type="button">
-        Open File
-      </button>
       <input
         ref={fileInputRef}
         type="file"
