@@ -79,11 +79,15 @@ class SearXNGService:
             return SearXNGServiceResult(ok=False, owned_by_piper=False, message=msg)
 
         if not self.docker_available():
-            msg = "SearXNG not reachable and Docker is unavailable"
-            _LOG.warning(msg)
-            if getattr(self._cfg, "SEARXNG_REQUIRE", False):
-                return SearXNGServiceResult(ok=False, owned_by_piper=False, message=msg)
-            return SearXNGServiceResult(ok=True, owned_by_piper=False, message=f"{msg}; continuing without SearXNG")
+            _LOG.info("Docker daemon not responsive; attempting to start Docker Desktop")
+            if self.start_docker_desktop():
+                _LOG.info("Docker Desktop is now responsive")
+            else:
+                msg = "SearXNG not reachable and Docker is unavailable"
+                _LOG.warning(msg)
+                if getattr(self._cfg, "SEARXNG_REQUIRE", False):
+                    return SearXNGServiceResult(ok=False, owned_by_piper=False, message=msg)
+                return SearXNGServiceResult(ok=True, owned_by_piper=False, message=f"{msg}; continuing without SearXNG")
 
         result = self.start_container()
         if not result.ok:
@@ -155,6 +159,58 @@ class SearXNGService:
             return False
         proc = self._run_docker(["info"], timeout=5.0)
         return proc.returncode == 0
+
+    def start_docker_desktop(self) -> bool:
+        """Launch Docker Desktop if not already running and wait for daemon readiness.
+
+        Returns True if the Docker daemon becomes responsive within the configured
+        timeout, False otherwise.
+        """
+        if shutil.which("docker") is None:
+            _LOG.warning("Docker CLI not found on PATH; cannot verify Docker Desktop readiness")
+            return False
+
+        exe_path = self._docker_desktop_exe()
+        if not exe_path:
+            _LOG.warning("Docker Desktop executable not found")
+            return False
+
+        # Try to launch (harmless no-op if already running on Windows)
+        _LOG.info("Launching Docker Desktop from %s", exe_path)
+        try:
+            if os.name == "nt":
+                os.startfile(exe_path)
+            else:
+                subprocess.Popen([exe_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as exc:
+            _LOG.warning("Failed to launch Docker Desktop: %s", exc)
+            return False
+
+        timeout = float(getattr(self._cfg, "DOCKER_DESKTOP_START_TIMEOUT_S", 60.0))
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.docker_available():
+                return True
+            time.sleep(2.0)
+
+        _LOG.warning("Docker Desktop did not become responsive within %.0f seconds", timeout)
+        return False
+
+    def _docker_desktop_exe(self) -> str | None:
+        """Resolve path to Docker Desktop executable.
+
+        Checks the configured path first, then falls back to common locations.
+        """
+        candidates = [str(getattr(self._cfg, "DOCKER_DESKTOP_PATH", ""))]
+        if os.name == "nt":
+            candidates.extend([
+                r"C:\Program Files\Docker\Docker\Docker Desktop.exe",
+                r"C:\Program Files\Docker\Docker\frontend\Docker Desktop.exe",
+            ])
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        return None
 
     def start_container(self) -> SearXNGServiceResult:
         """Start the SearXNG Docker container if not already running.

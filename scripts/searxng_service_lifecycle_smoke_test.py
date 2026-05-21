@@ -46,6 +46,7 @@ def _make_cfg(**kwargs):
         "SEARXNG_DOCKER_CONTAINER_PORT": 8080,
         "SEARXNG_DOCKER_CONFIG_DIR": ".local/searxng",
         "SEARXNG_REQUIRE": False,
+        "DOCKER_DESKTOP_START_TIMEOUT_S": 60.0,
         "ROOT_DIR": ROOT,
     }
     defaults.update(kwargs)
@@ -167,6 +168,29 @@ def run_tests() -> list[dict]:
                     results.append(_ok("shutdown_owned_stops_container"))
                 else:
                     results.append(_fail("shutdown_owned_stops_container", f"unexpected: {shut}"))
+
+    # ── 5b. Docker Desktop auto-started successfully ────────────────────────
+    health_responses = [
+        urllib.error.URLError("refused"),  # first check fails
+        _http_response(b'{"results": [{"title": "t", "url": "http://x"}]}'),  # after start
+    ]
+    with patch("urllib.request.urlopen", side_effect=health_responses):
+        with patch("shutil.which", return_value="/usr/bin/docker"):
+            with patch("subprocess.run") as mock_run:
+                with patch.object(SearXNGService, "start_docker_desktop", return_value=True):
+                    mock_run.side_effect = [
+                        _docker_proc(),  # docker info (after Desktop starts)
+                        _docker_proc(),  # docker ps (running)
+                        _docker_proc(),  # docker ps -a (exists)
+                        _docker_proc("piper-searxng\n"),  # docker ps -a (exists)
+                        _docker_proc("abc123\n"),  # docker run
+                    ]
+                    svc = SearXNGService(cfg=_make_cfg())
+                    res = svc.ensure_available()
+                    if res.ok and res.owned_by_piper and "started and healthy" in res.message:
+                        results.append(_ok("docker_desktop_auto_start_ok"))
+                    else:
+                        results.append(_fail("docker_desktop_auto_start_ok", f"unexpected: {res}"))
 
     # ── 6. shutdown when not owned → no docker stop ────────────────────────
     svc = SearXNGService(cfg=_make_cfg(SEARCH_BACKEND="duckduckgo"))

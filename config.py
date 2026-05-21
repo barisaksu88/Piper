@@ -829,6 +829,8 @@ class Config:
     SEARXNG_DOCKER_CONTAINER_PORT: int = 8080
     SEARXNG_DOCKER_CONFIG_DIR: str = ".local/searxng"
     SEARXNG_REQUIRE: bool = False
+    DOCKER_DESKTOP_PATH: str = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    DOCKER_DESKTOP_START_TIMEOUT_S: float = 60.0
     SEARCH_BLACKLIST: list[str] = field(default_factory=lambda: ["zhihu.com", "baidu.com", "weibo.com"])
     SEARCH_URL_FETCH_TIMEOUT_S: float = 20.0
     SEARCH_MIN_CONTENT_LENGTH: int = 100
