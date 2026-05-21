@@ -120,12 +120,19 @@ body,
   min-width: 0;
 }
 
-.brand-logo-img {
-  height: 42px;
-  width: auto;
-  object-fit: contain;
+.brand-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #1e40af);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
   flex-shrink: 0;
-  user-select: none;
+  box-shadow: 0 0 14px var(--accent-glow);
 }
 
 .brand-text {
@@ -547,8 +554,8 @@ body,
 
 .avatar-portrait {
   position: relative;
-  width: 240px;
-  height: 240px;
+  width: 320px;
+  height: 320px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -568,29 +575,6 @@ body,
   letter-spacing: -2px;
   transition: all 0.4s ease;
   z-index: 2;
-  overflow: hidden;
-}
-
-.avatar-img {
-  width: 140%;
-  height: 140%;
-  object-fit: cover;
-  transform: translate(-15%, -20%);
-  animation: avatar-slow-spin 24s linear infinite;
-}
-
-@keyframes avatar-slow-spin {
-  from { transform: translate(-15%, -20%) rotate(0deg); }
-  to { transform: translate(-15%, -20%) rotate(360deg); }
-}
-
-.avatar-stage.thinking .avatar-img {
-  animation-duration: 8s;
-}
-
-.avatar-stage.listening .avatar-img,
-.avatar-stage.generating .avatar-img {
-  animation-duration: 12s;
 }
 
 .avatar-ring {

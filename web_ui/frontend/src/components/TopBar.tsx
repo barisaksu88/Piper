@@ -31,19 +31,32 @@ export default function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-brand">
-        <img
-          src="/piper-logo.png"
-          alt="Piper"
-          className="brand-logo-img"
-          draggable={false}
-        />
-        <div className="brand-subtitle">
-          <span
-            className={`status-dot ${
-              connState === "connected" ? "online" : "offline"
-            }`}
-          />
-          {statusText || "Ready"}
+        <div className="brand-icon">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        </div>
+        <div className="brand-text">
+          <div className="brand-title">PIPER</div>
+          <div className="brand-subtitle">
+            <span
+              className={`status-dot ${
+                connState === "connected" ? "online" : "offline"
+              }`}
+            />
+            Local Mode · {statusText || "Ready"}
+          </div>
         </div>
       </div>
 
