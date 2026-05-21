@@ -1161,7 +1161,6 @@ export default function App() {
                 }}
                 onClose={() => {
                   workspace.closeFile();
-                  setWorkspaceOpen(false);
                 }}
                 codeContent={codePreview}
                 onCodeChange={setCodePreview}

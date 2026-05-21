@@ -8,7 +8,8 @@ export default function VisionWorkspace({ fileName, imageUrl, analysis }: Vision
   return (
     <div className="vision-workspace">
       <div className="workspace-toolbar">
-        <span className="workspace-title">{fileName || "Vision"}</span>
+        <span className="workspace-title">Vision</span>
+        <span className="text-meta">{fileName}</span>
       </div>
       <div className="vision-body">
         <div className="vision-image-area">
@@ -16,7 +17,7 @@ export default function VisionWorkspace({ fileName, imageUrl, analysis }: Vision
             src={imageUrl}
             alt={fileName || "Image"}
             className="vision-image"
-            onClick={() => window.open(imageUrl, "_blank")}
+
           />
         </div>
         {analysis && (

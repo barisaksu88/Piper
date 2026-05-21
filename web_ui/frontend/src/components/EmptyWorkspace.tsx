@@ -30,17 +30,19 @@ export default function EmptyWorkspace({ onFileSelected }: EmptyWorkspaceProps) 
           <polyline points="10 9 9 9 8 9"/>
         </svg>
       </div>
-      <p className="workspace-empty-text">Open a file to begin</p>
+      <p className="workspace-empty-text">Open a folder to begin</p>
       <p className="workspace-empty-hint">.py for code · .txt/.md for text · images for vision</p>
       <button className="action-btn" onClick={handleOpenFile} type="button">
-        Open File
+        Open Folder
       </button>
       <input
         ref={fileInputRef}
         type="file"
+        // @ts-ignore — webkitdirectory is non-standard but widely supported
+        webkitdirectory=""
+        directory=""
         style={{ display: "none" }}
         onChange={handleFileChange}
-        accept=".py,.txt,.md,.jpg,.jpeg,.png,.webp"
       />
     </div>
   );
