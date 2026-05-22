@@ -1,7 +1,7 @@
-# Web UI Acceptance Checkpoint — Phase 17A
+# Web UI Acceptance Checkpoint — Phase 17C
 
 > **Branch:** `feature/web-ui-bridge`
-> **Date:** 2026-05-17
+> **Date:** 2026-05-22
 > **Status:** Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
 
 ---
@@ -24,18 +24,13 @@
 
 ### Default — Desktop Window (pywebview)
 ```powershell
-cd web_ui/frontend
-npm run build
-cd C:\Projects\Piper
 python app.py
 # Piper desktop window opens automatically
 ```
+`app.py` now auto-builds `web_ui/frontend` on startup when `src/` is newer than `dist/`, so a manual `npm run build` is no longer required for normal launches.
 
 ### Browser Web UI (backend-served, no window)
 ```powershell
-cd web_ui/frontend
-npm run build
-cd C:\Projects\Piper
 $env:PIPER_WEB_UI_ENABLED = "true"
 $env:PIPER_WEB_UI_WINDOW = "false"
 python app.py
@@ -52,7 +47,6 @@ npm run dev
 
 ### DearPyGui Fallback
 ```powershell
-cd C:\Projects\Piper
 $env:PIPER_WEB_UI_ENABLED = "false"
 python app.py
 ```
@@ -73,6 +67,7 @@ These features are verified working and accepted for daily use:
 - [x] New Session clears chat and resets context
 - [x] Stop button interrupts generation
 - [x] Restart button restarts Piper cleanly
+- [x] Restart closes the pywebview window before re-exec
 - [x] Code Session panel exists and functions
 - [x] Documents panel exists and functions
 - [x] Image/Vision panel exists and functions
@@ -80,6 +75,7 @@ These features are verified working and accepted for daily use:
 - [x] Activity & Logs panel exists and functions
 - [x] Raw Events inspector exists and functions
 - [x] Backend serves built frontend without Vite
+- [x] Frontend auto-builds on startup when source is newer than dist
 - [x] Vite dev mode still works for frontend development
 - [x] DearPyGui remains available as explicit fallback
 - [x] Web UI desktop mode is the default
@@ -97,7 +93,7 @@ These items are explicitly out of scope for default readiness:
 | Browser MediaRecorder mic upload | Quarantined | Available only behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. Native MIC is the accepted path. |
 | TTS in browser/window | Not implemented | TTS still plays through native OS audio. No browser TTS integration. |
 | Native OS packaging / installer | Not implemented | No `.exe` installer or Start Menu shortcut yet. |
-| Web UI as default | Deferred | Requires 1+ week daily-use burn-in by Baris. |
+| Web UI as default | Accepted | Desktop window mode is now the default. |
 | DearPyGui retirement | Deferred | Fallback must remain until Web UI parity is proven over time. |
 | Long-term daily-use stability | Not proven | Needs sustained real-world use. |
 | Deep visual polish / avatar | Deferred | No animated avatar, custom themes, or visual effects. |
@@ -111,7 +107,7 @@ These items are explicitly out of scope for default readiness:
 | Risk | Mitigation |
 |---|---|
 | pywebview may behave differently on other Windows versions / Edge versions | Tested on current Windows 11 + Edge Chromium. pywebview falls back gracefully if unavailable. |
-| Restart from inside desktop window requires user to close window manually | Documented limitation. Restart flag is set; re-exec happens after window closes. |
+| Restart from inside desktop window must close the window before re-exec | `close_piper_window()` now runs from the restart handler before the process re-execs. |
 | Web UI pump loop runs in background thread only in window mode | Browser mode unchanged. Threading model is well-tested. |
 | No native OS installer means launch still requires PowerShell/terminal | Acceptable for daily dev use. Packaging deferred to post-acceptance. |
 
@@ -123,9 +119,6 @@ Use this checklist when Baris does the final acceptance run:
 
 ### 6.1 Desktop Window Smoke
 ```powershell
-cd C:\Projects\Piper\web_ui\frontend
-npm run build
-cd C:\Projects\Piper
 $env:PIPER_WEB_UI_ENABLED = "true"
 $env:PIPER_WEB_UI_WINDOW = "true"
 python app.py
@@ -136,6 +129,7 @@ python app.py
 - [ ] Status badge shows "connected"
 - [ ] Boot logs appear in Activity & Logs panel
 - [ ] `boot.ready` appears, status shows "IDLE"
+- [ ] App launches even if `dist/` is stale, because auto-build runs before the window opens
 
 ### 6.2 Chat Test
 - [ ] Type "hello" and send

@@ -19,6 +19,7 @@ npm run build
 ```
 
 Outputs to `web_ui/frontend/dist/`.
+On the Piper startup path, `app.py` now auto-builds the frontend when `src/` is newer than `dist/`, so manual builds are only needed when you want to work on the frontend directly.
 
 ## Type-check only
 
@@ -49,3 +50,10 @@ Or permanently in your shell / `.env` equivalent.
 
 When `WEB_UI_ENABLED=true`, Piper runs the BridgeServer on `127.0.0.1:8787/ws`
 instead of launching DearPyGui.
+
+## Frontend Layout
+
+- `src/App.tsx` is the top-level orchestrator for bridge state and panel wiring
+- `src/components/` contains the panel modules, including chat and fullscreen image views
+- `src/css/` contains the modular stylesheet split imported through `src/css/index.css`
+- The app is intentionally split into multiple modules now, rather than keeping everything in one file

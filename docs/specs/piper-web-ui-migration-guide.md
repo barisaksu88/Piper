@@ -1,9 +1,9 @@
 # Piper Web UI Migration Guide
 
-> **Version:** 1.4 (Phase 17A)  
+> **Version:** 1.5 (Phase 17C)  
 > **Branch:** `feature/web-ui-bridge`  
 > **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
-> **Status:** Phase 17A complete. Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
+> **Status:** Phase 17C complete. Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
 
 ---
 
@@ -31,7 +31,7 @@ Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/f
 |---|---|
 | Branch | `feature/web-ui-bridge` |
 | Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
-| Completed phase | **Phase 17A** |
+| Completed phase | **Phase 17C** |
 | Python tests | **250+ passing** |
 | Frontend typecheck | **Passing** |
 | Frontend build | **Passing** (215 kB JS + 10 kB CSS) |
@@ -71,11 +71,14 @@ This checkpoint records:
 - **Desktop window wrapper** (Phase 15C) — Optional pywebview desktop window. Enabled with `PIPER_WEB_UI_WINDOW=true`. Falls back gracefully if pywebview is not installed.
 - **Threading fix** (Phase 15C.1) — pywebview requires the main thread on Windows. In window mode, the desktop window blocks the main thread while the Web UI action/pump loop runs in a background thread. Browser mode is unchanged (pump loop stays on main thread).
 - **Log hygiene** (Phase 15C.2) — Per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed in Web UI mode.
+- **Frontend auto-build** (Phase 17C) — `app.py` rebuilds `web_ui/frontend` automatically on startup when `src/` is newer than `dist/`, so normal launches do not require a manual `npm run build`.
+- **Restart closes window** (Phase 17C) — restart now closes the pywebview window from the handler before re-exec.
+- **Frontend modularization** (Phase 17C) — `App.tsx` is now a 472-line orchestrator over 6 modules, and CSS lives in 10 modular files under `web_ui/frontend/src/css/`.
 - **Acceptance checkpoint** (Phase 15D) — Formal green/deferred/default-readiness criteria documented in `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`.
 
 ### What does NOT work yet
 - TTS in browser / window (native OS TTS still plays; no browser TTS integration)
-- Search result display panel (raw inspector only)
+- Search result display panel (raw inspector only; results still surface through reporter flow)
 - Native OS packaging / installer (no `.exe` or Start Menu shortcut)
 - DearPyGui retirement (fallback preserved)
 - Settings mutation UI (config reload is read-only)
@@ -107,6 +110,14 @@ Live testing on Windows revealed issues the original plan did not anticipate:
 3. **DPG hard-exit risk** — `run_web()` called DPG's `does_item_exist` directly, causing a native crash when no DPG context existed. Fixed with monkeypatch guard + restoration (Phase 3.1 / Phase 5).
 4. **chat_append broadcast gap** — `chat_append` events were not reaching WebSocket clients because `ui_queue` was consumed by DPG pump. Fixed with bridge queue forwarding (Phase 5).
 5. **Thinking placeholder role mismatch** — Piper creates "Thinking..." as an `assistant` message, but frontend only checked `role === "system"`. Fixed in Phase 7.1.
+
+### Current frontend shape
+
+- `web_ui/frontend/src/App.tsx` is the top-level orchestrator for bridge state, UI routing, and panel wiring
+- `web_ui/frontend/src/components/` holds the panel-level UI pieces, including chat and fullscreen image views
+- `web_ui/frontend/src/css/` contains the modular stylesheet split, imported through `src/css/index.css`
+- `web_ui/frontend/src/components/ChatPanel.tsx` and `VisionWorkspace.tsx` both support fullscreen image viewing
+- `web_ui/frontend/src/components/` and `src/css/` are the intended extension points for future UI polish
 
 ---
 
@@ -488,7 +499,7 @@ No environment variables required. Builds and opens the Web UI desktop window by
 ```powershell
 cd web_ui/frontend
 npm run build
-cd C:\Projects\Piper
+cd ..\..
 python app.py
 ```
 
@@ -505,7 +516,7 @@ python app.py
 ```powershell
 cd web_ui/frontend
 npm run build
-cd C:\Projects\Piper
+cd ..\..
 $env:PIPER_WEB_UI_ENABLED = "true"
 $env:PIPER_WEB_UI_WINDOW = "false"
 python app.py
@@ -516,7 +527,6 @@ python app.py
 ### DearPyGui fallback
 
 ```powershell
-cd C:\Projects\Piper
 $env:PIPER_WEB_UI_ENABLED = "false"
 python app.py
 ```
@@ -786,7 +796,7 @@ Web UI / WebView should control Piper's existing native/backend mic pipeline:
 ```powershell
 cd web_ui/frontend
 npm run build
-cd C:\Projects\Piper
+cd ..\..
 $env:PIPER_WEB_UI_ENABLED = "true"
 python app.py
 # Open http://127.0.0.1:8787/
@@ -826,7 +836,7 @@ npm run dev
 ```powershell
 cd web_ui/frontend
 npm run build
-cd C:\Projects\Piper
+cd ..\..
 $env:PIPER_WEB_UI_ENABLED = "true"
 $env:PIPER_WEB_UI_WINDOW = "true"
 python app.py
@@ -878,7 +888,7 @@ python app.py
 - DearPyGui retirement criteria defined: fallback preserved until explicit approval
 - Rollback instructions for all three launch modes (browser, desktop window, DearPyGui)
 
-**Status:** Web UI desktop mode is **the default** as of Phase 17A. DearPyGui remains available as an explicit fallback.
+**Status:** Web UI desktop mode is **the default** as of Phase 17C. DearPyGui remains available as an explicit fallback.
 
 ---
 

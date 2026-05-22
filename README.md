@@ -49,6 +49,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
+If you are using the Web UI, `app.py` will auto-build the frontend on startup when `web_ui/frontend/src/` is newer than `web_ui/frontend/dist/`.
+
 ### Requirements
 
 - Windows 10/11
