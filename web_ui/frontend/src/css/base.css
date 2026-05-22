@@ -1,0 +1,46 @@
+:root {
+  --bg: #06080f;
+  --bg-panel: #0a0e17;
+  --bg-card: #0f1522;
+  --bg-card-hover: #141b2d;
+  --bg-input: #131a2b;
+  --border: #1a2235;
+  --border-light: #253047;
+  --text: #d8dce6;
+  --text-dim: #5e6b82;
+  --text-muted: #3d4a5f;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-glow: rgba(59, 130, 246, 0.3);
+  --gold: #c8a45c;
+  --gold-glow: rgba(200, 164, 92, 0.25);
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --success: #22c55e;
+  --user: #3b82f6;
+  --assistant: #22c55e;
+  --system: #c8a45c;
+  --badge-connected: #22c55e;
+  --badge-connecting: #f59e0b;
+  --badge-error: #ef4444;
+  --badge-disconnected: #5e6b82;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+    Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
