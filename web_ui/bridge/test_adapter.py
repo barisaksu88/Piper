@@ -164,19 +164,19 @@ class TestImageVisionEvents:
         assert frame["payload"]["url"] == "/images/test.png"
         assert frame["payload"]["filename"] == "test.png"
 
-    def test_show_image_windows_absolute_workspace(self):
+    def test_show_image_workspace_path(self):
         frame = _decode_frame(
-            adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: C:\\Projects\\Piper\\data\\workspace\\foo.png")
+            adapter.ui_tuple_to_ws_frame("show_image", "Image saved to: data/workspace/foo.png")
         )
-        assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\foo.png"
+        assert frame["payload"]["path"] == "data/workspace/foo.png"
         assert frame["payload"]["url"] == "/images/foo.png"
         assert frame["payload"]["filename"] == "foo.png"
 
-    def test_show_image_windows_absolute_workspace_subdir(self):
+    def test_show_image_workspace_subdir(self):
         frame = _decode_frame(
-            adapter.ui_tuple_to_ws_frame("show_image", "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg")
+            adapter.ui_tuple_to_ws_frame("show_image", "data/workspace/images/bar.jpg")
         )
-        assert frame["payload"]["path"] == "C:\\Projects\\Piper\\data\\workspace\\images\\bar.jpg"
+        assert frame["payload"]["path"] == "data/workspace/images/bar.jpg"
         assert frame["payload"]["url"] == "/images/bar.jpg"
         assert frame["payload"]["filename"] == "bar.jpg"
 
