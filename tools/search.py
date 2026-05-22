@@ -15,6 +15,10 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+# Maximum bytes to read from a single page during deep-dive
+_FETCH_MAX_BYTES = 1024 * 1024  # 1 MiB
+_READ_CHUNK_SIZE = 16 * 1024    # 16 KiB chunks
+
 from core.runtime_control import CancellationToken, OperationCancelled
 from core.search_contracts import SEARCH_TOOL_ERROR_PREFIX
 from core.search.backends.searxng import SearXNGBackend
@@ -128,23 +132,29 @@ def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
     try:
         _raise_if_cancelled(cancel_token)
         reader_url = f"https://r.jina.ai/{url}"
-        req = urllib.request.Request(reader_url, headers={'User-Agent': 'Mozilla/5.0'}) # Changed to standard browser UA
+        req = urllib.request.Request(reader_url, headers={'User-Agent': 'Mozilla/5.0'})
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
 
-        # Use configured timeout for news sites (from config.SEARCH_URL_FETCH_TIMEOUT_S)
         with urllib.request.urlopen(req, timeout=CFG.SEARCH_URL_FETCH_TIMEOUT_S, context=context) as resp:
             _raise_if_cancelled(cancel_token)
-            data = resp.read().decode('utf-8', errors='ignore')
+            chunks: list[bytes] = []
+            total = 0
+            while total < _FETCH_MAX_BYTES:
+                _raise_if_cancelled(cancel_token)
+                chunk = resp.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            data = b"".join(chunks).decode('utf-8', errors='ignore')
 
-            # CHECK FOR PAYWALL/LOGIN WALLS
-            # If the returned text is very short or contains certain keywords, it failed
             if len(data) < CFG.SEARCH_MIN_CONTENT_LENGTH:
                 return "Error: Page content too short (likely blocked/empty)"
 
             return data
-            
+
     except OperationCancelled:
         raise
     except Exception as e:
