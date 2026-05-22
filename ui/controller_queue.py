@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import queue
 import time
 
 import dearpygui.dearpygui as dpg
+
+_LOG = logging.getLogger(__name__)
 
 from config import CFG
 from ui.controller_actions import (
@@ -342,6 +345,12 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 payload_fn = getattr(controller, "web_style_status_payload", None)
                 if callable(payload_fn):
                     forward_queue.put(("style_status", payload_fn()))
+            continue
+
+        if kind == "search_result":
+            _LOG.info("[SEARCH WEB] Handling search_result event.")
+            controller.maybe_speak_ui_event(kind, payload)
+            handle_search_result(controller, payload)
             continue
 
         if kind == "status_widget_mode":
