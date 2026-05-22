@@ -118,6 +118,16 @@ export default function App() {
     micStatusText,
   } = mic;
 
+  // Stable refs for bridge callbacks — prevent infinite re-registrations.
+  const abortMicRef = useRef(abortMicRecording);
+  const handleFrameRef = useRef(handleFrame);
+  const appendActivityRef = useRef(appendActivity);
+  const setTtsStateRef = useRef(setTtsState);
+  abortMicRef.current = abortMicRecording;
+  handleFrameRef.current = handleFrame;
+  appendActivityRef.current = appendActivity;
+  setTtsStateRef.current = setTtsState;
+
   const [inputText, setInputText] = useState("");
   const [codeInputText, setCodeInputText] = useState("");
   const [documentPathInput, setDocumentPathInput] = useState("");
@@ -145,26 +155,26 @@ export default function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [documentsView]);
 
-  // Bridge setup
+  // Bridge setup — empty deps: refs keep callbacks fresh without re-connects.
   useEffect(() => {
     const bridge = new PiperBridge({
       onStateChange: (state) => {
         setConnState(state);
         if (state === "disconnected" || state === "error") {
-          abortMicRecording(true);
-          setTtsState("idle");
+          abortMicRef.current(true);
+          setTtsStateRef.current("idle");
         }
       },
-      onFrame: handleFrame,
-      onError: (msg) => appendActivity(`[Bridge Error] ${msg}`),
+      onFrame: (frame) => handleFrameRef.current(frame),
+      onError: (msg) => appendActivityRef.current(`[Bridge Error] ${msg}`),
     });
     bridgeRef.current = bridge;
     bridge.connect();
     return () => {
-      abortMicRecording(true);
+      abortMicRef.current(true);
       bridge.disconnect();
     };
-  }, [handleFrame, appendActivity, abortMicRecording, setTtsState]);
+  }, []);
 
   const sendAction = useCallback(
     (action: string, payload: Record<string, unknown> = {}) => {
