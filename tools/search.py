@@ -4,6 +4,7 @@ Online Search Tool using DuckDuckGo + Jina.ai Reader.
 """
 
 import logging
+import time
 import urllib.request
 import urllib.parse
 import ssl
@@ -17,7 +18,7 @@ from pathlib import Path
 
 # Maximum bytes to read from a single page during deep-dive
 _FETCH_MAX_BYTES = 1024 * 1024  # 1 MiB
-_READ_CHUNK_SIZE = 16 * 1024    # 16 KiB chunks
+_READ_CHUNK_SIZE = 4 * 1024     # 4 KiB chunks
 
 from core.runtime_control import CancellationToken, OperationCancelled
 from core.search_contracts import SEARCH_TOOL_ERROR_PREFIX
@@ -122,6 +123,23 @@ _VERSIONED_NEWS_CONTEXT_TERMS = (
     "whats new",
 )
 
+# Deep-dive targets to skip (media-only / non-text pages)
+_SKIP_DEEP_DIVE_HOSTS = {"youtube.com", "youtu.be", "tiktok.com"}
+_SKIP_DEEP_DIVE_PATH_HINTS = ("/video", "/watch", "/shorts", "/live", "/embed")
+
+
+def _should_skip_deep_dive(url: str) -> bool:
+    """Return True for media-only URLs that waste the deep-dive budget."""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    if any(host == s or host.endswith(f".{s}") for s in _SKIP_DEEP_DIVE_HOSTS):
+        return True
+    path = parsed.path.lower()
+    if any(path.startswith(h) or h in path for h in _SKIP_DEEP_DIVE_PATH_HINTS):
+        return True
+    return False
+
+
 # 2. The "Magic" Reader (Jina.ai)
 def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
     if cancel_token is not None:
@@ -129,6 +147,7 @@ def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
 
 
 def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
+    deadline = time.monotonic() + CFG.SEARCH_FETCH_WALL_TIMEOUT_S
     try:
         _raise_if_cancelled(cancel_token)
         reader_url = f"https://r.jina.ai/{url}"
@@ -141,9 +160,14 @@ def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
             _raise_if_cancelled(cancel_token)
             chunks: list[bytes] = []
             total = 0
+            read_fn = getattr(resp, "read1", resp.read)
             while total < _FETCH_MAX_BYTES:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"fetch wall timeout after {CFG.SEARCH_FETCH_WALL_TIMEOUT_S}s"
+                    )
                 _raise_if_cancelled(cancel_token)
-                chunk = resp.read(_READ_CHUNK_SIZE)
+                chunk = read_fn(_READ_CHUNK_SIZE)
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -157,6 +181,8 @@ def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
 
     except OperationCancelled:
         raise
+    except TimeoutError:
+        return f"Error reading page: fetch wall timeout after {CFG.SEARCH_FETCH_WALL_TIMEOUT_S}s"
     except Exception as e:
         return f"Error reading page: {e}"
 
@@ -732,38 +758,53 @@ def perform_search(query: str, data_dir, log_callback=None, cancel_token: Cancel
     # 3. Greedy Deep Dive (Top 6 Links)
     output_parts.append("\n--- DEEP DIVE (Full Content) ---")
     log(f"Deep-diving up to {CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT} links.")
-    
+
     links_visited = 0
 
     for r in filtered:
         _raise_if_cancelled(cancel_token)
-        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT: break
-        
+        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT:
+            break
+
         link = _result_url(r)
-        if not link: continue
-        
-        log(clean_url(link))
-        content = fetch_clean_text(link, cancel_token=cancel_token)
-        
-        # Check for errors
-        if "Error reading page" in content:
-            # We can keep errors silent or logged to console only to keep UI clean?
-            # Let's log to console but not UI for cleaner activity window
-            # log(f"Skipped: {clean_url(link)} (Error)")
-            continue
-        if _looks_like_blocked_page(content):
-            log(f"Skipped blocked page: {clean_url(link)}")
-            continue
-        if not _content_matches_query(content, used_query):
-            log(f"Skipped low-relevance page content: {clean_url(link)}")
-            continue
-        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+        if not link:
             continue
 
+        if _should_skip_deep_dive(link):
+            log(f"Skipped (media target): {clean_url(link)}")
+            continue
+
+        t0 = time.monotonic()
+        log(f"Fetching: {clean_url(link)}")
+        content = fetch_clean_text(link, cancel_token=cancel_token)
+        elapsed = time.monotonic() - t0
+
+        if "Error reading page" in content:
+            reason = content.replace("Error reading page: ", "")
+            log(f"Skipped (fetch error): {clean_url(link)} reason={reason} elapsed={elapsed:.1f}s")
+            continue
+        if _looks_like_blocked_page(content):
+            log(f"Skipped (blocked): {clean_url(link)} elapsed={elapsed:.1f}s")
+            continue
+        if not _content_matches_query(content, used_query):
+            log(f"Skipped (low relevance): {clean_url(link)} elapsed={elapsed:.1f}s")
+            continue
+        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+            log(f"Skipped (too short): {clean_url(link)} chars={len(content)} elapsed={elapsed:.1f}s")
+            continue
+
+        log(f"Fetched: {clean_url(link)} chars={len(content)} elapsed={elapsed:.1f}s")
         output_parts.append(f"\nSource: {link}\nContent: {content[:CFG.SEARCH_CONTENT_SLICE_LENGTH]}")
         links_visited += 1
 
-    output_parts.append(f"\nSOURCE COVERAGE: {links_visited} readable source(s) from {len(filtered)} candidate result(s).")
+    output_parts.append(
+        f"\nSOURCE COVERAGE: {links_visited} readable source(s) from {len(filtered)} candidate result(s)."
+    )
+    log(f"Search deep-dive complete: {links_visited} readable / {len(filtered)} candidates")
+
+    result_text = "\n".join(output_parts)
+    log(f"Search context chars: {len(result_text)}")
+    log("Returning search context to caller")
 
     if links_visited == 0:
         if filtered:
@@ -772,8 +813,11 @@ def perform_search(query: str, data_dir, log_callback=None, cancel_token: Cancel
                 "No readable full-content pages were available. "
                 "Use the snippet evidence above only; do not infer article details beyond the title/snippet."
             )
-            return "\n".join(output_parts)
+            result_text = "\n".join(output_parts)
+            log(f"Search context chars: {len(result_text)}")
+            log("Returning search context to caller")
+            return result_text
         log("Error: Found results but could not read content from any link.")
         return f"{SEARCH_TOOL_ERROR_PREFIX} Found results but could not read content from any link."
 
-    return "\n".join(output_parts)
+    return result_text

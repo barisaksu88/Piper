@@ -872,6 +872,7 @@ class Config:
     SEARCH_SNIPPETS_LIMIT: int = 3
     SEARCH_DEEP_DIVE_LINKS_LIMIT: int = 6
     SEARCH_CONTENT_SLICE_LENGTH: int = 1500
+    SEARCH_FETCH_WALL_TIMEOUT_S: float = float(os.environ.get("PIPER_SEARCH_FETCH_WALL_TIMEOUT_S", "10.0"))
 
     # -----------------------------------------------------------------
     # Web UI bridge (default; DearPyGui remains available as fallback)
