@@ -33,7 +33,30 @@ for logger_name, level in (
 import atexit
 import queue
 import sys
+import time
 from pathlib import Path
+
+_MAX_RESTARTS = 3
+_RESTART_WINDOW_S = 60
+
+def _should_restart() -> bool:
+    """Return True if restart count is under the cap, using env vars for persistence."""
+    now = time.time()
+    count_str = os.environ.get("PIPER_RESTART_COUNT", "0")
+    first_str = os.environ.get("PIPER_RESTART_FIRST_TIME", "")
+    try:
+        count = int(count_str)
+    except ValueError:
+        count = 0
+    first = float(first_str) if first_str else now
+    elapsed = now - first
+    if elapsed > _RESTART_WINDOW_S:
+        count = 0
+        first = now
+    count += 1
+    os.environ["PIPER_RESTART_COUNT"] = str(count)
+    os.environ["PIPER_RESTART_FIRST_TIME"] = str(first)
+    return count <= _MAX_RESTARTS
 
 from core.agent import AgentBrain
 from core.environment_service import EnvironmentService
@@ -254,7 +277,13 @@ def main() -> int:
     else:
         exit_code = controller.run()
     if exit_code == RESTART_EXIT_CODE and os.environ.get("PIPER_LAUNCHER") != "batch":
-        os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+        if _should_restart():
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+        else:
+            logging.fatal(
+                "Restart loop detected: exceeded %s restarts within %s seconds. Exiting.",
+                _MAX_RESTARTS, _RESTART_WINDOW_S,
+            )
     return exit_code
 
 

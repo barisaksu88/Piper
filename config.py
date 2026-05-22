@@ -6,6 +6,7 @@ import os
 import shutil
 import fnmatch
 import re
+import threading
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
@@ -47,6 +48,39 @@ def data_benchmark_logs_dir(data_dir: Path) -> Path:
 
 def data_benchmark_scripts_dir(data_dir: Path) -> Path:
     return data_benchmarks_dir(data_dir) / "scripts"
+
+
+def _safe_path_exists(path: str, timeout_s: float = 2.0) -> bool:
+    """Windows-safe os.path.exists() that won't hang on disconnected network drives."""
+    if os.name != "nt":
+        return os.path.exists(path)
+    result: list[bool] = []
+    def _check() -> None:
+        try:
+            result.append(os.path.exists(path))
+        except Exception:
+            result.append(False)
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+    return result[0] if result else False
+
+
+def _safe_read_text(path: Path, timeout_s: float = 5.0) -> str | None:
+    """Read file text with a timeout to avoid hanging on network shares."""
+    result: list[str] = []
+    exception: list[Exception] = []
+    def _read() -> None:
+        try:
+            result.append(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            exception.append(exc)
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+    if exception:
+        raise exception[0]
+    return result[0] if result else None
 
 
 def data_harness_dir(data_dir: Path) -> Path:
@@ -733,7 +767,7 @@ class Config:
         LLAMA_SERVER_EXE = _env_llama_path
     elif _local_newer_llama.exists():
         LLAMA_SERVER_EXE = _local_newer_llama
-    elif os.path.exists(_hard_llama):
+    elif _safe_path_exists(_hard_llama):
         LLAMA_SERVER_EXE = Path(_hard_llama)
     else:
         LLAMA_SERVER_EXE = ROOT_DIR / "llama-server.exe"
@@ -755,7 +789,7 @@ class Config:
     # 3. ComfyUI
     # Check if the hardcoded path exists, otherwise look locally
     _hard_comfy = r"F:\ComfyUI_windows_portable"
-    if os.path.exists(_hard_comfy):
+    if _safe_path_exists(_hard_comfy):
         COMFY_DIR = Path(_hard_comfy)
     else:
         COMFY_DIR = ROOT_DIR / "ComfyUI"
@@ -807,7 +841,7 @@ class Config:
     SCREEN_POINTER_FOCUS_HEIGHT: int = 900
 
     _hard_kokoro = r"C:\Piper\models\kokoro"
-    if os.path.exists(_hard_kokoro):
+    if _safe_path_exists(_hard_kokoro):
         KOKORO_DIR = Path(_hard_kokoro)
     else:
         KOKORO_DIR = ROOT_DIR / "models" / "kokoro"
@@ -891,6 +925,7 @@ class LiveConfig:
             "config_override.json",
         )
         self._override_mtime: float = 0.0
+        self._lock = threading.Lock()
 
     @staticmethod
     def _public_values(source: Config) -> dict[str, Any]:
@@ -909,8 +944,9 @@ class LiveConfig:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
+        with self._lock:
+            if name in self._data:
+                return self._data[name]
         class_value = getattr(self._config_class, name, None)
         if class_value is not None and not isinstance(class_value, property) and not callable(class_value):
             return class_value
@@ -935,7 +971,8 @@ class LiveConfig:
                 continue
             coerced = self._coerce_override_value(self._data[key], value)
             if self._data[key] != coerced:
-                self._data[key] = coerced
+                with self._lock:
+                    self._data[key] = coerced
                 changed.append(key)
         if changed:
             self._notify(changed)
@@ -965,11 +1002,15 @@ class LiveConfig:
         current_mtime = stat_result.st_mtime
         if current_mtime == self._override_mtime:
             return []
-        self._override_mtime = current_mtime
+        with self._lock:
+            self._override_mtime = current_mtime
         if stat_result.st_size > 10240:
             return []
         try:
-            payload = json.loads(self._override_path.read_text(encoding="utf-8"))
+            text = _safe_read_text(self._override_path)
+            if text is None:
+                return []
+            payload = json.loads(text)
         except Exception:
             return []
         if not isinstance(payload, dict):
@@ -990,10 +1031,11 @@ class LiveConfig:
         defaults = Config()
         default_values = self._public_values(defaults)
         changed: list[str] = []
-        for name, default_value in default_values.items():
-            if name in self._data and self._data[name] != default_value:
-                self._data[name] = default_value
-                changed.append(name)
+        with self._lock:
+            for name, default_value in default_values.items():
+                if name in self._data and self._data[name] != default_value:
+                    self._data[name] = default_value
+                    changed.append(name)
         if changed:
             self._notify(changed)
         return changed
