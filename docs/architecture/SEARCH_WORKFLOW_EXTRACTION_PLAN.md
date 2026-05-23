@@ -1,7 +1,7 @@
 # Search Workflow Extraction Plan
 
-> **Status:** Stage 03 — helper extraction complete. Pure helpers moved to `core/engines/search_workflow.py`. No runtime behavior changed.
-> **Branch:** `audit/stage-03-search-workflow-helper-extraction`
+> **Status:** Stage 04 — reporter context extraction complete. `SearchWorkflowEngine` now owns reporter payload/instruction parsing via `prepare_reporter_context`. No runtime behavior changed.
+> **Branch:** `audit/stage-04-search-reporter-context`
 > **Owner:** core search lifecycle
 
 This document is the pre-extraction blueprint for extracting `SearchWorkflowEngine` from `core/orchestrator_phases.py`. It records live-code truth as of the inventory date and prescribes safe boundaries for future extraction stages.
@@ -185,12 +185,15 @@ These behaviors are **cross-cutting concerns** that must not be hidden inside a 
 │    **In-flight state remains orchestrator/controller-owned until a      │
 │    dedicated migration stage decides otherwise.**                      │
 │                                                                         │
-│  Reporter orchestration (called by phase_reporter):                    │
-│    - prepare_reporter_turn(orc) → ReporterTurnContext                  │
-│      (parses payload, decides failure vs success path,                 │
-│       loads reporter template, returns structured context)              │
+│  Reporter context parsing (implemented in Stage 04):                   │
+│    - prepare_reporter_context(recent_history) → SearchReporterContext  │
+│      (parses payload + instruction from history; immutable result)     │
+│                                                                         │
+│  Reporter orchestration (future — NOT in Stage 04):                    │
 │    - finalize_reporter_turn(orc, summary, query, failed)               │
 │      (sets orc attributes, replaces system messages)                    │
+│      **Reporter LLM generation, stats calls, chat mutation, and orc    │
+│      state assignment remain in phase_reporter.**                       │
 │                                                                         │
 │  Registry hooks (future — not in this stage):                          │
 │    - @register_hook("on_pre_route") → detect pending payload           │
@@ -227,12 +230,13 @@ class SearchWorkflowEngine:
     def is_in_flight(self) -> bool: ...
     def current_query(self) -> str | None: ...
 
-    # ── Reporter turn orchestration ──
+    # ── Reporter context parsing (Stage 04) ──
     def prepare_reporter_context(
         self,
-        recent_history: list[dict],
-    ) -> ReporterTurnContext: ...
+        recent_history: list[dict] | tuple[dict, ...] | None,
+    ) -> SearchReporterContext: ...
 
+    # ── Reporter orchestration (future) ──
     def finalize_reporter_turn(
         self,
         orc,

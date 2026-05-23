@@ -1,23 +1,85 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
-from core.search_contracts import normalize_search_error
+from core.search_contracts import (
+    is_background_search_payload,
+    is_search_reporter_instruction,
+    normalize_search_error,
+    parse_background_search_content,
+)
 
 _SEARCH_RECENCY_HINT_RE = re.compile(
     r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b"
 )
 
 
+@dataclass(frozen=True)
+class SearchReporterContext:
+    """Immutable result of parsing the reporter turn from recent history."""
+
+    raw_content: str = ""
+    instruction_content: str = ""
+    query: str = "Unknown Query"
+    data: str = ""
+    failed: bool = False
+    normalized_error: str = ""
+
+
 class SearchWorkflowEngine:
     """Pure helper/service methods for the search workflow lifecycle.
 
-    This module is a **direct-call utility** in Stage 03. It contains no
+    This module is a **direct-call utility** in Stage 03/04. It contains no
     registry hooks, no LLM calls, no threading, no I/O, and no in-flight
     state management.  In-flight state remains owned by the orchestrator
     and controller boundaries.
     """
+
+    def prepare_reporter_context(
+        self,
+        recent_history: list[dict] | tuple[dict, ...] | None,
+    ) -> SearchReporterContext:
+        """Scan recent history for the latest search payload and reporter instruction.
+
+        Mirrors the exact logic formerly inline in ``phase_reporter``:
+        - Walk reversed recent_history for the latest system message matching
+          ``is_background_search_payload``.
+        - Walk reversed recent_history for the latest system message matching
+          ``is_search_reporter_instruction``.
+        - Parse the payload with ``parse_background_search_content``.
+        - Return an immutable ``SearchReporterContext``.
+        """
+        raw_content = ""
+        instruction_content = ""
+
+        for message in reversed(list(recent_history or [])):
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "").strip().lower() == "system":
+                if is_background_search_payload(message.get("content", "")):
+                    raw_content = str(message.get("content", ""))
+                    break
+
+        for message in reversed(list(recent_history or [])):
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("role") or "").strip().lower() == "system":
+                if is_search_reporter_instruction(message.get("content", "")):
+                    instruction_content = str(message.get("content", ""))
+                    break
+
+        payload = parse_background_search_content(raw_content)
+        search_failed = bool(payload.failed)
+        return SearchReporterContext(
+            raw_content=raw_content,
+            instruction_content=instruction_content,
+            query=payload.query,
+            data=payload.data,
+            failed=search_failed,
+            normalized_error=normalize_search_error(payload.data) if search_failed else "",
+        )
 
     def build_search_failure_summary(self, query: str, error_text: str) -> str:
         clean_error = normalize_search_error(error_text) or "The search backend failed before returning usable results."

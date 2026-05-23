@@ -1452,26 +1452,16 @@ def phase_reporter(orc) -> None:
     orc.stats_collector.start_phase(orc.turn_stats, "reporter")
 
     recent_history = orc.get_context()[-6:]
-    raw_content = ""
-    instruction_content = ""
-    for message in reversed(recent_history):
-        if _is_pending_search_payload(message):
-            raw_content = message.get("content", "")
-            break
-
-    for message in reversed(recent_history):
-        if _is_search_reporter_instruction(message):
-            instruction_content = message.get("content", "")
-            break
-
-    payload = parse_background_search_content(raw_content)
-    query = payload.query
-    data = payload.data
-    search_failed = bool(payload.failed)
+    reporter_context = _SEARCH_WORKFLOW_ENGINE.prepare_reporter_context(recent_history)
+    raw_content = reporter_context.raw_content
+    instruction_content = reporter_context.instruction_content
+    query = reporter_context.query
+    data = reporter_context.data
+    search_failed = reporter_context.failed
 
     orc.stats_collector.note_reporter_query(orc.turn_stats, query)
     orc.latest_search_failed = search_failed
-    orc.latest_search_error = normalize_search_error(data) if search_failed else ""
+    orc.latest_search_error = reporter_context.normalized_error
 
     orc.ui.put(("status", "Analyzing Search Results..."))
     if search_failed:

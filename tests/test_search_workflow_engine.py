@@ -230,3 +230,110 @@ class TestBuildSearchReportHistory:
         ]
         result = engine.build_search_report_history(history, user_msg="user")
         assert result == [{"role": "user", "content": "user"}]
+
+
+# ── prepare_reporter_context ──
+
+class TestPrepareReporterContext:
+    def test_success_payload_and_instruction_found(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": "system", "content": build_background_search_content("Python 3.14", "Results here"), "hidden": True},
+            {"role": "system", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.raw_content == history[0]["content"]
+        assert ctx.instruction_content == SEARCH_REPORTER_INSTRUCTION
+        assert ctx.query == "Python 3.14"
+        assert ctx.data == "Results here"
+        assert ctx.failed is False
+        assert ctx.normalized_error == ""
+
+    def test_failure_payload_and_failure_instruction_found(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_FAILURE_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": "system", "content": build_background_search_content("Python 3.14", "Search Error: 403", failed=True), "hidden": True},
+            {"role": "system", "content": SEARCH_FAILURE_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.raw_content == history[0]["content"]
+        assert ctx.instruction_content == SEARCH_FAILURE_REPORTER_INSTRUCTION
+        assert ctx.query == "Python 3.14"
+        assert ctx.data == "Search Error: 403"
+        assert ctx.failed is True
+        assert ctx.normalized_error == "403"
+
+    def test_latest_payload_wins_when_multiple_exist(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import build_background_search_content
+
+        history = [
+            {"role": "system", "content": build_background_search_content("old query", "old data"), "hidden": True},
+            {"role": "system", "content": build_background_search_content("new query", "new data"), "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.query == "new query"
+        assert ctx.data == "new data"
+
+    def test_latest_instruction_wins_when_multiple_exist(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, SEARCH_FAILURE_REPORTER_INSTRUCTION
+
+        history = [
+            {"role": "system", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+            {"role": "system", "content": SEARCH_FAILURE_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.instruction_content == SEARCH_FAILURE_REPORTER_INSTRUCTION
+
+    def test_non_system_messages_ignored(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": "assistant", "content": build_background_search_content("x", "y")},
+            {"role": "user", "content": SEARCH_REPORTER_INSTRUCTION},
+            {"role": "system", "content": build_background_search_content("real", "data"), "hidden": True},
+            {"role": "system", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.query == "real"
+        assert ctx.data == "data"
+        assert ctx.instruction_content == SEARCH_REPORTER_INSTRUCTION
+
+    def test_no_payload_preserves_fallback(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_reporter_context([])
+        assert ctx.query == "Unknown Query"
+        assert ctx.data == ""
+        assert ctx.failed is False
+        assert ctx.normalized_error == ""
+        assert ctx.raw_content == ""
+        assert ctx.instruction_content == ""
+
+    def test_none_history_safe(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_reporter_context(None)
+        assert ctx.query == "Unknown Query"
+        assert ctx.failed is False
+
+    def test_malformed_non_dict_items_skipped(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            None,
+            "not a dict",
+            123,
+            {"role": "system", "content": build_background_search_content("safe", "data"), "hidden": True},
+            {"role": "system", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.query == "safe"
+        assert ctx.instruction_content == SEARCH_REPORTER_INSTRUCTION
+
+    def test_input_not_mutated(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import build_background_search_content
+
+        history = [
+            {"role": "system", "content": build_background_search_content("q", "d"), "hidden": True},
+        ]
+        original = [dict(item) for item in history]
+        engine.prepare_reporter_context(history)
+        assert history == original
