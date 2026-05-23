@@ -1427,6 +1427,37 @@ class ActiveUserRuntime:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
 
+    def activate_dev_admin_override(self, source: str = "text") -> UserActivationResult:
+        """Activate the configured admin profile without password checks.
+
+        This is intended for local development only (e.g., Web UI on localhost).
+        It does not create a new admin profile if one already exists.
+        It does not weaken request_typed_user_switch, submit_admin_password,
+        verify_admin_password, or voice matching.
+        """
+        target_profile = self.registry.profile_for_id(self.registry.admin_user_id)
+        if target_profile is None:
+            target_profile = self.registry.profile_for_id(DEFAULT_ADMIN_USER_ID)
+        if target_profile is None or target_profile.is_unknown:
+            # Ensure admin payload exists in registry
+            target_profile = self.registry._coerce_profile(
+                self.registry._default_admin_payload(),
+                fallback_id=self.registry.admin_user_id,
+            )
+        result = self._activate_target_profile(target_profile)
+        profile = result.profile
+        role = "admin" if profile.is_admin else "user"
+        message = (
+            f"[DEV] Trusted admin text-input mode activated via {source}. "
+            f"Active user forced to {profile.name} [{profile.user_id}; {role}]."
+        )
+        return UserActivationResult(
+            status="switched",
+            profile=profile,
+            created=result.created,
+            message=message,
+        )
+
     def activate_voice_match(
         self,
         matched_user_id: str,

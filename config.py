@@ -909,6 +909,12 @@ class Config:
     WEB_UI_WINDOW: bool = field(
         default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", True)
     )
+    DEV_TRUSTED_ADMIN_TEXT_INPUT: bool = field(
+        default_factory=lambda: _env_flag("PIPER_DEV_TRUSTED_ADMIN_TEXT_INPUT", False)
+    )
+    DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST: bool = field(
+        default_factory=lambda: _env_flag("PIPER_DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST", True)
+    )
 
 
 class LiveConfig:
