@@ -18,6 +18,7 @@ from core.engines.context_pack import _hook_upsert_runtime_context
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.engines.summary import SummaryEngine
+from core.engines.search_workflow import SearchWorkflowEngine
 from core.engines.proactive_monitor import (
     PROACTIVE_TRIGGER_PREFIX,
     ReminderStore,
@@ -81,25 +82,7 @@ _SCRATCHPAD_ERROR_PREFIXES = (
     "execution error:",
 )
 _SEARCH_RECENCY_HINT_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b")
-_SEARCH_PREVIEW_SOURCE_CHOICE_WORDS = {
-    "actually",
-    "do",
-    "internet",
-    "instead",
-    "it",
-    "online",
-    "please",
-    "pls",
-    "search",
-    "that",
-    "the",
-    "web",
-    "yeah",
-    "yep",
-    "yes",
-}
-_SEARCH_PREVIEW_SOURCE_WORDS = {"internet", "online", "web"}
-_SEARCH_SUMMARY_QUERY_RE = re.compile(r"(?is)^\[SEARCH SUMMARY FOR ['\"](?P<query>.+?)['\"]\]")
+_SEARCH_WORKFLOW_ENGINE = SearchWorkflowEngine()
 _INGESTED_DOC_META_ACTION_RE = re.compile(
     r"(?i)^\s*/ingest\b|\b(ingest|upload|import|attach|add)\b.*\b(document|pdf|docx|file)\b"
 )
@@ -279,30 +262,11 @@ def _is_search_reporter_instruction(message: dict) -> bool:
 
 
 def _build_search_failure_summary(query: str, error_text: str) -> str:
-    clean_error = normalize_search_error(error_text) or "The search backend failed before returning usable results."
-    clean_query = str(query or "Unknown Query").strip() or "Unknown Query"
-    return "\n".join(
-        [
-            "The web search failed before usable results were retrieved.",
-            f"- Query: {clean_query}",
-            f"- Error: {clean_error}",
-            "- Verified web findings: none.",
-        ]
-    )
+    return _SEARCH_WORKFLOW_ENGINE.build_search_failure_summary(query, error_text)
 
 
 def _summarize_search_error_for_user(error_text: str) -> str:
-    clean_error = normalize_search_error(error_text) or "the search backend failed"
-    lower = clean_error.casefold()
-    if "zero results" in lower:
-        return "the search provider returned zero usable results"
-    if "403" in lower and "ratelimit" in lower:
-        return "the search provider returned HTTP 403 Ratelimit"
-    if "403" in lower:
-        return "the search provider returned HTTP 403"
-    if "rate" in lower and "limit" in lower:
-        return "the search provider rate-limited the request"
-    return clean_error
+    return _SEARCH_WORKFLOW_ENGINE.summarize_search_error_for_user(error_text)
 
 
 def _build_search_failed_persona_reply(orc) -> str:
@@ -315,89 +279,22 @@ def _build_search_failed_persona_reply(orc) -> str:
 
 
 def _build_search_in_flight_reply(notice: dict) -> str:
-    active_query = str(notice.get("active_query", "") or "").strip()
-    requested_query = str(notice.get("requested_query", "") or "").strip()
-    if active_query and requested_query and active_query.casefold() != requested_query.casefold():
-        return (
-            f'I already have a web search running for "{active_query}". '
-            f'Let that finish first, then ask again about "{requested_query}" and I will take it next.'
-        )
-    if active_query:
-        return (
-            f'I already have a web search running for "{active_query}". '
-            "Let that finish first, then ask again if you want me to continue from there."
-        )
-    if requested_query:
-        return (
-            "I already have a web search running right now. "
-            f'Let that finish first, then ask again about "{requested_query}" and I will take it next.'
-        )
-    return "I already have a web search running right now. Let that finish first, then ask again and I will take the next search."
+    return _SEARCH_WORKFLOW_ENGINE.build_search_in_flight_reply(
+        notice.get("active_query", ""),
+        notice.get("requested_query", ""),
+    )
 
 
 def _build_search_first_pass_rule(query: str) -> str:
-    clean_query = str(query or "").strip()
-    lines = [
-        "[SEARCH_FIRST_PASS_RULE]",
-        "A background web search is already running for the user's latest request.",
-    ]
-    if clean_query:
-        lines.append(f"Search query: {clean_query}")
-    lines.extend(
-        [
-            "While it runs, engage with the topic using the current system context and your existing knowledge only.",
-            "Give a useful first-pass response: relevant context, a best-effort answer, or one focused follow-up question if that would materially help.",
-            "The runtime will automatically deliver the completed search results on this same turn as soon as the search finishes.",
-            "Do not ask whether to proceed, whether the user wants the results, or whether you should continue once the search completes.",
-            "Do not tell the user to wait, reply, or confirm before the search finishes.",
-            "If you ask a question, it must clarify the search topic itself, not permission to continue the search.",
-            "Stay tightly on the search topic. Do not riff on unrelated profile facts, tasks, events, memories, or document excerpts.",
-            "Ignore any personal or workspace context unless it is directly relevant to the search query itself.",
-            "If the query asks for externally verifiable facts, results, status, rankings, dates, specs, or claims not supplied by current system context, frame uncertainty plainly and defer specifics until the web results arrive.",
-            "Do not speculate that the web findings are empty, quiet, lacking breakthroughs, or already leaning one way unless the current system context explicitly says so.",
-            "Do not present your existing knowledge as if it came from the live web search.",
-            "Make it clear the web findings will follow shortly.",
-            "Do not emit control tags such as [ROUTER] or [RECALL].",
-        ]
-    )
-    if _SEARCH_RECENCY_HINT_RE.search(clean_query):
-        lines.extend(
-            [
-                "The query is recency-sensitive. Do not state current/live facts, release status, dates, version status, rankings, prices, or 'latest news' claims from memory.",
-                "For recency-sensitive searches, keep the first-pass response brief: say what you are checking and defer factual claims until the web results arrive.",
-                "Do not say a version is already out, current, upcoming, quiet, settled, or lacking news unless supplied by explicit current system evidence.",
-            ]
-        )
-    return "\n".join(lines)
+    return _SEARCH_WORKFLOW_ENGINE.build_search_first_pass_rule(query)
 
 
 def _build_search_first_pass_fallback(query: str) -> str:
-    clean_query = str(query or "").strip()
-    clean_query = re.sub(
-        r"(?i)^\s*(?:please\s+)?(?:search(?:\s+the\s+web)?\s+for|look\s+up|look\s+for|find|locate)\s+",
-        "",
-        clean_query,
-        count=1,
-    ).strip(" .?!")
-    if clean_query:
-        return f'I\'m checking the web for "{clean_query}" now. I\'ll bring the results back automatically in a moment.'
-    return "I'm checking the web for that now. I'll bring the results back automatically in a moment."
+    return _SEARCH_WORKFLOW_ENGINE.build_search_first_pass_fallback(query)
 
 
 def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
-    raw_user = str(user_msg or "").strip()
-    clean_query = str(query or "").strip()
-    current_user = raw_user or clean_query
-    if clean_query and raw_user and raw_user.casefold() != clean_query.casefold():
-        words = set(re.findall(r"[a-z]+", raw_user.casefold()))
-        source_choice_only = bool(words & _SEARCH_PREVIEW_SOURCE_WORDS) and words.issubset(
-            _SEARCH_PREVIEW_SOURCE_CHOICE_WORDS
-        )
-        if source_choice_only:
-            current_user = f"Search the web for {clean_query}."
-    if not current_user:
-        return []
-    return [{"role": "user", "content": current_user}]
+    return _SEARCH_WORKFLOW_ENGINE.build_search_preview_history(user_msg, query)
 
 
 def _build_search_report_history(
@@ -405,22 +302,7 @@ def _build_search_report_history(
     *,
     user_msg: str,
 ) -> list[dict[str, str]]:
-    filtered: list[dict[str, str]] = []
-    latest_summary = None
-    latest_summary_query = ""
-    for message in reversed(list(history or [])):
-        if str(message.get("role") or "").strip().lower() != "system":
-            continue
-        content = str(message.get("content") or "").strip()
-        if content.startswith("[SEARCH SUMMARY FOR "):
-            latest_summary = {"role": "system", "content": content}
-            match = _SEARCH_SUMMARY_QUERY_RE.match(content)
-            latest_summary_query = str(match.group("query") if match else "").strip()
-            break
-    if latest_summary is not None:
-        filtered.append(latest_summary)
-    filtered.extend(_build_search_preview_history(user_msg, latest_summary_query or user_msg))
-    return filtered
+    return _SEARCH_WORKFLOW_ENGINE.build_search_report_history(history, user_msg=user_msg)
 
 
 def _scratchpad_steps_executed(stage_log: list[str]) -> bool:
