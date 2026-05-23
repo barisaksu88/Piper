@@ -413,3 +413,10 @@ class TestPreparePreviewContext:
         ctx = engine.prepare_preview_context(user_msg="hello", query="world")
         with pytest.raises(AttributeError):
             ctx.query = "changed"  # type: ignore[misc]
+
+    def test_default_history_is_not_shared_between_instances(self, engine: SearchWorkflowEngine) -> None:
+        ctx1 = engine.prepare_preview_context(user_msg="", query="")
+        ctx2 = engine.prepare_preview_context(user_msg="", query="")
+        assert ctx1.history is not ctx2.history
+        ctx1.history.append({"role": "user", "content": "mutated"})
+        assert ctx2.history == []

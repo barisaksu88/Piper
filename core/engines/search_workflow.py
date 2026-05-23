@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.search_contracts import (
@@ -33,14 +33,10 @@ class SearchPreviewContext:
     """Immutable inputs for the search first-pass preview turn."""
 
     query: str = ""
-    history: list[dict[str, str]] = None  # type: ignore[assignment]
+    history: list[dict[str, str]] = field(default_factory=list)
     first_pass_rule: str = ""
     fallback_text: str = ""
     recency_sensitive: bool = False
-
-    def __post_init__(self) -> None:
-        # frozen dataclass with mutable default workaround
-        object.__setattr__(self, "history", list(self.history or []))
 
 
 class SearchWorkflowEngine:
