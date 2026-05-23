@@ -57,7 +57,7 @@ class SearchWorkflowEngine:
         for message in reversed(list(recent_history or [])):
             if not isinstance(message, dict):
                 continue
-            if str(message.get("role") or "").strip().lower() == "system":
+            if message.get("role") == "system":
                 if is_background_search_payload(message.get("content", "")):
                     raw_content = str(message.get("content", ""))
                     break
@@ -65,7 +65,7 @@ class SearchWorkflowEngine:
         for message in reversed(list(recent_history or [])):
             if not isinstance(message, dict):
                 continue
-            if str(message.get("role") or "").strip().lower() == "system":
+            if message.get("role") == "system":
                 if is_search_reporter_instruction(message.get("content", "")):
                     instruction_content = str(message.get("content", ""))
                     break

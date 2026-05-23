@@ -337,3 +337,39 @@ class TestPrepareReporterContext:
         original = [dict(item) for item in history]
         engine.prepare_reporter_context(history)
         assert history == original
+
+    def test_role_case_sensitive_system_ignored(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": "System", "content": build_background_search_content("case", "test"), "hidden": True},
+            {"role": "System", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.raw_content == ""
+        assert ctx.instruction_content == ""
+        assert ctx.query == "Unknown Query"
+
+    def test_role_whitespace_system_ignored(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": " system ", "content": build_background_search_content("space", "test"), "hidden": True},
+            {"role": " system ", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.raw_content == ""
+        assert ctx.instruction_content == ""
+        assert ctx.query == "Unknown Query"
+
+    def test_exact_role_system_accepted(self, engine: SearchWorkflowEngine) -> None:
+        from core.search_contracts import SEARCH_REPORTER_INSTRUCTION, build_background_search_content
+
+        history = [
+            {"role": "system", "content": build_background_search_content("exact", "match"), "hidden": True},
+            {"role": "system", "content": SEARCH_REPORTER_INSTRUCTION, "hidden": True},
+        ]
+        ctx = engine.prepare_reporter_context(history)
+        assert ctx.raw_content == history[0]["content"]
+        assert ctx.instruction_content == SEARCH_REPORTER_INSTRUCTION
+        assert ctx.query == "exact"
