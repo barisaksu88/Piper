@@ -1335,20 +1335,23 @@ def phase_search(orc) -> None:
         reporter_just_ran=False,
     )
     prompt_context = orc.prompt_context.to_prompt_context(prompt_pack)
+    preview_context = _SEARCH_WORKFLOW_ENGINE.prepare_preview_context(
+        user_msg=orc.user_msg,
+        query=query,
+    )
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
-    history = _build_search_preview_history(orc.user_msg, query)
     speak_messages = build_persona_messages(
         system_content=system_content,
-        history=history,
-        tail_system_content=_build_search_first_pass_rule(query),
+        history=preview_context.history,
+        tail_system_content=preview_context.first_pass_rule,
         model_path=getattr(CFG, "MODEL_PATH", None),
     )
     if CFG.DEBUG_LLM_PROMPTS:
         log_prompt_debug(CFG.PERSONA_DEBUG_PATH, speak_messages, "SEARCH_FIRST_PASS")
 
-    fallback_text = _build_search_first_pass_fallback(query)
+    fallback_text = preview_context.fallback_text
     full_answer = ""
-    if _SEARCH_RECENCY_HINT_RE.search(str(query or "")):
+    if preview_context.recency_sensitive:
         _emit_fallback_assistant_answer(orc, fallback_text)
     else:
         orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
@@ -1533,27 +1536,17 @@ def phase_reporter(orc) -> None:
     orc.stats_collector.start_phase(orc.turn_stats, "reporter")
 
     recent_history = orc.get_context()[-6:]
-    raw_content = ""
-    instruction_content = ""
-    for message in reversed(recent_history):
-        if _is_pending_search_payload(message):
-            raw_content = message.get("content", "")
-            break
-
-    for message in reversed(recent_history):
-        if _is_search_reporter_instruction(message):
-            instruction_content = message.get("content", "")
-            break
-
-    payload = parse_background_search_content(raw_content)
-    query = payload.query
-    data = payload.data
-    search_failed = bool(payload.failed)
+    reporter_context = _SEARCH_WORKFLOW_ENGINE.prepare_reporter_context(recent_history)
+    raw_content = reporter_context.raw_content
+    instruction_content = reporter_context.instruction_content
+    query = reporter_context.query
+    data = reporter_context.data
+    search_failed = reporter_context.failed
 
     orc.stats_collector.note_reporter_query(orc.turn_stats, query)
     orc.latest_search_query = query
     orc.latest_search_failed = search_failed
-    orc.latest_search_error = normalize_search_error(data) if search_failed else ""
+    orc.latest_search_error = reporter_context.normalized_error if search_failed else ""
 
     orc.ui.put(("status", "Analyzing Search Results..."))
     if search_failed:
