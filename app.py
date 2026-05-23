@@ -128,6 +128,25 @@ def build_controller() -> PiperController:
         admin_name="Baris",
         default_style_filename=style_mgr.active_filename,
     )
+
+    # Dev-only trusted admin text-input mode for local development
+    if getattr(CFG, "DEV_TRUSTED_ADMIN_TEXT_INPUT", False):
+        web_ui_host = getattr(CFG, "WEB_UI_HOST", "127.0.0.1")
+        web_ui_enabled = getattr(CFG, "WEB_UI_ENABLED", True)
+        localhost_hosts = {"127.0.0.1", "localhost", "::1"}
+        is_local = (not web_ui_enabled) or (web_ui_host in localhost_hosts)
+        require_localhost = getattr(CFG, "DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST", True)
+        if is_local or not require_localhost:
+            result = user_runtime.activate_dev_admin_override(source="text")
+            logging.getLogger(__name__).info(result.message)
+        else:
+            logging.getLogger(__name__).warning(
+                "[DEV] DEV_TRUSTED_ADMIN_TEXT_INPUT is enabled but host %s is not localhost. "
+                "Set DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST=false to allow non-localhost, "
+                "or set PIPER_WEB_UI_HOST to 127.0.0.1.",
+                web_ui_host,
+            )
+
     active_user_style = user_runtime.current_style_filename()
     if active_user_style:
         style_mgr.active_filename = active_user_style
