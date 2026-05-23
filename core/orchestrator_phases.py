@@ -1272,19 +1272,22 @@ def phase_search(orc) -> None:
     )
     prompt_context = orc.prompt_context.to_prompt_context(prompt_pack)
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
-    history = _build_search_preview_history(orc.user_msg, query)
+    preview_context = _SEARCH_WORKFLOW_ENGINE.prepare_preview_context(
+        user_msg=orc.user_msg,
+        query=query,
+    )
     speak_messages = build_persona_messages(
         system_content=system_content,
-        history=history,
-        tail_system_content=_build_search_first_pass_rule(query),
+        history=preview_context.history,
+        tail_system_content=preview_context.first_pass_rule,
         model_path=getattr(CFG, "MODEL_PATH", None),
     )
     if CFG.DEBUG_LLM_PROMPTS:
         log_prompt_debug(CFG.PERSONA_DEBUG_PATH, speak_messages, "SEARCH_FIRST_PASS")
 
-    fallback_text = _build_search_first_pass_fallback(query)
+    fallback_text = preview_context.fallback_text
     full_answer = ""
-    if _SEARCH_RECENCY_HINT_RE.search(str(query or "")):
+    if preview_context.recency_sensitive:
         _emit_fallback_assistant_answer(orc, fallback_text)
     else:
         orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))

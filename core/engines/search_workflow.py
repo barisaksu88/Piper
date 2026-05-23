@@ -28,6 +28,21 @@ class SearchReporterContext:
     normalized_error: str = ""
 
 
+@dataclass(frozen=True)
+class SearchPreviewContext:
+    """Immutable inputs for the search first-pass preview turn."""
+
+    query: str = ""
+    history: list[dict[str, str]] = None  # type: ignore[assignment]
+    first_pass_rule: str = ""
+    fallback_text: str = ""
+    recency_sensitive: bool = False
+
+    def __post_init__(self) -> None:
+        # frozen dataclass with mutable default workaround
+        object.__setattr__(self, "history", list(self.history or []))
+
+
 class SearchWorkflowEngine:
     """Pure helper/service methods for the search workflow lifecycle.
 
@@ -79,6 +94,26 @@ class SearchWorkflowEngine:
             data=payload.data,
             failed=search_failed,
             normalized_error=normalize_search_error(payload.data) if search_failed else "",
+        )
+
+    def prepare_preview_context(
+        self,
+        *,
+        user_msg: str,
+        query: str,
+    ) -> SearchPreviewContext:
+        """Build immutable preview inputs for ``phase_search``.
+
+        Uses existing engine helpers so ``phase_search`` only calls
+        one method instead of four separate helpers.
+        """
+        clean_query = str(query or "").strip()
+        return SearchPreviewContext(
+            query=clean_query,
+            history=self.build_search_preview_history(user_msg, query),
+            first_pass_rule=self.build_search_first_pass_rule(query),
+            fallback_text=self.build_search_first_pass_fallback(query),
+            recency_sensitive=bool(_SEARCH_RECENCY_HINT_RE.search(str(query or ""))),
         )
 
     def build_search_failure_summary(self, query: str, error_text: str) -> str:

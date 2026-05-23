@@ -373,3 +373,43 @@ class TestPrepareReporterContext:
         assert ctx.raw_content == history[0]["content"]
         assert ctx.instruction_content == SEARCH_REPORTER_INSTRUCTION
         assert ctx.query == "exact"
+
+
+# ── prepare_preview_context ──
+
+class TestPreparePreviewContext:
+    def test_normal_query_returns_all_fields(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_preview_context(user_msg="search for Python", query="Python")
+        assert ctx.query == "Python"
+        assert ctx.history == [{"role": "user", "content": "search for Python"}]
+        assert "[SEARCH_FIRST_PASS_RULE]" in ctx.first_pass_rule
+        assert 'checking the web for "Python"' in ctx.fallback_text
+        assert ctx.recency_sensitive is False
+
+    def test_recency_query_sets_recency_sensitive_true(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_preview_context(user_msg="latest news", query="latest news")
+        assert ctx.recency_sensitive is True
+        assert "recency-sensitive" in ctx.first_pass_rule
+
+    def test_ordinary_query_sets_recency_sensitive_false(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_preview_context(user_msg="Python docs", query="Python docs")
+        assert ctx.recency_sensitive is False
+        assert "recency-sensitive" not in ctx.first_pass_rule
+
+    def test_empty_user_msg_falls_back_to_query_in_history(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_preview_context(user_msg="", query="Django")
+        assert ctx.history == [{"role": "user", "content": "Django"}]
+        assert ctx.query == "Django"
+
+    def test_empty_user_msg_and_empty_query_returns_empty_history_and_generic_fallback(
+        self, engine: SearchWorkflowEngine
+    ) -> None:
+        ctx = engine.prepare_preview_context(user_msg="", query="")
+        assert ctx.history == []
+        assert ctx.query == ""
+        assert ctx.fallback_text == "I'm checking the web for that now. I'll bring the results back automatically in a moment."
+
+    def test_preview_context_is_frozen(self, engine: SearchWorkflowEngine) -> None:
+        ctx = engine.prepare_preview_context(user_msg="hello", query="world")
+        with pytest.raises(AttributeError):
+            ctx.query = "changed"  # type: ignore[misc]

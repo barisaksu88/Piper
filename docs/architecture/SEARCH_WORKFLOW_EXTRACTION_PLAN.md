@@ -1,7 +1,7 @@
 # Search Workflow Extraction Plan
 
-> **Status:** Stage 04 — reporter context extraction complete. `SearchWorkflowEngine` now owns reporter payload/instruction parsing via `prepare_reporter_context`. No runtime behavior changed.
-> **Branch:** `audit/stage-04-search-reporter-context`
+> **Status:** Stage 05 — preview context extraction complete. `SearchWorkflowEngine` now owns reporter payload/instruction parsing (`prepare_reporter_context`) and search first-pass preview preparation (`prepare_preview_context`). No runtime behavior changed.
+> **Branch:** `audit/stage-05-search-preview-context`
 > **Owner:** core search lifecycle
 
 This document is the pre-extraction blueprint for extracting `SearchWorkflowEngine` from `core/orchestrator_phases.py`. It records live-code truth as of the inventory date and prescribes safe boundaries for future extraction stages.
