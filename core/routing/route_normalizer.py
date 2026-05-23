@@ -44,9 +44,6 @@ from core.routing.route_patterns import (
     EXPLICIT_ASSISTANT_REQUEST_RE,
     _FILE_PATH_TOKEN,
 )
-from core.routing.route_subjects import (
-    looks_like_task_creation,
-)
 from core.search.topic_resolver import resolve_search_topic
 
 _DOCUMENT_READ_REQUEST_RE = re.compile(
