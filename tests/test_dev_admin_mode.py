@@ -31,33 +31,76 @@ class TestConfigDefaults:
         assert getattr(CFG, "DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST", None) is True
 
 
-# ── localhost guard (mirrors app.py logic) ──
+# ── localhost guard (tests the real helper) ──
+
+from core.dev_mode import is_dev_trusted_admin_text_allowed
+
 
 class TestLocalhostGuard:
-    def _is_local(self, host: str, web_ui_enabled: bool = True) -> bool:
-        localhost_hosts = {"127.0.0.1", "localhost", "::1"}
-        return (not web_ui_enabled) or (host in localhost_hosts)
-
     def test_accepts_127_0_0_1(self) -> None:
-        assert self._is_local("127.0.0.1") is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="127.0.0.1", require_localhost=True
+        ) is True
 
     def test_accepts_localhost(self) -> None:
-        assert self._is_local("localhost") is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="localhost", require_localhost=True
+        ) is True
 
     def test_accepts_ipv6_loopback(self) -> None:
-        assert self._is_local("::1") is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="::1", require_localhost=True
+        ) is True
+
+    def test_accepts_bracket_ipv6_loopback(self) -> None:
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="[::1]", require_localhost=True
+        ) is True
+
+    def test_accepts_uppercase_localhost(self) -> None:
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="LOCALHOST", require_localhost=True
+        ) is True
+
+    def test_accepts_whitespace_localhost(self) -> None:
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="  localhost  ", require_localhost=True
+        ) is True
 
     def test_rejects_0_0_0_0(self) -> None:
-        assert self._is_local("0.0.0.0") is False
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="0.0.0.0", require_localhost=True
+        ) is False
 
     def test_rejects_external_host(self) -> None:
-        assert self._is_local("192.168.1.50") is False
-        assert self._is_local("example.com") is False
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="192.168.1.50", require_localhost=True
+        ) is False
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="example.com", require_localhost=True
+        ) is False
+
+    def test_rejects_empty_host_when_web_ui_enabled(self) -> None:
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="", require_localhost=True
+        ) is False
 
     def test_dpg_mode_considers_local(self) -> None:
         # When Web UI is disabled (DPG only), any host is treated as local
-        assert self._is_local("0.0.0.0", web_ui_enabled=False) is True
-        assert self._is_local("192.168.1.50", web_ui_enabled=False) is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=False, web_ui_host="0.0.0.0", require_localhost=True
+        ) is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=False, web_ui_host="192.168.1.50", require_localhost=True
+        ) is True
+
+    def test_require_localhost_false_allows_non_localhost(self) -> None:
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="0.0.0.0", require_localhost=False
+        ) is True
+        assert is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=True, web_ui_host="192.168.1.50", require_localhost=False
+        ) is True
 
 
 # ── activate_dev_admin_override ──

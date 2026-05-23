@@ -131,12 +131,16 @@ def build_controller() -> PiperController:
 
     # Dev-only trusted admin text-input mode for local development
     if getattr(CFG, "DEV_TRUSTED_ADMIN_TEXT_INPUT", False):
+        from core.dev_mode import is_dev_trusted_admin_text_allowed
+
         web_ui_host = getattr(CFG, "WEB_UI_HOST", "127.0.0.1")
         web_ui_enabled = getattr(CFG, "WEB_UI_ENABLED", True)
-        localhost_hosts = {"127.0.0.1", "localhost", "::1"}
-        is_local = (not web_ui_enabled) or (web_ui_host in localhost_hosts)
         require_localhost = getattr(CFG, "DEV_TRUSTED_ADMIN_TEXT_REQUIRE_LOCALHOST", True)
-        if is_local or not require_localhost:
+        if is_dev_trusted_admin_text_allowed(
+            web_ui_enabled=web_ui_enabled,
+            web_ui_host=web_ui_host,
+            require_localhost=require_localhost,
+        ):
             result = user_runtime.activate_dev_admin_override(source="text")
             logging.getLogger(__name__).info(result.message)
         else:
