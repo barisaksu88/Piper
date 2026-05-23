@@ -27,6 +27,28 @@ def _log_voice_debug(message: str) -> None:
         pass
 
 
+def _voice_decision_debug_line(*, mode: str, active_user: str, decision) -> str:
+    best_user = str(getattr(decision, "best_user", "") or "none")
+    best_score = float(getattr(decision, "best_score", 0.0) or 0.0)
+    second_score = float(getattr(decision, "second_score", 0.0) or 0.0)
+    margin = float(getattr(decision, "margin", 0.0) or 0.0)
+    best_is_admin = bool(getattr(decision, "best_is_admin", False))
+    threshold = float(getattr(decision, "threshold", 0.0) or 0.0)
+    margin_threshold = float(getattr(decision, "margin_threshold", 0.0) or 0.0)
+    final_decision = str(getattr(decision, "decision", "") or "unknown")
+    reason = str(getattr(decision, "reason", "") or "none")
+    final_user = str(getattr(decision, "final_user", "") or "none")
+    return (
+        "match "
+        f"mode={mode} active={active_user or 'unknown'} "
+        f"best_user={best_user} best_score={best_score:.3f} "
+        f"second_score={second_score:.3f} margin={margin:.3f} "
+        f"best_is_admin={str(best_is_admin).lower()} "
+        f"threshold={threshold:.3f} margin_threshold={margin_threshold:.3f} "
+        f"final_decision={final_decision} final_user={final_user} reason={reason}"
+    )
+
+
 def _load_sounddevice():
     global _sd, _sounddevice_error
     if _sd is not None:
@@ -56,8 +78,126 @@ def _load_whisper_model_class():
     _WhisperModel = model_cls
     return model_cls
 
+
 class STTError(RuntimeError):
     pass
+
+
+def _concatenate_audio_chunks(chunks: list[np.ndarray]) -> np.ndarray:
+    """Concatenate a list of audio chunk arrays."""
+    if not chunks:
+        return np.array([], dtype=np.int16)
+    return np.concatenate(chunks, axis=0)
+
+
+def _rms_gate(audio_data: np.ndarray, min_rms: float) -> bool:
+    """Return True if audio passes the RMS no-speech gate."""
+    if audio_data.size == 0:
+        return False
+    rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
+    return rms >= min_rms
+
+
+def _normalize_and_resample(audio_data: np.ndarray, source_sr: int) -> np.ndarray:
+    """Convert int16 audio to float32 mono and resample to 16 kHz if needed."""
+    audio_float = audio_data.astype(np.float32) / 32768.0
+    audio_mono = audio_float.squeeze()
+    if source_sr != 16000:
+        source_idx = np.arange(audio_mono.shape[0], dtype=np.float32)
+        target_len = max(1, int(round(audio_mono.shape[0] * 16000 / source_sr)))
+        target_idx = np.linspace(0, audio_mono.shape[0] - 1, num=target_len, dtype=np.float32)
+        audio_downsampled = np.interp(target_idx, source_idx, audio_mono).astype(np.float32)
+    else:
+        audio_downsampled = audio_mono.astype(np.float32)
+    return audio_downsampled
+
+
+def _transcribe_audio_array(model, audio_float32_16k: np.ndarray) -> str:
+    """Run Faster-Whisper transcription on a normalized audio array."""
+    segments, _info = model.transcribe(
+        audio_float32_16k,
+        beam_size=5,
+        language="en",
+        condition_on_previous_text=False,
+    )
+    return "".join([seg.text for seg in segments]).strip()
+
+
+def _run_voice_identity_hook(
+    engine: "STTEngine",
+    audio_samples: np.ndarray,
+) -> None:
+    """Run voice recognition / enrollment on the given audio samples.
+
+    Sets ``engine._last_voice_match`` and ``engine._last_audio_samples``.
+    """
+    try:
+        from core.voice_recognition import get_voice_engine
+        from config import CFG
+
+        engine._last_audio_samples = audio_samples
+
+        if not CFG.VOICE_RECOGNITION_ENABLED:
+            return
+
+        voice_engine = get_voice_engine()
+        if not voice_engine.available():
+            return
+
+        embedding = voice_engine.extract_embedding(audio_samples)
+        if embedding is None:
+            return
+
+        current_user_id = str(getattr(engine, "_active_voice_user_id", "") or "").strip()
+        current_is_unknown = bool(getattr(engine, "_active_voice_user_unknown", True))
+
+        if current_user_id and not current_is_unknown and voice_engine.is_enrolling(current_user_id):
+            completed = voice_engine.add_enrollment_sample(current_user_id, embedding)
+            _log_voice_debug(f"enrollment_sample user={current_user_id} completed={completed}")
+        else:
+            if hasattr(voice_engine, "evaluate_match"):
+                try:
+                    decision = voice_engine.evaluate_match(embedding, first_turn=current_is_unknown)
+                except TypeError:
+                    decision = voice_engine.evaluate_match(embedding)
+                mode = "unknown_eval" if current_is_unknown else "strict_eval"
+                _log_voice_debug(
+                    _voice_decision_debug_line(
+                        mode=mode,
+                        active_user=current_user_id or "unknown",
+                        decision=decision,
+                    )
+                )
+                engine._last_voice_match = (
+                    getattr(decision, "final_user", "") or None,
+                    float(getattr(decision, "best_score", 0.0) or 0.0),
+                    {
+                        "best_user": str(getattr(decision, "best_user", "") or ""),
+                        "best_score": float(getattr(decision, "best_score", 0.0) or 0.0),
+                        "second_score": float(getattr(decision, "second_score", 0.0) or 0.0),
+                        "margin": float(getattr(decision, "margin", 0.0) or 0.0),
+                        "best_is_admin": bool(getattr(decision, "best_is_admin", False)),
+                        "threshold": float(getattr(decision, "threshold", 0.0) or 0.0),
+                        "margin_threshold": float(getattr(decision, "margin_threshold", 0.0) or 0.0),
+                        "final_decision": str(getattr(decision, "decision", "") or ""),
+                        "reason": str(getattr(decision, "reason", "") or ""),
+                    },
+                )
+            else:
+                matched_user, similarity = voice_engine.match(embedding)
+                _log_voice_debug(
+                    "match "
+                    f"mode=legacy active={current_user_id or 'unknown'} "
+                    f"best_user={matched_user or 'none'} best_score={float(similarity or 0.0):.3f} "
+                    "second_score=0.000 margin=0.000 best_is_admin=false "
+                    "threshold=0.000 margin_threshold=0.000 "
+                    f"final_decision={'accepted_legacy' if matched_user else 'unknown'} "
+                    f"final_user={matched_user or 'none'} reason=legacy_engine"
+                )
+                engine._last_voice_match = (matched_user, similarity)
+    except Exception as exc:
+        _log_voice_debug(f"error {type(exc).__name__}: {exc}")
+
 
 class STTEngine:
     def __init__(self):
@@ -70,7 +210,7 @@ class STTEngine:
         self._last_voice_match = None
         self._active_voice_user_id = ""
         self._active_voice_user_unknown = True
-        
+
     def _load_model(self):
         if self.model:
             return
@@ -160,91 +300,66 @@ class STTEngine:
         if not self._audio_data:
             return ""
 
-        audio_data = np.concatenate(self._audio_data, axis=0)
-        rms = float(np.sqrt(np.mean(audio_data.astype(np.float32) ** 2)))
-        if rms < self._min_rms:
+        audio_data = _concatenate_audio_chunks(self._audio_data)
+        if not _rms_gate(audio_data, self._min_rms):
             return ""
-            
+
         try:
             self._load_model()
-
-            audio_float = audio_data.astype(np.float32) / 32768.0
-            audio_mono = audio_float.squeeze()
-            source_sr = int(self._sample_rate or 16000)
-            if source_sr != 16000:
-                source_idx = np.arange(audio_mono.shape[0], dtype=np.float32)
-                target_len = max(1, int(round(audio_mono.shape[0] * 16000 / source_sr)))
-                target_idx = np.linspace(0, audio_mono.shape[0] - 1, num=target_len, dtype=np.float32)
-                audio_downsampled = np.interp(target_idx, source_idx, audio_mono).astype(np.float32)
-            else:
-                audio_downsampled = audio_mono.astype(np.float32)
-            
-            # Store for voice recognition hook
-            self._last_audio_samples = audio_downsampled
-            
-            segments, info = self.model.transcribe(
-                audio_downsampled, 
-                beam_size=5,
-                language="en",
-                condition_on_previous_text=False
-            )
-            
-            text = "".join([seg.text for seg in segments]).strip()
-            
-            # Voice recognition hook
-            try:
-                from core.voice_recognition import get_voice_engine
-                from config import CFG
-                
-                if CFG.VOICE_RECOGNITION_ENABLED:
-                    engine = get_voice_engine()
-                    if engine.available() and hasattr(self, '_last_audio_samples'):
-                        embedding = engine.extract_embedding(self._last_audio_samples)
-                        if embedding is not None:
-                            # Check if any user is being enrolled
-                            current_user_id = str(getattr(self, "_active_voice_user_id", "") or "").strip()
-                            current_is_unknown = bool(getattr(self, "_active_voice_user_unknown", True))
-                            
-                            if current_user_id and not current_is_unknown and engine.is_enrolling(current_user_id):
-                                completed = engine.add_enrollment_sample(current_user_id, embedding)
-                                _log_voice_debug(
-                                    f"enrollment_sample user={current_user_id} completed={completed}"
-                                )
-                            else:
-                                matched_user, similarity = engine.match(embedding)
-                                strict_user = matched_user
-                                strict_similarity = similarity
-                                if matched_user is None and current_is_unknown and hasattr(engine, "best_match"):
-                                    candidate_user, candidate_similarity = engine.best_match(embedding)
-                                    if (
-                                        candidate_user
-                                        and float(candidate_similarity or 0.0) >= float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD)
-                                    ):
-                                        matched_user = candidate_user
-                                        similarity = candidate_similarity
-                                    _log_voice_debug(
-                                        "match "
-                                        f"mode=first_turn_infer active={current_user_id or 'unknown'} "
-                                        f"strict_user={strict_user or 'none'} strict_score={float(strict_similarity or 0.0):.3f} "
-                                        f"best_user={candidate_user or 'none'} best_score={float(candidate_similarity or 0.0):.3f} "
-                                        f"threshold={float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD):.3f} "
-                                        f"selected={matched_user or 'none'}"
-                                    )
-                                else:
-                                    _log_voice_debug(
-                                        "match "
-                                        f"mode=strict active={current_user_id or 'unknown'} "
-                                        f"selected={matched_user or 'none'} score={float(similarity or 0.0):.3f}"
-                                    )
-                                # Result handled by caller / UI layer.
-                                self._last_voice_match = (matched_user, similarity)
-            except Exception as exc:
-                _log_voice_debug(f"error {type(exc).__name__}: {exc}")
-            
+            audio_downsampled = _normalize_and_resample(audio_data, int(self._sample_rate or 16000))
+            text = _transcribe_audio_array(self.model, audio_downsampled)
+            _run_voice_identity_hook(self, audio_downsampled)
             return text
-            
         except Exception as e:
             _LOG.warning("[STT] Error: %s", e)
+            return ""
+
+    def transcribe_buffer(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
+        """Transcribe a pre-recorded audio buffer from the Web UI / WebView mic path.
+
+        Args:
+            audio_data: Audio samples as a numpy array (any numeric dtype).
+            sample_rate: Sample rate of the input audio (default 16000).
+
+        Returns:
+            Transcribed text, or empty string if no speech detected or an error occurs.
+
+        Side effects:
+            Sets ``self._last_voice_match`` and ``self._last_audio_samples``
+            for downstream voice identity consumption.
+        """
+        if audio_data is None or audio_data.size == 0:
+            return ""
+
+        # Convert to float32 mono at the target sample rate.
+        audio_float = np.asarray(audio_data, dtype=np.float32)
+        audio_mono = audio_float.squeeze()
+        if audio_mono.ndim > 1:
+            audio_mono = audio_mono.mean(axis=1)
+
+        source_sr = int(sample_rate or 16000)
+        if source_sr != 16000:
+            source_idx = np.arange(audio_mono.shape[0], dtype=np.float32)
+            target_len = max(1, int(round(audio_mono.shape[0] * 16000 / source_sr)))
+            target_idx = np.linspace(0, audio_mono.shape[0] - 1, num=target_len, dtype=np.float32)
+            audio_downsampled = np.interp(target_idx, source_idx, audio_mono).astype(np.float32)
+        else:
+            audio_downsampled = audio_mono.astype(np.float32)
+
+        # RMS gate using the same threshold as native stop_recording.
+        # Compute RMS on the normalized float32 array (scale back to int16-equivalent for comparison).
+        int16_equiv = (audio_downsampled * 32768.0).astype(np.float32)
+        rms = float(np.sqrt(np.mean(int16_equiv ** 2)))
+        if rms < self._min_rms:
+            return ""
+
+        try:
+            self._load_model()
+            text = _transcribe_audio_array(self.model, audio_downsampled)
+            _run_voice_identity_hook(self, audio_downsampled)
+            return text
+        except Exception as e:
+            _LOG.warning("[STT] transcribe_buffer error: %s", e)
             return ""
 
     def set_active_voice_profile(self, user_id: str, *, is_unknown: bool = False) -> None:

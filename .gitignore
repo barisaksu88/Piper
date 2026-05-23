@@ -57,3 +57,32 @@ data/stats.jsonl
 data/users/
 data/benchmarks/results/
 data/reference/user_notes/
+# Voice runtime data
+data/voice_calibration/
+data/voice_embeddings/
+
+# Local runtime data (Docker volumes, caches, etc.)
+.local/
+
+# Temp/debug artifacts
+testfile.txt
+out.txt
+out2.txt
+tmp_*.txt
+tmp_*.py
+_git_*.txt
+aga
+.codex
+scripts/check_checkpoint*.py
+scripts/debug_*.py
+scripts/phase8_debug_*.py
+scripts/phase8_approval_only.py
+
+# Local runtime data (auto-generated, not source)
+data/styles/active_style.txt
+data/users.json
+notes/coder-log.md
+data/*.png
+data/*.jpg
+data/*.jpeg
+scripts/web_ui_e2e_smoke_test.py

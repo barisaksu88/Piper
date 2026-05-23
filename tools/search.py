@@ -4,19 +4,23 @@ Online Search Tool using DuckDuckGo + Jina.ai Reader.
 """
 
 import logging
+import time
 import urllib.request
 import urllib.parse
 import ssl
-import json
 import re
 import html
 import warnings
-from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+# Maximum bytes to read from a single page during deep-dive
+_FETCH_MAX_BYTES = 1024 * 1024  # 1 MiB
+_READ_CHUNK_SIZE = 4 * 1024     # 4 KiB chunks
+
 from core.runtime_control import CancellationToken, OperationCancelled
 from core.search_contracts import SEARCH_TOOL_ERROR_PREFIX
+from core.search.backends.searxng import SearXNGBackend
 # 1. Search Library
 # Import lazily/fault-tolerantly so test harnesses can patch perform_search/DDGS
 # without requiring the live DuckDuckGo backend in every environment.
@@ -117,6 +121,23 @@ _VERSIONED_NEWS_CONTEXT_TERMS = (
     "whats new",
 )
 
+# Deep-dive targets to skip (media-only / non-text pages)
+_SKIP_DEEP_DIVE_HOSTS = {"youtube.com", "youtu.be", "tiktok.com"}
+_SKIP_DEEP_DIVE_PATH_HINTS = ("/video", "/watch", "/shorts", "/live", "/embed")
+
+
+def _should_skip_deep_dive(url: str) -> bool:
+    """Return True for media-only URLs that waste the deep-dive budget."""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    if any(host == s or host.endswith(f".{s}") for s in _SKIP_DEEP_DIVE_HOSTS):
+        return True
+    path = parsed.path.lower()
+    if any(path.startswith(h) or h in path for h in _SKIP_DEEP_DIVE_PATH_HINTS):
+        return True
+    return False
+
+
 # 2. The "Magic" Reader (Jina.ai)
 def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
     if cancel_token is not None:
@@ -124,28 +145,42 @@ def _raise_if_cancelled(cancel_token: CancellationToken | None) -> None:
 
 
 def fetch_clean_text(url, *, cancel_token: CancellationToken | None = None):
+    deadline = time.monotonic() + CFG.SEARCH_FETCH_WALL_TIMEOUT_S
     try:
         _raise_if_cancelled(cancel_token)
         reader_url = f"https://r.jina.ai/{url}"
-        req = urllib.request.Request(reader_url, headers={'User-Agent': 'Mozilla/5.0'}) # Changed to standard browser UA
+        req = urllib.request.Request(reader_url, headers={'User-Agent': 'Mozilla/5.0'})
         context = ssl.create_default_context()
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
 
-        # Use configured timeout for news sites (from config.SEARCH_URL_FETCH_TIMEOUT_S)
         with urllib.request.urlopen(req, timeout=CFG.SEARCH_URL_FETCH_TIMEOUT_S, context=context) as resp:
             _raise_if_cancelled(cancel_token)
-            data = resp.read().decode('utf-8', errors='ignore')
+            chunks: list[bytes] = []
+            total = 0
+            read_fn = getattr(resp, "read1", resp.read)
+            while total < _FETCH_MAX_BYTES:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"fetch wall timeout after {CFG.SEARCH_FETCH_WALL_TIMEOUT_S}s"
+                    )
+                _raise_if_cancelled(cancel_token)
+                chunk = read_fn(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            data = b"".join(chunks).decode('utf-8', errors='ignore')
 
-            # CHECK FOR PAYWALL/LOGIN WALLS
-            # If the returned text is very short or contains certain keywords, it failed
             if len(data) < CFG.SEARCH_MIN_CONTENT_LENGTH:
                 return "Error: Page content too short (likely blocked/empty)"
 
             return data
-            
+
     except OperationCancelled:
         raise
+    except TimeoutError:
+        return f"Error reading page: fetch wall timeout after {CFG.SEARCH_FETCH_WALL_TIMEOUT_S}s"
     except Exception as e:
         return f"Error reading page: {e}"
 
@@ -463,6 +498,51 @@ def _run_search_query(
     return _run_ddgs_query(query=query, mode=mode, cancel_token=cancel_token)
 
 
+def _run_searxng_search(
+    query: str,
+    *,
+    cancel_token: CancellationToken | None = None,
+) -> list[dict]:
+    _raise_if_cancelled(cancel_token)
+    backend = SearXNGBackend(
+        base_url=CFG.SEARXNG_URL,
+        timeout_s=CFG.SEARXNG_TIMEOUT_S,
+    )
+    results = backend.search(query, max_results=CFG.SEARCH_MAX_RESULTS)
+    return [
+        {"title": r.title, "body": r.snippet, "href": r.url}
+        for r in results
+    ]
+
+
+def _searxng_query_variants(original_query: str) -> list[str]:
+    clean = " ".join(str(original_query or "").split()).strip()
+    relaxed = _normalize_search_query(clean)
+    news_like = _query_looks_like_news(clean)
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        candidate = " ".join(str(value or "").split()).strip(" .?!")
+        key = candidate.casefold()
+        if candidate and key not in seen:
+            seen.add(key)
+            variants.append(candidate)
+
+    add(clean)
+    if relaxed and relaxed.casefold() != clean.casefold():
+        add(relaxed)
+
+    base = relaxed or clean
+    if news_like and base:
+        if not _query_looks_like_news(base):
+            add(f"latest {base} news")
+        add(f"{base} 2026")
+        add(f"{base} updates")
+
+    return variants
+
+
 def _collect_search_results(
     query: str,
     *,
@@ -470,6 +550,59 @@ def _collect_search_results(
     cancel_token: CancellationToken | None = None,
 ) -> tuple[list[dict], str, str]:
     original_query = " ".join(str(query or "").split()).strip()
+
+    # SearXNG path: keep asking with nearby query variants until there is
+    # enough source material to report, rather than accepting a thin first page.
+    if str(CFG.SEARCH_BACKEND or "").strip().lower() == "searxng":
+        seen_results: set[tuple[str, str]] = set()
+        collected: list[dict] = []
+        used_queries: list[str] = []
+        last_error = ""
+        completed_attempt = False
+        target_count = min(CFG.SEARCH_MAX_RESULTS, max(CFG.SEARCH_SNIPPETS_LIMIT, CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT))
+        for attempt_query in _searxng_query_variants(original_query):
+            log(f"Search attempt (searxng): {attempt_query}")
+            try:
+                results = _run_searxng_search(query=attempt_query, cancel_token=cancel_token)
+            except OperationCancelled:
+                raise
+            except Exception as exc:
+                last_error = str(exc)
+                log(f"Search attempt failed (searxng): {exc}")
+                continue
+            _raise_if_cancelled(cancel_token)
+            completed_attempt = True
+            if not results:
+                log(f"No results via searxng for: {attempt_query}")
+                continue
+            relevant_results = _filter_relevant_results(results, attempt_query)
+            if not relevant_results:
+                log(f"Search results via searxng did not match the core query terms for: {attempt_query}")
+                continue
+            if len(relevant_results) != len(results):
+                log(f"Filtered {len(results) - len(relevant_results)} low-relevance search result(s).")
+            added = 0
+            for result in relevant_results:
+                result_key = _result_dedupe_key(result)
+                if result_key in seen_results:
+                    continue
+                seen_results.add(result_key)
+                collected.append(result)
+                added += 1
+                if len(collected) >= CFG.SEARCH_MAX_RESULTS:
+                    break
+            if added:
+                used_queries.append(attempt_query)
+                log(f"Added {added} relevant result(s) from searxng: {attempt_query}")
+            if len(collected) >= target_count:
+                break
+        if collected:
+            query_label = "; ".join(used_queries) if used_queries else original_query
+            return collected[: CFG.SEARCH_MAX_RESULTS], query_label, "searxng"
+        if last_error and not completed_attempt:
+            raise RuntimeError(last_error)
+        return [], "", ""
+
     relaxed_query = _normalize_search_query(original_query)
     strategies: list[tuple[str, str]] = []
     news_like_query = _query_looks_like_news(original_query)
@@ -623,38 +756,53 @@ def perform_search(query: str, data_dir, log_callback=None, cancel_token: Cancel
     # 3. Greedy Deep Dive (Top 6 Links)
     output_parts.append("\n--- DEEP DIVE (Full Content) ---")
     log(f"Deep-diving up to {CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT} links.")
-    
+
     links_visited = 0
 
     for r in filtered:
         _raise_if_cancelled(cancel_token)
-        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT: break
-        
+        if links_visited >= CFG.SEARCH_DEEP_DIVE_LINKS_LIMIT:
+            break
+
         link = _result_url(r)
-        if not link: continue
-        
-        log(clean_url(link))
-        content = fetch_clean_text(link, cancel_token=cancel_token)
-        
-        # Check for errors
-        if "Error reading page" in content:
-            # We can keep errors silent or logged to console only to keep UI clean?
-            # Let's log to console but not UI for cleaner activity window
-            # log(f"Skipped: {clean_url(link)} (Error)")
-            continue
-        if _looks_like_blocked_page(content):
-            log(f"Skipped blocked page: {clean_url(link)}")
-            continue
-        if not _content_matches_query(content, used_query):
-            log(f"Skipped low-relevance page content: {clean_url(link)}")
-            continue
-        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+        if not link:
             continue
 
+        if _should_skip_deep_dive(link):
+            log(f"Skipped (media target): {clean_url(link)}")
+            continue
+
+        t0 = time.monotonic()
+        log(f"Fetching: {clean_url(link)}")
+        content = fetch_clean_text(link, cancel_token=cancel_token)
+        elapsed = time.monotonic() - t0
+
+        if "Error reading page" in content:
+            reason = content.replace("Error reading page: ", "")
+            log(f"Skipped (fetch error): {clean_url(link)} reason={reason} elapsed={elapsed:.1f}s")
+            continue
+        if _looks_like_blocked_page(content):
+            log(f"Skipped (blocked): {clean_url(link)} elapsed={elapsed:.1f}s")
+            continue
+        if not _content_matches_query(content, used_query):
+            log(f"Skipped (low relevance): {clean_url(link)} elapsed={elapsed:.1f}s")
+            continue
+        if len(content) < CFG.SEARCH_MIN_CONTENT_LENGTH:
+            log(f"Skipped (too short): {clean_url(link)} chars={len(content)} elapsed={elapsed:.1f}s")
+            continue
+
+        log(f"Fetched: {clean_url(link)} chars={len(content)} elapsed={elapsed:.1f}s")
         output_parts.append(f"\nSource: {link}\nContent: {content[:CFG.SEARCH_CONTENT_SLICE_LENGTH]}")
         links_visited += 1
 
-    output_parts.append(f"\nSOURCE COVERAGE: {links_visited} readable source(s) from {len(filtered)} candidate result(s).")
+    output_parts.append(
+        f"\nSOURCE COVERAGE: {links_visited} readable source(s) from {len(filtered)} candidate result(s)."
+    )
+    log(f"Search deep-dive complete: {links_visited} readable / {len(filtered)} candidates")
+
+    result_text = "\n".join(output_parts)
+    log(f"Search context chars: {len(result_text)}")
+    log("Returning search context to caller")
 
     if links_visited == 0:
         if filtered:
@@ -663,8 +811,11 @@ def perform_search(query: str, data_dir, log_callback=None, cancel_token: Cancel
                 "No readable full-content pages were available. "
                 "Use the snippet evidence above only; do not infer article details beyond the title/snippet."
             )
-            return "\n".join(output_parts)
+            result_text = "\n".join(output_parts)
+            log(f"Search context chars: {len(result_text)}")
+            log("Returning search context to caller")
+            return result_text
         log("Error: Found results but could not read content from any link.")
         return f"{SEARCH_TOOL_ERROR_PREFIX} Found results but could not read content from any link."
 
-    return "\n".join(output_parts)
+    return result_text

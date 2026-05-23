@@ -11,7 +11,8 @@ Piper is a **Windows-first local agent system** built around a Route-Plan-Act-Sp
 - Executes workspace tasks: file operations, code execution, web search
 - Generates images via ComfyUI
 - Speech-to-text (Faster Whisper) and text-to-speech (Kokoro)
-- Dear PyGui desktop interface
+- Web UI desktop interface (React + pywebview window, default)
+- DearPyGui fallback interface
 
 ## Architecture
 
@@ -47,6 +48,8 @@ pip install -r requirements.txt
 # Launch
 python app.py
 ```
+
+If you are using the Web UI, `app.py` will auto-build the frontend on startup when `web_ui/frontend/src/` is newer than `web_ui/frontend/dist/`.
 
 ### Requirements
 

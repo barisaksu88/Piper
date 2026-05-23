@@ -6,6 +6,7 @@ import os
 import shutil
 import fnmatch
 import re
+import threading
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
@@ -47,6 +48,39 @@ def data_benchmark_logs_dir(data_dir: Path) -> Path:
 
 def data_benchmark_scripts_dir(data_dir: Path) -> Path:
     return data_benchmarks_dir(data_dir) / "scripts"
+
+
+def _safe_path_exists(path: str, timeout_s: float = 2.0) -> bool:
+    """Windows-safe os.path.exists() that won't hang on disconnected network drives."""
+    if os.name != "nt":
+        return os.path.exists(path)
+    result: list[bool] = []
+    def _check() -> None:
+        try:
+            result.append(os.path.exists(path))
+        except Exception:
+            result.append(False)
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+    return result[0] if result else False
+
+
+def _safe_read_text(path: Path, timeout_s: float = 5.0) -> str | None:
+    """Read file text with a timeout to avoid hanging on network shares."""
+    result: list[str] = []
+    exception: list[Exception] = []
+    def _read() -> None:
+        try:
+            result.append(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            exception.append(exc)
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
+    t.join(timeout=timeout_s)
+    if exception:
+        raise exception[0]
+    return result[0] if result else None
 
 
 def data_harness_dir(data_dir: Path) -> Path:
@@ -688,12 +722,15 @@ class Config:
         os.environ.get("PIPER_LANGGRAPH_CHECKPOINT_MODE", "sqlite").strip().lower() or "sqlite"
     )
     VOICE_RECOGNITION_ENABLED: bool = _env_flag("PIPER_VOICE_RECOGNITION_ENABLED", True)
-    VOICE_SIMILARITY_THRESHOLD_HIGH: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_HIGH", "0.85"))
-    VOICE_SIMILARITY_THRESHOLD_LOW: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_LOW", "0.60"))
-    VOICE_FIRST_TURN_INFER_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_FIRST_TURN_INFER_THRESHOLD", "0.60"))
+    VOICE_SIMILARITY_THRESHOLD_HIGH: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_HIGH", "0.74"))
+    VOICE_SIMILARITY_THRESHOLD_LOW: float = float(os.environ.get("PIPER_VOICE_SIMILARITY_THRESHOLD_LOW", "0.58"))
+    VOICE_FIRST_TURN_INFER_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_FIRST_TURN_INFER_THRESHOLD", "0.74"))
     VOICE_ENROLLMENT_TURNS: int = int(os.environ.get("PIPER_VOICE_ENROLLMENT_TURNS", "5"))
     VOICE_ADMIN_ENROLLMENT_TURNS: int = int(os.environ.get("PIPER_VOICE_ADMIN_ENROLLMENT_TURNS", "10"))
-    VOICE_ADMIN_SIMILARITY_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_ADMIN_SIMILARITY_THRESHOLD", "0.90"))
+    VOICE_ADMIN_SIMILARITY_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_ADMIN_SIMILARITY_THRESHOLD", "0.70"))
+    VOICE_ADMIN_MARGIN_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_ADMIN_MARGIN_THRESHOLD", "0.08"))
+    VOICE_PUBLIC_MARGIN_THRESHOLD: float = float(os.environ.get("PIPER_VOICE_PUBLIC_MARGIN_THRESHOLD", "0.08"))
+    VOICE_DRIFT_CONFIRMATION_TURNS: int = int(os.environ.get("PIPER_VOICE_DRIFT_CONFIRMATION_TURNS", "3"))
     VOICE_LOW_CONFIDENCE_ASK_AFTER: int = int(os.environ.get("PIPER_VOICE_LOW_CONFIDENCE_ASK_AFTER", "3"))
     COMPUTER_USE_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_ENABLED", True)
     COMPUTER_USE_HTTP_ENABLED: bool = _env_flag("PIPER_COMPUTER_USE_HTTP_ENABLED", True)
@@ -730,7 +767,7 @@ class Config:
         LLAMA_SERVER_EXE = _env_llama_path
     elif _local_newer_llama.exists():
         LLAMA_SERVER_EXE = _local_newer_llama
-    elif os.path.exists(_hard_llama):
+    elif _safe_path_exists(_hard_llama):
         LLAMA_SERVER_EXE = Path(_hard_llama)
     else:
         LLAMA_SERVER_EXE = ROOT_DIR / "llama-server.exe"
@@ -752,7 +789,7 @@ class Config:
     # 3. ComfyUI
     # Check if the hardcoded path exists, otherwise look locally
     _hard_comfy = r"F:\ComfyUI_windows_portable"
-    if os.path.exists(_hard_comfy):
+    if _safe_path_exists(_hard_comfy):
         COMFY_DIR = Path(_hard_comfy)
     else:
         COMFY_DIR = ROOT_DIR / "ComfyUI"
@@ -804,7 +841,7 @@ class Config:
     SCREEN_POINTER_FOCUS_HEIGHT: int = 900
 
     _hard_kokoro = r"C:\Piper\models\kokoro"
-    if os.path.exists(_hard_kokoro):
+    if _safe_path_exists(_hard_kokoro):
         KOKORO_DIR = Path(_hard_kokoro)
     else:
         KOKORO_DIR = ROOT_DIR / "models" / "kokoro"
@@ -815,6 +852,19 @@ class Config:
     # Web Search (DuckDuckGo + Jina.ai Reader)
     # ---------------------------------------------------------------------
 
+    SEARCH_BACKEND: str = "searxng"
+    SEARXNG_URL: str = "http://127.0.0.1:8888"
+    SEARXNG_TIMEOUT_S: float = 10.0
+    SEARXNG_AUTO_START: bool = True
+    SEARXNG_STOP_ON_EXIT: bool = True
+    SEARXNG_DOCKER_CONTAINER: str = "piper-searxng"
+    SEARXNG_DOCKER_IMAGE: str = "searxng/searxng:latest"
+    SEARXNG_DOCKER_HOST_PORT: int = 8888
+    SEARXNG_DOCKER_CONTAINER_PORT: int = 8080
+    SEARXNG_DOCKER_CONFIG_DIR: str = ".local/searxng"
+    SEARXNG_REQUIRE: bool = False
+    DOCKER_DESKTOP_PATH: str = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    DOCKER_DESKTOP_START_TIMEOUT_S: float = 60.0
     SEARCH_BLACKLIST: list[str] = field(default_factory=lambda: ["zhihu.com", "baidu.com", "weibo.com"])
     SEARCH_URL_FETCH_TIMEOUT_S: float = 20.0
     SEARCH_MIN_CONTENT_LENGTH: int = 100
@@ -822,6 +872,43 @@ class Config:
     SEARCH_SNIPPETS_LIMIT: int = 3
     SEARCH_DEEP_DIVE_LINKS_LIMIT: int = 6
     SEARCH_CONTENT_SLICE_LENGTH: int = 1500
+    SEARCH_FETCH_WALL_TIMEOUT_S: float = float(os.environ.get("PIPER_SEARCH_FETCH_WALL_TIMEOUT_S", "10.0"))
+
+    # -----------------------------------------------------------------
+    # Web UI bridge (default; DearPyGui remains available as fallback)
+    # -----------------------------------------------------------------
+    WEB_UI_ENABLED: bool = field(
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_ENABLED", True)
+    )
+    WEB_UI_HOST: str = field(
+        default_factory=lambda: os.environ.get("PIPER_WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    )
+    WEB_UI_PORT: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_UI_PORT", "8787"))
+    )
+    WEB_UI_WS_PATH: str = field(
+        default_factory=lambda: os.environ.get("PIPER_WEB_UI_WS_PATH", "/ws").strip() or "/ws"
+    )
+    WEB_MIC_MAX_DECODED_BYTES: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_MAX_DECODED_BYTES", "10485760"))  # 10 MiB
+    )
+    WEB_MIC_MAX_SECONDS: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_MAX_SECONDS", "60"))
+    )
+    WEB_MIC_FFMPEG_TIMEOUT_S: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_MIC_FFMPEG_TIMEOUT_S", "30"))
+    )
+    WEB_UI_MAX_WS_MESSAGE_BYTES: int = field(
+        default_factory=lambda: int(os.environ.get("PIPER_WEB_UI_MAX_WS_MESSAGE_BYTES", str(20 * 1024 * 1024)))
+    )
+    WEB_UI_FRONTEND_DIST_DIR: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("PIPER_WEB_UI_FRONTEND_DIST_DIR", str(ROOT_DIR / "web_ui" / "frontend" / "dist"))
+        )
+    )
+    WEB_UI_WINDOW: bool = field(
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", True)
+    )
 
 
 class LiveConfig:
@@ -839,6 +926,7 @@ class LiveConfig:
             "config_override.json",
         )
         self._override_mtime: float = 0.0
+        self._lock = threading.Lock()
 
     @staticmethod
     def _public_values(source: Config) -> dict[str, Any]:
@@ -857,8 +945,9 @@ class LiveConfig:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
+        with self._lock:
+            if name in self._data:
+                return self._data[name]
         class_value = getattr(self._config_class, name, None)
         if class_value is not None and not isinstance(class_value, property) and not callable(class_value):
             return class_value
@@ -883,7 +972,8 @@ class LiveConfig:
                 continue
             coerced = self._coerce_override_value(self._data[key], value)
             if self._data[key] != coerced:
-                self._data[key] = coerced
+                with self._lock:
+                    self._data[key] = coerced
                 changed.append(key)
         if changed:
             self._notify(changed)
@@ -913,11 +1003,15 @@ class LiveConfig:
         current_mtime = stat_result.st_mtime
         if current_mtime == self._override_mtime:
             return []
-        self._override_mtime = current_mtime
+        with self._lock:
+            self._override_mtime = current_mtime
         if stat_result.st_size > 10240:
             return []
         try:
-            payload = json.loads(self._override_path.read_text(encoding="utf-8"))
+            text = _safe_read_text(self._override_path)
+            if text is None:
+                return []
+            payload = json.loads(text)
         except Exception:
             return []
         if not isinstance(payload, dict):
@@ -938,10 +1032,11 @@ class LiveConfig:
         defaults = Config()
         default_values = self._public_values(defaults)
         changed: list[str] = []
-        for name, default_value in default_values.items():
-            if name in self._data and self._data[name] != default_value:
-                self._data[name] = default_value
-                changed.append(name)
+        with self._lock:
+            for name, default_value in default_values.items():
+                if name in self._data and self._data[name] != default_value:
+                    self._data[name] = default_value
+                    changed.append(name)
         if changed:
             self._notify(changed)
         return changed

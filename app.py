@@ -33,13 +33,37 @@ for logger_name, level in (
 import atexit
 import queue
 import sys
+import time
 from pathlib import Path
+
+_MAX_RESTARTS = 3
+_RESTART_WINDOW_S = 60
+
+def _should_restart() -> bool:
+    """Return True if restart count is under the cap, using env vars for persistence."""
+    now = time.time()
+    count_str = os.environ.get("PIPER_RESTART_COUNT", "0")
+    first_str = os.environ.get("PIPER_RESTART_FIRST_TIME", "")
+    try:
+        count = int(count_str)
+    except ValueError:
+        count = 0
+    first = float(first_str) if first_str else now
+    elapsed = now - first
+    if elapsed > _RESTART_WINDOW_S:
+        count = 0
+        first = now
+    count += 1
+    os.environ["PIPER_RESTART_COUNT"] = str(count)
+    os.environ["PIPER_RESTART_FIRST_TIME"] = str(first)
+    return count <= _MAX_RESTARTS
 
 from core.agent import AgentBrain
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
 from core.operational_state_service import OperationalStateService
 from core.prompt_context import PromptContextService
+from core.search.searxng_service import SearXNGService
 from core.style import StyleManager
 from llm.boot import BootManager
 from llm.llm_server_client import LlamaServerClient, LlamaServerConfig
@@ -144,11 +168,16 @@ def build_controller() -> PiperController:
     )
     img_gen = ImageGenerator(CFG.DATA_DIR)
 
+    searxng_service = SearXNGService()
+    searxng_service.ensure_available()
+    atexit.register(searxng_service.shutdown)
+
     atexit.register(boot_mgr.shutdown)
     atexit.register(live_screen.stop)
     atexit.register(agent_brain.shutdown)
 
     return PiperController(
+        searxng_service=searxng_service,
         app_title=APP_TITLE,
         width=W,
         height=H,
@@ -171,9 +200,90 @@ def build_controller() -> PiperController:
 
 def main() -> int:
     controller = build_controller()
-    exit_code = controller.run()
+    web_ui_enabled = getattr(CFG, "WEB_UI_ENABLED", True)
+    use_window = getattr(CFG, "WEB_UI_WINDOW", True)
+
+    if web_ui_enabled:
+        # Quiet websockets per-connection INFO logs in Web UI mode
+        # (HTTP asset serving and open/close messages are not useful at INFO).
+        logging.getLogger("websockets.server").setLevel(logging.WARNING)
+
+        dist_dir = Path(getattr(CFG, "WEB_UI_FRONTEND_DIST_DIR", ""))
+        src_dir = Path(__file__).resolve().parent / "web_ui" / "frontend" / "src"
+        if not dist_dir.is_dir() or not (dist_dir / "index.html").is_file():
+            logging.warning(
+                "Web UI frontend dist not found at %s. "
+                "Run: cd web_ui/frontend && npm run build",
+                dist_dir,
+            )
+        elif src_dir.is_dir():
+            # Auto-rebuild frontend if source files are newer than dist
+            try:
+                dist_mtime = max(
+                    (f.stat().st_mtime for f in dist_dir.rglob("*") if f.is_file()),
+                    default=0,
+                )
+                src_mtime = max(
+                    (f.stat().st_mtime for f in src_dir.rglob("*") if f.is_file()),
+                    default=0,
+                )
+                if src_mtime > dist_mtime:
+                    import shutil
+                    import subprocess
+
+                    npm_cmd = shutil.which("npm")
+                    if npm_cmd:
+                        logging.info("Frontend source changed — rebuilding...")
+                        result = subprocess.run(
+                            [npm_cmd, "run", "build"],
+                            cwd=str(src_dir.parent),
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                        )
+                        if result.returncode == 0:
+                            logging.info("Frontend rebuilt successfully.")
+                        else:
+                            logging.warning(
+                                "Frontend rebuild failed: %s",
+                                result.stderr.strip()[-200:] if result.stderr else "unknown error",
+                            )
+                    else:
+                        logging.warning(
+                            "npm not found in PATH. Frontend may be stale. "
+                            "Run: cd web_ui/frontend && npm run build"
+                        )
+            except Exception as exc:
+                logging.debug("Frontend auto-build check failed: %s", exc)
+
+        if use_window:
+            try:
+                import webview  # type: ignore[import-untyped]  # noqa: F401
+            except ImportError:
+                logging.warning(
+                    "pywebview not installed; falling back to browser mode. "
+                    "Open http://%s:%s/ manually, or install pywebview for desktop window.",
+                    getattr(CFG, "WEB_UI_HOST", "127.0.0.1"),
+                    getattr(CFG, "WEB_UI_PORT", 8787),
+                )
+                use_window = False
+
+        exit_code = controller.run_web(
+            host=getattr(CFG, "WEB_UI_HOST", "127.0.0.1"),
+            port=getattr(CFG, "WEB_UI_PORT", 8787),
+            ws_path=getattr(CFG, "WEB_UI_WS_PATH", "/ws"),
+            use_window=use_window,
+        )
+    else:
+        exit_code = controller.run()
     if exit_code == RESTART_EXIT_CODE and os.environ.get("PIPER_LAUNCHER") != "batch":
-        os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+        if _should_restart():
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+        else:
+            logging.fatal(
+                "Restart loop detected: exceeded %s restarts within %s seconds. Exiting.",
+                _MAX_RESTARTS, _RESTART_WINDOW_S,
+            )
     return exit_code
 
 

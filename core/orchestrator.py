@@ -17,6 +17,7 @@ from core.engines.conversation_compressor import ConversationCompressor
 from core.engines.stats_collector import StatsCollector
 from core.orchestrator_phases import (
     phase_document_focus,
+    phase_explain,
     phase_manager,
     phase_persona,
     phase_reminder_set,
@@ -68,9 +69,12 @@ class OrchestratorConfig:
     # -- User runtime (for identity extraction in router) --
     user_runtime: Any | None = None
     input_modality: str = "typed"
+    voice_identity_notice: str = ""
+    voice_identity_state: dict[str, str] | None = None
 
     # -- Paths --
     conversation_summary_path: Path | None = None
+    conversation_summary: str | None = None
 
     # -- LangGraph Recovery --
     langgraph_resume_thread_id: str = ""
@@ -123,10 +127,14 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_query = ""
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.conversation_compressor = ConversationCompressor()
-        self.conversation_summary = self._load_conversation_summary()
+        if cfg.conversation_summary is not None:
+            self.conversation_summary = cfg.conversation_summary
+        else:
+            self.conversation_summary = self._load_conversation_summary()
         self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)
         self.stats_collector.startup_check_once()
         self.change_journal = ChangeJournal(CFG.CHANGE_JOURNAL_PATH)
@@ -138,6 +146,8 @@ class Orchestrator:
         self.synthetic_user_turn = False
         self.pending_file_target_confirmation: dict | None = None
         self.pending_stage_pause: dict | None = None
+        self.identity_switch_notice: str = str(cfg.voice_identity_notice or "").strip()
+        self.voice_identity_state: dict[str, str] = dict(cfg.voice_identity_state or {})
         # Tracks which style's bootstrap was last injected into history.
         # Bootstrap is prepended only on session start (empty) or style change.
         self._bootstrap_injected_for_style: str = ""
@@ -215,6 +225,7 @@ class Orchestrator:
         self.failed_task_router_retries = 0
         self.last_stage_outcome = None
         self.last_verification = None
+        self.latest_search_query = ""
         self.latest_search_failed = False
         self.latest_search_error = ""
         self.turn_stats = self.stats_collector.resume_or_start_turn(
@@ -448,7 +459,7 @@ class Orchestrator:
         phase_reminder_set(self)
 
     def _phase_explain(self):
-        phase_persona(self)
+        phase_explain(self)
 
     def _phase_persona(self):
         phase_persona(self)

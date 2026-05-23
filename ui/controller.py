@@ -48,6 +48,7 @@ from ui.controller_actions import (
     on_stop as on_stop_action,
     refresh_live_screen_ui as refresh_live_screen_ui_action,
     reset_mic_ui as reset_mic_ui_action,
+    submit_text_input as submit_text_input_action,
     trigger_proactive_reminder as trigger_proactive_reminder_action,
 )
 from ui.controller_queue import pump_ui_queue as pump_ui_queue_action
@@ -62,6 +63,7 @@ from ui.controller_status import (
     set_status as set_status_action,
 )
 from tools.vision import VisionResolvedRequest, analyze_image
+from core.search.searxng_service import SearXNGService
 from memory.vision_session import VisionSessionMemory
 
 
@@ -212,6 +214,7 @@ class PiperController:
         img_gen,
         live_screen,
         vision_session_memory: VisionSessionMemory,
+        searxng_service: SearXNGService | None = None,
         tags: UiTags | None = None,
     ) -> None:
         self.app_title = app_title
@@ -233,6 +236,7 @@ class PiperController:
         self.img_gen = img_gen
         self.live_screen = live_screen
         self.vision_session_memory = vision_session_memory
+        self.searxng_service = searxng_service
         self.code_session = EmbeddedCodeSession(
             self.agent_brain.workspace,
             lambda kind, payload: self.ui_queue.put((kind, payload)),
@@ -259,6 +263,7 @@ class PiperController:
         self.live_screen_pending = False
         self.thinking_placeholder = "Thinking..."
         self.code_session_active = False
+        self._conversation_summary_override: str | None = None
         self.document_ingest_active = False
         self.event_speech_mode = normalize_event_speech_mode(EVENT_SPEECH_OFF)
         self._chat_rendered_messages: List[Tuple[str, str]] = []
@@ -468,6 +473,62 @@ class PiperController:
             str(getattr(CFG, "TTS_VOICE", "af_heart")),
             float(getattr(CFG, "TTS_SPEED", 0.85)),
         )
+
+    def web_active_user_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {"preserve_transcript": False}
+        try:
+            profile = self.user_runtime.active_profile()
+            payload["user_name"] = str(getattr(profile, "name", "") or "")
+            payload["user_id"] = str(getattr(profile, "user_id", "") or "")
+            payload["role"] = str(getattr(profile, "role", "") or "")
+        except Exception:
+            pass
+        return payload
+
+    def web_style_status_payload(self) -> dict[str, str]:
+        try:
+            style_state = self.load_style_state()
+        except Exception:
+            return {"name": "default", "label": "Default", "filename": ""}
+        name = str(getattr(style_state, "name", "") or "default").strip() or "default"
+        try:
+            filename = str(getattr(self.style_mgr, "active_filename", "") or "").strip()
+        except Exception:
+            filename = ""
+        return {
+            "name": name,
+            "label": name.upper() if name.lower() != "default" else "Default",
+            "filename": filename,
+        }
+
+    def web_tts_status_payload(self) -> dict[str, str]:
+        try:
+            tts = self.tts
+            play_active = bool(getattr(tts, "_play_active", False))
+            synth_active = bool(getattr(tts, "_synth_active", False))
+            stream_active = False
+            stream_lock = getattr(tts, "_stream_lock", None)
+            if stream_lock is not None:
+                try:
+                    with stream_lock:
+                        stream_active = getattr(tts, "_stream_epoch", None) is not None
+                except Exception:
+                    stream_active = False
+            queued = False
+            for attr in ("_job_q", "_audio_q"):
+                q = getattr(tts, attr, None)
+                if q is not None and not q.empty():
+                    queued = True
+                    break
+            if play_active:
+                state = "playing"
+            elif synth_active or stream_active or queued:
+                state = "synthesizing"
+            else:
+                state = "idle"
+            return {"state": state, "error": ""}
+        except Exception as exc:
+            return {"state": "error", "error": str(exc)}
 
     def _speak_event_notification(self, text: str, *, key: str = "", force: bool = False) -> None:
         if not force and self.event_speech_mode == EVENT_SPEECH_OFF:
@@ -726,6 +787,7 @@ class PiperController:
 
     def chat_append(self, role: str, content: str) -> None:
         self.chat_state.append(role, content)
+        self.ui_queue.put(("chat_append", {"role": role, "content": content, "_state_synced": True}))
         if self._try_append_chat_ui(renderable_chat_messages(self.chat_state.get_messages_snapshot())):
             return
         self._refresh_chat_ui()
@@ -734,7 +796,10 @@ class PiperController:
         self.chat_state.upsert_streaming_assistant(text)
         if self._try_update_streaming_chat_ui(renderable_chat_messages(self.chat_state.get_messages_snapshot())):
             return
-        print(f"[STREAM DEBUG] _try_update_streaming_chat_ui FAILED — falling back to full refresh (text len={len(text)})")
+        _LOG.debug(
+            "_try_update_streaming_chat_ui failed — falling back to full refresh (text len=%d)",
+            len(text),
+        )
         self._refresh_chat_ui()
 
     def _should_persist_turn(self) -> bool:
@@ -789,6 +854,13 @@ class PiperController:
 
         input_modality = str(getattr(self, "_pending_input_modality", "typed") or "typed")
         self._pending_input_modality = "typed"
+        voice_identity_notice = str(getattr(self, "_pending_voice_identity_notice", "") or "").strip()
+        self._pending_voice_identity_notice = ""
+        voice_identity_state = self._build_voice_identity_state()
+        # Consume one-shot conversation summary override (set by on_new_session / on_clear).
+        summary_override = getattr(self, "_conversation_summary_override", None)
+        if summary_override is not None:
+            self._conversation_summary_override = None
         return OrchestratorConfig(
             llm=self.llm,
             brain=self.agent_brain,
@@ -810,12 +882,41 @@ class PiperController:
             release_search_in_flight=self.release_search_in_flight,
             current_search_query=self.current_search_query,
             conversation_summary_path=Path(self.user_runtime.current_conversation_summary_path()),
+            conversation_summary=summary_override,
             user_runtime=self.user_runtime,
             input_modality=input_modality,
+            voice_identity_notice=voice_identity_notice,
+            voice_identity_state=voice_identity_state,
             langgraph_resume_thread_id=str(langgraph_resume_thread_id or ""),
             langgraph_resume_checkpoint_id=str(langgraph_resume_checkpoint_id or ""),
             langgraph_resume_value=langgraph_resume_value,
         )
+
+    def _build_voice_identity_state(self) -> dict[str, str]:
+        try:
+            profile = self.user_runtime.active_profile()
+        except Exception:
+            return {"current_speaker": "unknown", "recognition_status": "unknown", "access_tier": "unknown"}
+        is_unknown = bool(getattr(profile, "is_unknown", False))
+        current_speaker = "unknown" if is_unknown else str(getattr(profile, "name", "") or getattr(profile, "user_id", "") or "unknown")
+        tracker = getattr(self, "_voice_drift_tracker", None)
+        drift_pending = bool(
+            isinstance(tracker, dict)
+            and (
+                int(tracker.get("candidate_count") or 0) > 0
+                or int(tracker.get("unknown_count") or 0) > 0
+            )
+        )
+        recognition_status = "unknown" if is_unknown else "tentative" if drift_pending else "confirmed"
+        try:
+            access_tier = "admin" if self.user_runtime.is_admin_unlocked() else "unknown" if is_unknown else "public"
+        except Exception:
+            access_tier = "unknown" if is_unknown else "public"
+        return {
+            "current_speaker": current_speaker,
+            "recognition_status": recognition_status,
+            "access_tier": access_tier,
+        }
 
     def _on_config_changed(self, changed_keys: list[str]) -> None:
         """Handle live config updates."""
@@ -1180,6 +1281,498 @@ class PiperController:
         if update_ui:
             self._refresh_top_bar()
 
+    def _handle_web_mic_audio_submit(self, payload: dict) -> None:
+        """Handle mic audio submission from Web UI / WebView.
+
+        Runs decode + STT + voice identity in a worker thread so the Web
+        dispatch loop is not blocked.
+        """
+        from tools.audio_decode import AudioDecodeError, decode_web_audio
+        from tools.stt import get_stt_engine
+        from ui.controller_actions import _apply_voice_identity_match
+
+        audio_b64 = str(payload.get("audio") or "").strip()
+        fmt = str(payload.get("format") or "").strip().lower()
+
+        # Payload validation
+        if not audio_b64:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Empty audio payload"}))
+            return
+        if fmt not in ("webm", "wav"):
+            self.ui_queue.put(("mic_status", {"state": "error", "error": f"Unsupported format: {fmt}"}))
+            return
+
+        # Busy guard
+        if self.has_active_operations() or self.has_active_code_session() or self.document_ingest_active or self.live_screen_pending:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Piper is busy"}))
+            return
+
+        def _worker() -> None:
+            try:
+                _LOG.info("Web mic: received audio payload format=%s len=%d", fmt, len(audio_b64))
+
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "decoding", "message": "Decoding audio...", "error": ""}))
+                decode_start = time.perf_counter()
+                audio_np = decode_web_audio(
+                    audio_b64,
+                    fmt,  # type: ignore[arg-type]
+                    max_decoded_bytes=CFG.WEB_MIC_MAX_DECODED_BYTES,
+                    ffmpeg_timeout_s=float(getattr(CFG, "WEB_MIC_FFMPEG_TIMEOUT_S", 30)),
+                )
+                decode_elapsed = time.perf_counter() - decode_start
+                _LOG.info("Web mic: decode complete samples=%d elapsed=%.3fs", len(audio_np), decode_elapsed)
+
+                duration_s = float(len(audio_np)) / 16000.0
+                _LOG.info("Web mic: audio duration=%.3fs", duration_s)
+                if duration_s > CFG.WEB_MIC_MAX_SECONDS:
+                    self.ui_queue.put(("mic_status", {"state": "error", "error": "Audio duration exceeds limit"}))
+                    return
+
+                engine = get_stt_engine()
+                try:
+                    profile = self.user_runtime.active_profile()
+                    if hasattr(engine, "set_active_voice_profile"):
+                        engine.set_active_voice_profile(
+                            profile.user_id,
+                            is_unknown=getattr(profile, "is_unknown", False),
+                        )
+                except Exception:
+                    pass
+
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "stt", "message": "Running local STT...", "error": ""}))
+                stt_start = time.perf_counter()
+                transcript = engine.transcribe_buffer(audio_np, sample_rate=16000)
+                stt_elapsed = time.perf_counter() - stt_start
+                _LOG.info("Web mic: STT complete elapsed=%.3fs empty=%s", stt_elapsed, not transcript)
+
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "identity", "message": "Checking voice identity...", "error": ""}))
+                identity_start = time.perf_counter()
+                _apply_voice_identity_match(self, engine)
+                identity_elapsed = time.perf_counter() - identity_start
+                _LOG.info("Web mic: identity complete elapsed=%.3fs", identity_elapsed)
+
+                self.ui_queue.put(("mic_status", {"state": "transcribing", "stage": "submitting", "message": "Submitting transcript...", "error": ""}))
+                if transcript:
+                    self._pending_input_modality = "voice"
+                    self.submit_user_text(transcript)
+                else:
+                    self.chat_append("system", "[No speech detected]")
+
+                self.ui_queue.put(("mic_status", {"state": "idle", "error": ""}))
+            except AudioDecodeError as exc:
+                _LOG.warning("Web mic audio decode failed: %s", exc)
+                self.ui_queue.put(("mic_status", {"state": "error", "error": str(exc)}))
+            except Exception as exc:
+                _LOG.exception("Web mic audio submission failed")
+                self.ui_queue.put(("mic_status", {"state": "error", "error": f"STT error: {exc}"}))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _handle_web_mic_start(self) -> None:
+        """Start native mic recording from Web UI / WebView."""
+        from tools.stt import get_stt_engine
+
+        if self.mic_state != "idle":
+            return
+        if not self.boot_ready:
+            self.ui_queue.put(("mic_status", {"state": "error", "error": "Piper is not ready"}))
+            return
+        try:
+            engine = get_stt_engine()
+            try:
+                profile = self.user_runtime.active_profile()
+                if hasattr(engine, "set_active_voice_profile"):
+                    engine.set_active_voice_profile(profile.user_id, is_unknown=getattr(profile, "is_unknown", False))
+            except Exception:
+                pass
+            engine.start_recording()
+            self.mic_state = "recording"
+            self.ui_queue.put(("mic_status", {"state": "listening", "message": "Listening..."}))
+        except Exception as exc:
+            self.mic_state = "idle"
+            _LOG.warning("Web mic start failed: %s", exc)
+            self.ui_queue.put(("mic_status", {"state": "error", "error": f"Mic error: {exc}"}))
+
+    def _handle_web_mic_stop(self) -> None:
+        """Stop native mic recording from Web UI / WebView and run STT in a worker."""
+        from tools.stt import get_stt_engine
+        from ui.controller_actions import _apply_voice_identity_match
+
+        if self.mic_state != "recording":
+            return
+        self.mic_state = "idle"
+        self.ui_queue.put(("mic_status", {"state": "transcribing", "message": "Running local STT..."}))
+
+        def _worker() -> None:
+            try:
+                engine = get_stt_engine()
+                text = engine.stop_recording()
+                if text:
+                    _apply_voice_identity_match(self, engine)
+                    self._pending_input_modality = "voice"
+                    self.submit_user_text(text)
+                else:
+                    _apply_voice_identity_match(self, engine)
+                    self.chat_append("system", "[No speech detected]")
+                self.ui_queue.put(("mic_status", {"state": "idle", "error": ""}))
+            except Exception as exc:
+                _LOG.exception("Web mic stop/STT failed")
+                self.ui_queue.put(("mic_status", {"state": "error", "error": f"STT error: {exc}"}))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _dispatch_web_action(self, action_name: str, payload: dict) -> None:
+        """Dispatch a Web UI action without touching DearPyGui widgets."""
+        if action_name == "send_message":
+            text = str(payload.get("text", ""))
+            submit_text_input_action(self, text, emit_bridge_events=True)
+        elif action_name == "stop":
+            self.on_stop()
+        elif action_name == "new_session":
+            self.on_new_session()
+        elif action_name == "clear_chat":
+            self.on_clear()
+        elif action_name == "mic_toggle":
+            if self.mic_state == "idle":
+                self._handle_web_mic_start()
+            else:
+                self._handle_web_mic_stop()
+        elif action_name == "mic_start":
+            self._handle_web_mic_start()
+        elif action_name == "mic_stop":
+            self._handle_web_mic_stop()
+        elif action_name == "mic_audio_submit":
+            _LOG.info("Web mic: action received")
+            self._handle_web_mic_audio_submit(payload)
+        elif action_name == "snapshot_toggle":
+            self.on_snapshot()
+        elif action_name == "live_screen_mode":
+            mode = str(payload.get("mode", "display")).strip().lower()
+            self.live_screen.set_mode(mode)
+            enabled = False
+            try:
+                enabled = self.live_screen.is_enabled()
+            except Exception:
+                pass
+            self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {mode}"
+            self.set_vision_session_active(enabled)
+            self.ui_queue.put(
+                ("status_widget_dashboard_activity", f"Live screen source set to {mode}.")
+            )
+        elif action_name == "live_screen_interval":
+            interval_s = float(payload.get("interval_s", 10.0))
+            self.live_screen.set_interval(interval_s)
+            enabled = False
+            try:
+                enabled = self.live_screen.is_enabled()
+            except Exception:
+                pass
+            self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {interval_s}s"
+            self.ui_queue.put(
+                (
+                    "status_widget_dashboard_activity",
+                    f"Live screen interval set to {interval_s}s.",
+                )
+            )
+        elif action_name == "event_speech_mode":
+            mode = payload.get("mode", "")
+            self.set_event_speech_mode(mode, announce=True)
+        elif action_name == "restart_piper":
+            self.restart_requested = True
+            self.set_status("Restarting...")
+
+            try:
+                from web_ui.window import close_piper_window
+                close_piper_window()
+            except Exception:
+                pass
+
+            def _shutdown_worker() -> None:
+                try:
+                    self.boot_mgr.shutdown()
+                except Exception as exc:
+                    _LOG.exception("Web restart shutdown failed")
+                self.ui_queue.put(("status_widget_dashboard_activity", "Restart requested."))
+
+            threading.Thread(target=_shutdown_worker, daemon=True).start()
+        elif action_name == "open_document_picker":
+            self.ui_queue.put(
+                (
+                    "chat_append",
+                    {
+                        "role": "system",
+                        "content": "[UI] Document picker is frontend-owned in Web UI mode.",
+                    },
+                )
+            )
+        elif action_name == "document_picker_selected":
+            paths = payload.get("paths", [])
+            if paths:
+                from ui.controller_actions import _start_document_ingest
+                _start_document_ingest(self, [str(p) for p in paths])
+            else:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {"role": "system", "content": "[UI] No document selected."},
+                    )
+                )
+        elif action_name == "document_picker_cancel":
+            pass
+        elif action_name == "code_send":
+            text = str(payload.get("text", "")).strip()
+            if text and self.has_active_code_session():
+                self.send_code_session_input(text)
+        elif action_name == "code_run":
+            path = str(payload.get("path", "")).strip()
+            content = str(payload.get("content", ""))
+            if content and path:
+                from pathlib import Path
+                script_path = CFG.DATA_DIR / "workspace" / path
+                script_path.parent.mkdir(parents=True, exist_ok=True)
+                script_path.write_text(content, encoding="utf-8")
+                self.safe_log(f"[Code] Saved {path} ({len(content)} chars)")
+            if path:
+                self.start_code_session(path)
+                self.set_code_status(f"Launching: {path}")
+                self.set_status("CODE SESSION")
+            else:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {
+                            "role": "system",
+                            "content": "[UI] Code run requires a path in Web UI mode.",
+                        },
+                    )
+                )
+            self.refresh_interaction_state()
+        elif action_name == "code_clear":
+            self.on_code_clear()
+        elif action_name == "list_workspace_files":
+            from pathlib import Path
+            workspace_dir = CFG.DATA_DIR / "workspace"
+            files = []
+            if workspace_dir.exists():
+                for f in sorted(workspace_dir.iterdir()):
+                    if f.is_file() and f.suffix.lower() in (".py", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"):
+                        files.append({
+                            "name": f.name,
+                            "path": str(f),
+                            "size": f.stat().st_size,
+                        })
+            self.ui_queue.put(("workspace_files", {"files": files, "path": str(workspace_dir)}))
+        elif action_name == "read_workspace_file":
+            from pathlib import Path
+            file_path = Path(str(payload.get("path", "")))
+            workspace_dir = CFG.DATA_DIR / "workspace"
+            try:
+                resolved = file_path.resolve()
+                if not str(resolved).startswith(str(workspace_dir.resolve())):
+                    self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Access denied"}))
+                    return
+            except Exception:
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Invalid path"}))
+                return
+            if not file_path.exists() or not file_path.is_file():
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "File not found"}))
+                return
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": content}))
+            except Exception as exc:
+                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": str(exc)}))
+        elif action_name == "save_workspace_file":
+            from pathlib import Path
+            file_path = Path(str(payload.get("path", "")))
+            content = str(payload.get("content", ""))
+            workspace_dir = CFG.DATA_DIR / "workspace"
+            try:
+                resolved = file_path.resolve()
+                if not str(resolved).startswith(str(workspace_dir.resolve())):
+                    self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save denied: {file_path.name}"}))
+                    return
+            except Exception:
+                self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save invalid path"}))
+                return
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            self.safe_log(f"[Text] Saved {file_path.name} ({len(content)} chars)")
+        else:
+            self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
+
+    def run_web(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8787,
+        ws_path: str = "/ws",
+        *,
+        use_window: bool | None = None,
+    ) -> int:
+        """Run Piper in Web UI bridge mode (no DearPyGui)."""
+        CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.agent_brain.cleanup_old_events()
+        self.load_memory_into_chat()
+        self.knowledge_mgr.set_logger(self.safe_log)
+
+        self.proactive_monitor.start()
+        self._boot_ui_min_visible_until = time.perf_counter() + float(
+            getattr(CFG, "BOOT_SCREEN_MIN_VISIBLE_S", 0.75)
+        )
+        self._pending_boot_ready = False
+        self._pending_boot_ready_payload = ""
+        boot_thread: threading.Thread | None = None
+
+        action_queue: "queue.Queue[tuple[str, dict]]" = queue.Queue()
+        bridge_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        from web_ui.bridge.server import BridgeServer
+        from web_ui.bridge.adapter import ui_tuple_to_ws_frame
+        from ui.controller_queue import pump_ui_queue_web
+        from ui.controller_render import renderable_chat_messages
+
+        def _web_payload(method_name: str, fallback: dict[str, object]) -> dict[str, object]:
+            method = getattr(self, method_name, None)
+            if callable(method):
+                try:
+                    payload = method()
+                    if isinstance(payload, dict):
+                        return payload
+                except Exception:
+                    pass
+            return dict(fallback)
+
+        def _on_client_connect() -> list[str]:
+            """Return initial frames for a newly connected WebSocket client."""
+            try:
+                messages = renderable_chat_messages(self.chat_state.get_messages_snapshot())
+                return [
+                    ui_tuple_to_ws_frame("chat_sync", messages),
+                    ui_tuple_to_ws_frame(
+                        "active_user_changed",
+                        _web_payload("web_active_user_payload", {"preserve_transcript": False}),
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "style_status",
+                        _web_payload("web_style_status_payload", {"name": "default", "label": "Default", "filename": ""}),
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "auth_status",
+                        {"waiting": bool(self.user_runtime.is_waiting_for_admin_password())},
+                    ),
+                    ui_tuple_to_ws_frame(
+                        "tts_status",
+                        _web_payload("web_tts_status_payload", {"state": "idle", "error": ""}),
+                    ),
+                ]
+            except Exception:
+                return []
+
+        bridge = BridgeServer(
+            ui_queue=bridge_queue,
+            action_queue=action_queue,
+            host=host,
+            port=port,
+            ws_path=ws_path,
+            static_dir=str(CFG.WORKSPACE_DIR),
+            frontend_dist_dir=str(CFG.WEB_UI_FRONTEND_DIST_DIR),
+            on_client_connect=_on_client_connect,
+            max_message_size=int(getattr(CFG, "WEB_UI_MAX_WS_MESSAGE_BYTES", 20 * 1024 * 1024)),
+        )
+        bridge.start()
+
+        # Guard DearPyGui calls: without a DPG context dpg.does_item_exist causes a
+        # native hard exit on Windows.  Every DPG mutation in the codebase is already
+        # guarded with ``if dpg.does_item_exist(tag):``; returning False safely skips
+        # all of them in Web mode.
+        _orig_dpg_exists = dpg.does_item_exist
+        dpg.does_item_exist = lambda _tag: False
+
+        if use_window is None:
+            use_window = getattr(CFG, "WEB_UI_WINDOW", False)
+        stop_event = threading.Event()
+        previous_tts_status: tuple[str, str] | None = None
+
+        def _pump_loop() -> None:
+            """Web UI action/pump loop.
+
+            Runs on the main thread in browser mode, or in a background
+            thread when a desktop window is active.
+            """
+            nonlocal previous_tts_status
+            try:
+                while not self.restart_requested and not stop_event.is_set():
+                    try:
+                        action_name, payload = action_queue.get(timeout=0.05)
+                    except queue.Empty:
+                        pass
+                    else:
+                        try:
+                            self._dispatch_web_action(action_name, payload)
+                        except Exception as exc:
+                            _LOG.exception("Web action dispatch failed: %s", action_name)
+                            self.ui_queue.put(("error", f"Web action error: {action_name}: {exc}"))
+
+                    pump_ui_queue_web(self, forward_queue=bridge_queue)
+
+                    # Auth state tracking: emit when password-waiting state changes.
+                    try:
+                        auth_waiting = self.user_runtime.is_waiting_for_admin_password()
+                    except Exception:
+                        auth_waiting = False
+                    if getattr(self, "_web_ui_prev_auth_waiting", None) != auth_waiting:
+                        self._web_ui_prev_auth_waiting = auth_waiting
+                        bridge_queue.put(("auth_status", {"waiting": auth_waiting}))
+                    tts_payload = _web_payload("web_tts_status_payload", {"state": "idle", "error": ""})
+                    tts_key = (
+                        str(tts_payload.get("state") or "idle"),
+                        str(tts_payload.get("error") or ""),
+                    )
+                    if previous_tts_status != tts_key:
+                        previous_tts_status = tts_key
+                        bridge_queue.put(("tts_status", tts_payload))
+            except KeyboardInterrupt:
+                pass
+
+        try:
+            if use_window:
+                pump_thread = threading.Thread(
+                    target=_pump_loop, daemon=True, name="piper-web-pump"
+                )
+                pump_thread.start()
+
+                def _delayed_boot() -> None:
+                    time.sleep(1.5)
+                    self.boot_mgr.run_sequence()
+
+                boot_thread = threading.Thread(target=_delayed_boot, daemon=True)
+                boot_thread.start()
+
+                from web_ui.window import open_piper_window
+
+                open_piper_window(f"http://{host}:{port}")
+
+                stop_event.set()
+                pump_thread.join(timeout=3.0)
+            else:
+                boot_thread = threading.Thread(
+                    target=self.boot_mgr.run_sequence, daemon=True
+                )
+                boot_thread.start()
+                _pump_loop()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            dpg.does_item_exist = _orig_dpg_exists
+            bridge.stop()
+            self.proactive_monitor.stop()
+            self.agent_brain.shutdown()
+            self.code_session.shutdown()
+            self.boot_mgr.shutdown()
+            if getattr(self, "searxng_service", None):
+                self.searxng_service.shutdown()
+
+        return RESTART_EXIT_CODE if self.restart_requested else 0
+
     def run(self) -> int:
         CFG.DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.agent_brain.cleanup_old_events()
@@ -1243,4 +1836,6 @@ class PiperController:
             dpg.destroy_context()
             self.agent_brain.shutdown()
             self.code_session.shutdown()
+            if getattr(self, "searxng_service", None):
+                self.searxng_service.shutdown()
         return RESTART_EXIT_CODE if self.restart_requested else 0

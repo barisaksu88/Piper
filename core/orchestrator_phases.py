@@ -5,6 +5,7 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,11 @@ _CONFIRMATION_PHRASES = (
     "attempt to reroute",
 )
 _RECALL_TAG_RE = re.compile(r"\[RECALL:\s*(.*?)\]", re.IGNORECASE | re.DOTALL)
+_PERSONA_SYSTEM_BLOCK_LABEL_RE = re.compile(
+    r"(?is)\n?\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|"
+    r"FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|SEARCH_FIRST_PASS_RULE|PROACTIVE_TRIGGER|REMINDER_SET_RESULT|"
+    r"EXPLAIN_LAST_TURN|CONTEXT_ARBITRATION_RULE)\](?:\n.*)?$"
+)
 _SCRATCHPAD_ERROR_PREFIXES = (
     "system error:",
     "security violation:",
@@ -75,6 +81,25 @@ _SCRATCHPAD_ERROR_PREFIXES = (
     "execution error:",
 )
 _SEARCH_RECENCY_HINT_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b")
+_SEARCH_PREVIEW_SOURCE_CHOICE_WORDS = {
+    "actually",
+    "do",
+    "internet",
+    "instead",
+    "it",
+    "online",
+    "please",
+    "pls",
+    "search",
+    "that",
+    "the",
+    "web",
+    "yeah",
+    "yep",
+    "yes",
+}
+_SEARCH_PREVIEW_SOURCE_WORDS = {"internet", "online", "web"}
+_SEARCH_SUMMARY_QUERY_RE = re.compile(r"(?is)^\[SEARCH SUMMARY FOR ['\"](?P<query>.+?)['\"]\]")
 _INGESTED_DOC_META_ACTION_RE = re.compile(
     r"(?i)^\s*/ingest\b|\b(ingest|upload|import|attach|add)\b.*\b(document|pdf|docx|file)\b"
 )
@@ -328,6 +353,7 @@ def _build_search_first_pass_rule(query: str) -> str:
             "If you ask a question, it must clarify the search topic itself, not permission to continue the search.",
             "Stay tightly on the search topic. Do not riff on unrelated profile facts, tasks, events, memories, or document excerpts.",
             "Ignore any personal or workspace context unless it is directly relevant to the search query itself.",
+            "If the query asks for externally verifiable facts, results, status, rankings, dates, specs, or claims not supplied by current system context, frame uncertainty plainly and defer specifics until the web results arrive.",
             "Do not speculate that the web findings are empty, quiet, lacking breakthroughs, or already leaning one way unless the current system context explicitly says so.",
             "Do not present your existing knowledge as if it came from the live web search.",
             "Make it clear the web findings will follow shortly.",
@@ -359,7 +385,16 @@ def _build_search_first_pass_fallback(query: str) -> str:
 
 
 def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
-    current_user = str(user_msg or query or "").strip()
+    raw_user = str(user_msg or "").strip()
+    clean_query = str(query or "").strip()
+    current_user = raw_user or clean_query
+    if clean_query and raw_user and raw_user.casefold() != clean_query.casefold():
+        words = set(re.findall(r"[a-z]+", raw_user.casefold()))
+        source_choice_only = bool(words & _SEARCH_PREVIEW_SOURCE_WORDS) and words.issubset(
+            _SEARCH_PREVIEW_SOURCE_CHOICE_WORDS
+        )
+        if source_choice_only:
+            current_user = f"Search the web for {clean_query}."
     if not current_user:
         return []
     return [{"role": "user", "content": current_user}]
@@ -372,16 +407,19 @@ def _build_search_report_history(
 ) -> list[dict[str, str]]:
     filtered: list[dict[str, str]] = []
     latest_summary = None
+    latest_summary_query = ""
     for message in reversed(list(history or [])):
         if str(message.get("role") or "").strip().lower() != "system":
             continue
         content = str(message.get("content") or "").strip()
         if content.startswith("[SEARCH SUMMARY FOR "):
             latest_summary = {"role": "system", "content": content}
+            match = _SEARCH_SUMMARY_QUERY_RE.match(content)
+            latest_summary_query = str(match.group("query") if match else "").strip()
             break
     if latest_summary is not None:
         filtered.append(latest_summary)
-    filtered.extend(_build_search_preview_history(user_msg, user_msg))
+    filtered.extend(_build_search_preview_history(user_msg, latest_summary_query or user_msg))
     return filtered
 
 
@@ -710,6 +748,25 @@ def _build_remaining_route_decision(orc, *, start_stage_index: int) -> dict[str,
 
 def _build_remaining_route_decision_for_target_confirmation(orc, *, stage_index: int) -> dict[str, Any]:
     return _build_remaining_route_decision(orc, start_stage_index=stage_index)
+
+
+def _strip_ui_prefix(message: str) -> str:
+    text = str(message or "").strip()
+    return re.sub(r"^\s*\[UI\]\s*", "", text).strip()
+
+
+def _identity_clarification_notice(message: str) -> str:
+    clean = _strip_ui_prefix(message)
+    if not clean:
+        clean = "I need one more detail before I can identify the current speaker."
+    return "\n".join(
+        [
+            "[VOICE IDENTITY CLARIFICATION]",
+            "The runtime could not safely choose a speaker profile.",
+            f"Ask the current speaker naturally: {clean}",
+            "Do not expose this as a system or UI message, and do not claim the identity was switched.",
+        ]
+    )
 
 
 def _maybe_pause_for_missing_file_target_confirmation(
@@ -1076,6 +1133,8 @@ def _run_route_core(orc) -> None:
             '{"identity_intent":{"is_introduction":true,"name":"Max","relation_to_admin":"friend","confidence":"high"}}. '
             "Also emit identity_intent when the latest user message explicitly corrects the active speaker, "
             "such as \"I'm not Baris, I'm Max\" or \"I'm Jim\" while another user is active. "
+            "If the active speaker spells or corrects their own name, such as \"I will spell my name, e-k-i-n\", "
+            "emit identity_intent with the corrected display spelling, for example name \"Ekin\". "
             "For correction phrases like \"I'm not British, I'm Jim\", use the asserted speaker name after the correction, not the negated description. "
             "Do not emit identity_intent for ordinary replies or status phrases like 'not bad', 'fine', 'okay', 'sure', or 'I am tired'."
         )
@@ -1115,6 +1174,17 @@ def _run_route_core(orc) -> None:
             parsed = exc.fallback or RouterBoundary.fallback()
             orc.ui.put(("agent_log", f"   -> Router validation failed: {exc}. Applying CHAT fallback."))
         identity_intent = dict((parsed or {}).get("identity_intent") or {})
+        if not identity_intent and user_runtime is not None and hasattr(user_runtime, "extract_spelled_identity_name"):
+            try:
+                spelled_identity = str(user_runtime.extract_spelled_identity_name(orc.user_msg) or "").strip()
+            except Exception:
+                spelled_identity = ""
+            if spelled_identity:
+                identity_intent = {
+                    "is_introduction": True,
+                    "name": spelled_identity,
+                    "confidence": "high",
+                }
         if (
             bool(identity_intent.get("is_introduction"))
             and user_runtime is not None
@@ -1123,12 +1193,37 @@ def _run_route_core(orc) -> None:
             relation_hint = str(identity_intent.get("relation_to_admin") or "").strip()
             if identity_name:
                 try:
-                    result = user_runtime.apply_router_identity_intent(identity_name, relation_hint=relation_hint)
+                    result = user_runtime.apply_router_identity_intent(
+                        identity_name,
+                        relation_hint=relation_hint,
+                        source_text=orc.user_msg,
+                    )
                     if getattr(result, "switched", False):
+                        switched_profile = getattr(result, "profile", None)
+                        switched_name = str(getattr(switched_profile, "name", "") or identity_name).strip() or identity_name
+                        switched_user_id = str(getattr(switched_profile, "user_id", "") or "").strip()
+                        role_label = ""
+                        try:
+                            role_label = str(user_runtime.profile_role_label(switched_profile) or "").strip()
+                        except Exception:
+                            role_label = ""
+                        notice_parts = [
+                            "[VOICE IDENTITY EVENT]",
+                            f"The runtime just identified the current speaker as {switched_name}"
+                            + (f" [{switched_user_id}]" if switched_user_id else "")
+                            + (f" ({role_label})" if role_label else "")
+                            + ".",
+                            "You may acknowledge this naturally if relevant.",
+                            "Do not say a new session started; the existing transcript is being carried forward under the identified user.",
+                        ]
+                        orc.identity_switch_notice = "\n".join(notice_parts)
                         orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Switched user."))
-                        orc.ui.put(("active_user_changed", ""))
+                        orc.ui.put(("active_user_changed", {"preserve_transcript": True}))
                     elif getattr(result, "requires_password", False) or getattr(result, "requires_identity_clarification", False):
-                        orc.ui.put(("chat_append", {"role": "system", "content": str(getattr(result, "message", "") or "")}))
+                        orc.identity_switch_notice = _identity_clarification_notice(
+                            str(getattr(result, "message", "") or "")
+                        )
+                        orc.ui.put(("agent_log", f"   -> Router identity intent: {identity_name}. Clarification required."))
                 except Exception as exc:
                     orc.ui.put(("agent_log", f"   -> Identity switch from router failed: {exc}"))
         normalized = normalize_route_decision(parsed, orc.user_msg, router_history)
@@ -1225,7 +1320,7 @@ def _run_route_core(orc) -> None:
     # If Secretary produced a bare CHAT with no stage instructions for a very
     # short/vague message, wrap it so the Planner/Persona asks for clarification
     # instead of treating it as casual chat (which leads to snarky responses).
-    if decision == "CHAT":
+    if decision == "CHAT" and not str(getattr(orc, "identity_switch_notice", "") or "").startswith("[VOICE IDENTITY CLARIFICATION]"):
         card = dict(orc.route_decision.get("card") or {})
         has_clarify_stage = any(
             str(s.get("stage_type") or "").upper() == "CHAT"
@@ -1421,24 +1516,40 @@ def phase_search(orc) -> None:
         orc.retain_cancel_token(orc.cancel_token)
     orc.retain_search_in_flight(query)
 
+    _search_trace_path = Path(CFG.DATA_DIR) / "debug" / "search_trace.log"
+    def _search_trace(msg: str) -> None:
+        ts = datetime.now().isoformat()
+        line = f"{ts} | {msg}\n"
+        try:
+            _search_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(_search_trace_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+        orc._log_dashboard(msg)
+
     def _do_search() -> None:
         queued_result = False
         try:
+            _search_trace(f"[SEARCH BG] Starting search for: {query}")
             orc.raise_if_cancelled()
             data = perform_search(
                 query,
                 CFG.DATA_DIR,
-                log_callback=orc._log_dashboard,
+                log_callback=_search_trace,
                 cancel_token=orc.cancel_token,
             )
+            _search_trace(f"[SEARCH BG] perform_search returned. Length={len(str(data))}")
             if is_search_error_result(data):
                 raise RuntimeError(normalize_search_error(data))
             orc.raise_if_cancelled()
             orc.ui.put(("search_result", {"query": query, "data": data, "cancel_token": orc.cancel_token}))
+            _search_trace("[SEARCH BG] Queued search_result event.")
             queued_result = True
         except OperationCancelled:
-            orc._log_dashboard("Search canceled.")
+            _search_trace("[SEARCH BG] Search canceled.")
         except Exception as exc:
+            _search_trace(f"[SEARCH BG] Search failed: {exc}")
             orc.emit_runtime_signal(
                 {
                     "kind": "search_error",
@@ -1461,13 +1572,14 @@ def phase_search(orc) -> None:
                 )
             )
             queued_result = True
-            orc._log_dashboard(error_data)
+            _search_trace(error_data)
         finally:
             orc.release_search_in_flight()
             if orc.cancel_token is not None:
                 orc.release_cancel_token(orc.cancel_token)
             if not queued_result:
                 orc.ui.put(("status", "Canceled" if orc.cancel_token and orc.cancel_token.is_cancelled else "IDLE"))
+            _search_trace(f"[SEARCH BG] Thread exiting. queued_result={queued_result}")
 
     try:
         worker = threading.Thread(target=_do_search, daemon=True)
@@ -1557,6 +1669,7 @@ def phase_reporter(orc) -> None:
     search_failed = bool(payload.failed)
 
     orc.stats_collector.note_reporter_query(orc.turn_stats, query)
+    orc.latest_search_query = query
     orc.latest_search_failed = search_failed
     orc.latest_search_error = normalize_search_error(data) if search_failed else ""
 
@@ -2044,6 +2157,21 @@ def phase_reminder_set(orc) -> None:
     orc.next_stage = "PERSONA"
 
 
+def phase_explain(orc) -> None:
+    """EXPLAIN stage — produce an explanation turn from the explain interceptor.
+
+    The interceptor already placed the ``explain_last_turn`` system notice in
+    ``route_decision``.  This stage simply logs the bypass and routes to
+    PERSONA so the explanation is generated with the proper context.
+    """
+    orc.raise_if_cancelled()
+    orc.ui.put(("agent_log", "--- PHASE 1: EXPLAIN ---"))
+    orc.stats_collector.start_phase(orc.turn_stats, "persona")
+    orc.stats_collector.note_route(orc.turn_stats, decision="CHAT", bypass="explain_last_turn")
+    orc.stats_collector.end_phase(orc.turn_stats, "persona")
+    orc.next_stage = "PERSONA"
+
+
 def _emit_fallback_assistant_answer(orc, text: str) -> None:
     fallback = (text or "").strip()
     if not fallback:
@@ -2070,6 +2198,7 @@ def _extract_recall_query(text: str) -> str:
 def _strip_persona_control_tags(text: str) -> str:
     cleaned = _RECALL_TAG_RE.sub("", str(text or ""))
     cleaned = cleaned.replace("[ROUTER]", "")
+    cleaned = _PERSONA_SYSTEM_BLOCK_LABEL_RE.sub("", cleaned)
     cleaned = re.sub(
         r"\[(?:ACTIVE_SKILL|LATEST_SYSTEM_EVENT|FINAL_STAGE_OUTCOME|NO_MUTATION_RULE|DOCUMENT_QA_RULE|FILE_WORK_REPORT_RULE|SEARCH_REPORT_RULE|SEARCH_FIRST_PASS_RULE|PROACTIVE_TRIGGER|REMINDER_SET_RESULT|EXPLAIN_LAST_TURN|CONTEXT_ARBITRATION_RULE)\]",
         "",
@@ -2077,6 +2206,12 @@ def _strip_persona_control_tags(text: str) -> str:
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _should_ignore_router_after_visible_reply(clean_answer: str, router_requested: bool) -> bool:
+    """Return True if the persona already produced a visible reply and the
+    [ROUTER] marker should be ignored for this turn."""
+    return router_requested and bool(clean_answer.strip())
 
 
 def _render_recall_block(query: str, hits: list[dict]) -> str:
@@ -2115,6 +2250,44 @@ def _persona_recall_allowed(
         except Exception:
             pass
     return True
+
+
+def _build_voice_identity_state_block(orc) -> str:
+    state = getattr(orc, "voice_identity_state", None)
+    if not isinstance(state, dict):
+        state = {}
+    current_speaker = str(state.get("current_speaker") or "").strip() or "unknown"
+    recognition_status = str(state.get("recognition_status") or "").strip().lower()
+    access_tier = str(state.get("access_tier") or "").strip().lower()
+    user_runtime = getattr(getattr(orc, "_cfg", None), "user_runtime", None)
+    if user_runtime is not None:
+        try:
+            profile = user_runtime.active_profile()
+            if getattr(profile, "is_unknown", False):
+                current_speaker = "unknown"
+                recognition_status = "unknown"
+                access_tier = "unknown"
+            else:
+                current_speaker = str(getattr(profile, "name", "") or getattr(profile, "user_id", "") or current_speaker)
+                access_tier = "admin" if user_runtime.is_admin_unlocked() else "public"
+                if recognition_status == "unknown":
+                    recognition_status = "confirmed"
+        except Exception:
+            pass
+    if recognition_status not in {"confirmed", "tentative", "unknown"}:
+        recognition_status = "unknown" if current_speaker.lower() == "unknown" else "confirmed"
+    if access_tier not in {"admin", "public", "unknown"}:
+        access_tier = "unknown"
+    return "\n".join(
+        [
+            "[VOICE IDENTITY STATE]",
+            f"Current speaker: {current_speaker}.",
+            f"Recognition status: {recognition_status}.",
+            f"Access tier: {access_tier}.",
+            "Use only this runtime-provided voice identity signal; do not invent identity changes.",
+            "If access tier is not admin, do not reveal admin/private memory.",
+        ]
+    )
 
 
 def _debug_log_stream(tokens, label: str):
@@ -2456,13 +2629,25 @@ def _run_persona_core(orc) -> None:
 
     system_content = PromptBuilder.build_persona_prompt(prompt_context)
     tail_system_parts = list(persona_directives.tail_system_blocks)
+    tail_system_parts.append(_build_voice_identity_state_block(orc))
+    identity_switch_notice = str(getattr(orc, "identity_switch_notice", "") or "").strip()
+    if identity_switch_notice:
+        tail_system_parts.append(identity_switch_notice)
     if str(getattr(getattr(orc, "_cfg", None), "input_modality", "") or "").strip().lower() == "voice":
         tail_system_parts.append(
             "[INPUT MODALITY]\n"
             "The current user turn came from microphone speech recognition.\n"
             "If [ACTIVE USER] is still unknown, do not ask who is speaking just because identity is unknown; "
             "voice recognition is handled by the runtime before Persona.\n"
+            "Do not say the user is typing, text-based, or keyboard-based.\n"
+            "Do not mention microphone capture, voice recognition, or input modality unless the user explicitly asks about it.\n"
             "Answer the user's actual message normally, using only public/session context and no persistent personal memory."
+        )
+    else:
+        tail_system_parts.append(
+            "[INPUT MODALITY]\n"
+            "Do not mention or infer how the user entered this message unless the user explicitly asks about input method.\n"
+            "Do not say things like 'I see you are typing' or speculate about microphone/keyboard use."
         )
     if not allow_persona_recall:
         tail_system_parts.append(
@@ -2470,6 +2655,17 @@ def _run_persona_core(orc) -> None:
             "Do not emit [RECALL: ...] markers on this turn.\n"
             "Answer only from the current turn evidence, runtime context, and verified state."
         )
+    tail_system_parts.append(
+        "[FACTUAL TRUTHFULNESS RULE]\n"
+        "If a factual claim is uncertain, do not guess.\n"
+        "Say you are not sure.\n"
+        "If the user is asking for a factual answer and the claim is externally verifiable on the web, prefer a short line like 'I am not sure. Let me check online.' and append [ROUTER] instead of bluffing.\n"
+        "Use this for uncertain externally checkable claims when the current runtime context does not already contain grounded evidence, including titles, lyrics, quotes, names, authorship, release facts, dates, rankings, prices, companies, public figures, laws, and current events.\n"
+        "Do not ask the user for permission before checking online when the user is clearly seeking a factual answer and a web search would directly resolve the uncertainty.\n"
+        "Do not reroute just because the conversation is vague, speculative, creative, or emotionally open-ended. Use reroute for factual verification.\n"
+        "Do this at most once on this turn. If a search is already running or already finished for this turn, do not append [ROUTER] again.\n"
+        "Do not present a best guess as if it were verified fact."
+    )
 
     history = orc.get_context()
     if reporter_just_ran:
@@ -2688,7 +2884,10 @@ def _run_persona_core(orc) -> None:
         orc.chat.replace_last_assistant_content(clean_answer)
 
     if router_requested:
-        if latest_route_error:
+        if _should_ignore_router_after_visible_reply(clean_answer, router_requested):
+            orc.ui.put(("agent_log", "   -> ROUTER marker ignored because persona already produced visible reply."))
+            orc.next_stage = "FINISHED"
+        elif latest_route_error:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored because the latest secretary pass errored."))
             orc.next_stage = "FINISHED"
         elif reporter_just_ran:
@@ -2713,9 +2912,15 @@ def _run_persona_core(orc) -> None:
             orc.ui.put(("agent_log", "   -> ROUTER marker ignored after successful task outcome."))
             orc.next_stage = "FINISHED"
         else:
-            orc.ui.put(("agent_log", "   -> LOOPBACK DETECTED."))
-            orc.stats_collector.note_router_reroute(orc.turn_stats)
-            orc.next_stage = "ROUTE"
+            loopback_count = int(getattr(orc, "persona_router_loopback_retries", 0) or 0)
+            if loopback_count >= 1:
+                orc.ui.put(("agent_log", f"   -> LOOPBACK ignored after cap ({loopback_count})."))
+                orc.next_stage = "FINISHED"
+            else:
+                orc.persona_router_loopback_retries = loopback_count + 1
+                orc.ui.put(("agent_log", "   -> LOOPBACK DETECTED."))
+                orc.stats_collector.note_router_reroute(orc.turn_stats)
+                orc.next_stage = "ROUTE"
     else:
         orc.next_stage = "FINISHED"
 

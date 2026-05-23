@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import pickle
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -13,6 +14,24 @@ try:
     _RESEMBLYZER_AVAILABLE = True
 except ImportError:
     _RESEMBLYZER_AVAILABLE = False
+
+
+@dataclass(frozen=True)
+class VoiceMatchDecision:
+    best_user: str = ""
+    best_score: float = 0.0
+    second_score: float = 0.0
+    margin: float = 0.0
+    best_is_admin: bool = False
+    threshold: float = 0.0
+    margin_threshold: float = 0.0
+    final_user: str = ""
+    decision: str = "unknown"
+    reason: str = "no_match"
+
+    @property
+    def accepted(self) -> bool:
+        return self.decision in {"accepted_admin", "accepted_public"} and bool(self.final_user)
 
 
 class VoiceFingerprintEngine:
@@ -161,27 +180,90 @@ class VoiceFingerprintEngine:
         Admin users use a stricter threshold. Returns (None, 0.0) if no match or
         the best match does not clear the user's threshold.
         """
-        best_user, best_score = self.best_match(embedding)
-        if best_user is None:
-            return None, 0.0
+        decision = self.evaluate_match(embedding)
+        return (decision.final_user or None), decision.best_score
 
-        # Apply per-user threshold
+    def evaluate_match(self, embedding: Any, *, first_turn: bool = False) -> VoiceMatchDecision:
+        """Return a score/margin-gated voice decision.
+
+        This separates the best identity guess from permission unlock. Admin
+        candidates must pass both the admin score threshold and admin margin
+        threshold before the caller may unlock private/admin context.
+        """
+        matches = self.ranked_matches(embedding)
+        if not matches:
+            return VoiceMatchDecision(reason="no_enrolled_profiles")
+
+        best_user, best_score = matches[0]
+        second_score = matches[1][1] if len(matches) > 1 else 0.0
+        margin = max(0.0, float(best_score) - float(second_score))
         admin_users = getattr(self, '_admin_users', set())
-        from config import CFG
-        threshold = CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD if best_user in admin_users else CFG.VOICE_SIMILARITY_THRESHOLD_HIGH
-        if best_score < threshold:
-            return None, best_score
+        best_is_admin = best_user in admin_users
 
-        return best_user, best_score
+        from config import CFG
+
+        if best_is_admin:
+            threshold = float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD)
+            margin_threshold = float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD)
+            accepted_decision = "accepted_admin"
+        else:
+            public_threshold = float(CFG.VOICE_SIMILARITY_THRESHOLD_HIGH)
+            first_turn_threshold = float(CFG.VOICE_FIRST_TURN_INFER_THRESHOLD)
+            threshold = max(public_threshold, first_turn_threshold) if first_turn else public_threshold
+            margin_threshold = float(CFG.VOICE_PUBLIC_MARGIN_THRESHOLD)
+            accepted_decision = "accepted_public"
+
+        if best_score >= threshold and margin >= margin_threshold:
+            return VoiceMatchDecision(
+                best_user=str(best_user),
+                best_score=float(best_score),
+                second_score=float(second_score),
+                margin=float(margin),
+                best_is_admin=bool(best_is_admin),
+                threshold=threshold,
+                margin_threshold=margin_threshold,
+                final_user=str(best_user),
+                decision=accepted_decision,
+                reason=accepted_decision,
+            )
+
+        low_threshold = float(CFG.VOICE_SIMILARITY_THRESHOLD_LOW)
+        if best_score >= low_threshold:
+            if best_score < threshold:
+                reason = "admin_score_below_threshold" if best_is_admin else "public_score_below_threshold"
+            else:
+                reason = "admin_margin_below_threshold" if best_is_admin else "public_margin_below_threshold"
+            decision = "low_confidence_admin" if best_is_admin else "low_confidence_public"
+        else:
+            reason = "score_below_low_threshold"
+            decision = "unknown"
+
+        return VoiceMatchDecision(
+            best_user=str(best_user),
+            best_score=float(best_score),
+            second_score=float(second_score),
+            margin=float(margin),
+            best_is_admin=bool(best_is_admin),
+            threshold=threshold,
+            margin_threshold=margin_threshold,
+            final_user="",
+            decision=decision,
+            reason=reason,
+        )
 
     def best_match(self, embedding: Any) -> Tuple[Optional[str], float]:
         """Return the nearest enrolled voice without applying confidence thresholds."""
-        if not self._embeddings:
+        matches = self.ranked_matches(embedding)
+        if not matches:
             return None, 0.0
+        return matches[0]
 
-        best_user: Optional[str] = None
-        best_score: float = 0.0
+    def ranked_matches(self, embedding: Any) -> list[tuple[str, float]]:
+        """Return enrolled voice similarities sorted best-first."""
+        if not self._embeddings:
+            return []
 
+        scores: list[tuple[str, float]] = []
         import numpy as np
         for user_id, enrolled_embeddings in self._embeddings.items():
             if not enrolled_embeddings:
@@ -190,10 +272,9 @@ class VoiceFingerprintEngine:
             similarity = float(np.dot(embedding, avg_embedding) / (
                 np.linalg.norm(embedding) * np.linalg.norm(avg_embedding) + 1e-8
             ))
-            if similarity > best_score:
-                best_score = similarity
-                best_user = user_id
-        return best_user, best_score
+            scores.append((str(user_id), similarity))
+        scores.sort(key=lambda item: item[1], reverse=True)
+        return scores
 
     def check_low_confidence_ask(self, user_id: str, similarity: float) -> Optional[str]:
         """Returns a clarification question if confidence stays low too long."""

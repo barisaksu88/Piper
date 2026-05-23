@@ -1,0 +1,204 @@
+import RailCard from "./RailCard";
+import type { RailPanelId } from "../types";
+
+const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
+const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
+const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
+
+interface RightRailProps {
+  expandedPanels: Record<RailPanelId, boolean>;
+  onTogglePanel: (panel: RailPanelId) => void;
+  workspaceOpen: boolean;
+  onToggleWorkspace: () => void;
+  connState: string;
+  sendAction: (action: string, payload?: Record<string, unknown>) => boolean;
+  documentIngestActive: boolean;
+  documentsView: string;
+  documentsViewRef: React.RefObject<HTMLDivElement | null>;
+  selectedDocumentPaths: string[];
+  documentPathInput: string;
+  onDocumentPathChange: (value: string) => void;
+  onAddDocumentPaths: () => void;
+  onIngestSelected: () => void;
+  onClearDocumentSelection: () => void;
+  onCancelIngest: () => void;
+  activities: string[];
+  logs: string[];
+  rawEvents: Array<{
+    kind: string;
+    sourceKind: string;
+    payload: Record<string, unknown>;
+    receivedAt: number;
+  }>;
+}
+
+export default function RightRail({
+  expandedPanels,
+  onTogglePanel,
+  workspaceOpen,
+  onToggleWorkspace,
+  connState,
+  sendAction,
+  documentIngestActive,
+  documentsView,
+  documentsViewRef,
+  selectedDocumentPaths,
+  documentPathInput,
+  onDocumentPathChange,
+  onAddDocumentPaths,
+  onIngestSelected,
+  onClearDocumentSelection,
+  onCancelIngest,
+  activities,
+  logs,
+  rawEvents,
+}: RightRailProps) {
+  return (
+    <aside className="right-rail">
+      <div
+        className={`rail-workspace-toggle ${workspaceOpen ? "active" : ""}`}
+        onClick={onToggleWorkspace}
+        role="button"
+        tabIndex={0}
+      >
+        <span className="rail-ws-label">Workspace</span>
+        <span className="rail-ws-hint">{workspaceOpen ? "Close" : "Open"}</span>
+      </div>
+
+      <RailCard
+        title="Capture"
+        collapsible
+        expanded={expandedPanels.capture}
+        onToggle={() => onTogglePanel("capture")}
+      >
+        <div className="settings-row">
+          <label className="setting-label">
+            Event Speech
+            <select
+              onChange={(e) => sendAction("event_speech_mode", { mode: e.target.value })}
+              disabled={connState !== "connected"}
+              defaultValue="off"
+            >
+              {EVENT_SPEECH_MODES.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <label className="setting-label">
+            Live Screen
+            <select
+              onChange={(e) => sendAction("live_screen_mode", { mode: e.target.value })}
+              disabled={connState !== "connected"}
+              defaultValue="display"
+            >
+              {LIVE_SCREEN_MODES.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <label className="setting-label">
+            Interval
+            <select
+              onChange={(e) => sendAction("live_screen_interval", { interval_s: Number(e.target.value) })}
+              disabled={connState !== "connected"}
+              defaultValue={10}
+            >
+              {LIVE_SCREEN_INTERVALS.map((n) => (
+                <option key={n} value={n}>{n}s</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </RailCard>
+
+      <RailCard
+        title="Documents"
+        collapsible
+        expanded={expandedPanels.documents}
+        onToggle={() => onTogglePanel("documents")}
+        badge={
+          <span className={documentIngestActive ? "rail-badge active" : "rail-badge"}>
+            {documentIngestActive ? "Ingesting..." : "Idle"}
+          </span>
+        }
+      >
+        <div className="doc-panel">
+          <div className="doc-view" ref={documentsViewRef}>
+            {documentsView && <pre className="doc-view-content">{documentsView}</pre>}
+          </div>
+          {selectedDocumentPaths.length > 0 && (
+            <div className="doc-selected-list">
+              {selectedDocumentPaths.map((p, i) => (
+                <div key={`dp-${i}`} className="doc-selected-item">{p}</div>
+              ))}
+            </div>
+          )}
+          <div className="doc-controls">
+            <div className="doc-control-row">
+              <input
+                className="input-text doc-path"
+                type="text"
+                value={documentPathInput}
+                onChange={(e) => onDocumentPathChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    onAddDocumentPaths();
+                  }
+                }}
+                placeholder="Path(s) separated by ; or newline..."
+                disabled={connState !== "connected"}
+              />
+              <button onClick={onAddDocumentPaths} disabled={connState !== "connected" || !documentPathInput.trim()}>
+                Add
+              </button>
+            </div>
+            <div className="doc-control-row">
+              <button onClick={onIngestSelected} disabled={connState !== "connected" || documentIngestActive || selectedDocumentPaths.length === 0}>
+                Ingest Selected
+              </button>
+              <button onClick={onClearDocumentSelection} disabled={connState !== "connected"}>
+                Clear
+              </button>
+              <button onClick={onCancelIngest} disabled={connState !== "connected" || !documentIngestActive}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </RailCard>
+
+      <RailCard
+        title="Activity & Logs"
+        collapsible
+        expanded={expandedPanels.activity}
+        onToggle={() => onTogglePanel("activity")}
+      >
+        <div className="log-box">
+          {activities.map((a, i) => (
+            <div key={`a-${i}`} className="log-line activity">{a}</div>
+          ))}
+          {logs.map((l, i) => (
+            <div key={`l-${i}`} className="log-line log">{l}</div>
+          ))}
+        </div>
+      </RailCard>
+
+      <RailCard
+        title="Raw Events"
+        collapsible
+        expanded={expandedPanels.raw}
+        onToggle={() => onTogglePanel("raw")}
+      >
+        <div className="log-box raw">
+          {rawEvents.map((e, i) => (
+            <details key={`e-${i}`} className="raw-event">
+              <summary>{e.kind} ({e.sourceKind})</summary>
+              <pre>{JSON.stringify(e.payload, null, 2)}</pre>
+            </details>
+          ))}
+        </div>
+      </RailCard>
+    </aside>
+  );
+}

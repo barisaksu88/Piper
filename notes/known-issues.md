@@ -54,3 +54,17 @@
 
 ## Engineering Support
 
+
+## Voice Identity Stabilization — WIP
+
+Current state:
+- Voice identity hardening has been implemented but is not yet manually verified.
+- Known risk: first-turn voice inference and admin activation thresholds need testing.
+- Continue work on `stabilize/voice-identity`, not directly on `main`.
+
+Required next evidence:
+- unknown speaker does not activate admin
+- Baris voice activates admin only above strict admin threshold
+- unknown-to-identified transition preserves session memory correctly
+- typed identity correction still works
+- no persistent memory writes for unknown users

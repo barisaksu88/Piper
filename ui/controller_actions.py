@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -59,6 +60,82 @@ def _log_voice_identity_ui(message: str) -> None:
         pass
 
 
+def _voice_drift_confirmation_turns() -> int:
+    try:
+        return max(1, int(getattr(CFG, "VOICE_DRIFT_CONFIRMATION_TURNS", 3) or 3))
+    except Exception:
+        return 3
+
+
+def _new_voice_drift_tracker() -> dict:
+    return {
+        "from_user_id": "",
+        "candidate_user_id": "",
+        "candidate_count": 0,
+        "unknown_count": 0,
+        "admin_revoked": False,
+    }
+
+
+def _reset_voice_drift_tracker(controller) -> None:
+    setattr(controller, "_voice_drift_tracker", _new_voice_drift_tracker())
+
+
+def _set_voice_drift_tracker(controller, tracker: dict) -> None:
+    setattr(
+        controller,
+        "_voice_drift_tracker",
+        {**_new_voice_drift_tracker(), **dict(tracker or {})},
+    )
+
+
+def _voice_drift_tracker(controller) -> dict:
+    tracker = getattr(controller, "_voice_drift_tracker", None)
+    if not isinstance(tracker, dict):
+        _reset_voice_drift_tracker(controller)
+        tracker = getattr(controller, "_voice_drift_tracker", {})
+    return tracker
+
+
+def _voice_target_profile(controller, user_id: str):
+    token = str(user_id or "").strip()
+    if not token:
+        return None
+    try:
+        registry = controller.user_runtime.registry
+        return registry.profile_for_id(token) or registry.resolve_profile(token)
+    except Exception:
+        return None
+
+
+def _set_voice_identity_notice(controller, text: str) -> None:
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    setattr(
+        controller,
+        "_pending_voice_identity_notice",
+        "\n".join(
+            [
+                "[VOICE IDENTITY EVENT]",
+                clean,
+                "Acknowledge this naturally and continue answering the user's current message.",
+            ]
+        ),
+    )
+
+
+def _announce_voice_identity_event(controller, text: str) -> None:
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    _set_voice_identity_notice(controller, clean)
+    try:
+        controller.safe_log(clean)
+    except Exception:
+        pass
+
+
 def _clear_conversation_summary_file() -> None:
     _clear_conversation_summary_file_at()
 
@@ -86,6 +163,49 @@ def _refresh_active_user_style(controller) -> None:
     style_state = controller.load_style_state()
     mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
     controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
+
+
+def _set_runtime_default_style_filename(controller, style_filename: str) -> None:
+    filename = str(style_filename or "").strip()
+    if not filename:
+        return
+    try:
+        registry = getattr(controller.user_runtime, "registry", None)
+        if registry is not None:
+            registry.default_style_filename = filename
+    except Exception:
+        pass
+
+
+def _current_style_status_payload(controller) -> dict[str, str]:
+    try:
+        style_state = controller.load_style_state()
+    except Exception:
+        return {"name": "default", "label": "Default", "filename": ""}
+    name = str(getattr(style_state, "name", "") or "default").strip() or "default"
+    try:
+        filename = str(getattr(controller.style_mgr, "active_filename", "") or "").strip()
+    except Exception:
+        filename = ""
+    return {
+        "name": name,
+        "label": name.upper() if name.lower() != "default" else "Default",
+        "filename": filename,
+    }
+
+
+def _queue_style_status(controller) -> None:
+    try:
+        controller.ui_queue.put(("style_status", _current_style_status_payload(controller)))
+    except Exception:
+        pass
+
+
+def _queue_active_user_changed(controller, *, preserve_transcript: bool = False) -> None:
+    try:
+        controller.ui_queue.put(("active_user_changed", {"preserve_transcript": bool(preserve_transcript)}))
+    except Exception:
+        pass
 
 
 def _render_user_list_message(controller) -> str:
@@ -121,7 +241,12 @@ def _render_active_user_message(controller) -> str:
     return f"[UI] Active user: {profile.name} [{profile.user_id}; {role}]"
 
 
-def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False) -> None:
+def _apply_active_user_switch(
+    controller,
+    *,
+    previous_was_unknown: bool = False,
+    preserve_current_session: bool = False,
+) -> None:
     try:
         controller.tts.stop()
     except Exception:
@@ -131,7 +256,9 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
     except Exception:
         pass
     # Privacy model: when switching from unknown to identified, preserve the
-    # unknown-phase conversation in the new user's persistent memory.
+    # unknown-phase conversation as the new user's current transcript. Do not
+    # insert a new-session marker; the conversation did not restart, ownership
+    # of the existing session was just resolved.
     _captured_messages: list[dict[str, str]] = []
     if previous_was_unknown:
         try:
@@ -143,16 +270,18 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
         except Exception:
             pass
     controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
-    controller.chat_state.begin_fresh_session(wipe_persistent=False)
     if _captured_messages:
         try:
             for msg in _captured_messages:
                 controller.chat_state.persist_turn(msg["role"], msg["content"])
         except Exception:
             pass
-    controller.session_meta = "Session: fresh"
+    elif not previous_was_unknown and not preserve_current_session:
+        controller.chat_state.begin_fresh_session(wipe_persistent=False)
+    controller.session_meta = "Session: active" if (previous_was_unknown or preserve_current_session) else "Session: fresh"
     controller.stage_meta = ""
     controller.runtime_mode = "IDLE"
+    _reset_voice_drift_tracker(controller)
     controller.refresh_active_user_meta()
     _refresh_active_user_style(controller)
     controller.refresh_documents_view()
@@ -160,16 +289,19 @@ def _apply_active_user_switch(controller, *, previous_was_unknown: bool = False)
     controller.refresh_interaction_state()
 
 
-def _switch_active_user(controller, target: str) -> str:
+def _switch_active_user(controller, target: str, *, emit_bridge_events: bool = False) -> str:
     old_profile = controller.user_runtime.active_profile()
     previous_was_unknown = getattr(old_profile, "is_unknown", False)
     result = controller.user_runtime.request_typed_user_switch(target)
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        if emit_bridge_events:
+            _queue_active_user_changed(controller, preserve_transcript=previous_was_unknown)
+            _queue_style_status(controller)
     return str(getattr(result, "message", "") or "[UI] User switch failed.")
 
 
-def _submit_admin_password(controller, raw_text: str) -> str:
+def _submit_admin_password(controller, raw_text: str, *, emit_bridge_events: bool = False) -> str:
     text = str(raw_text or "")
     lowered = text.strip().lower()
     if lowered in {"/cancel", "cancel"}:
@@ -177,6 +309,9 @@ def _submit_admin_password(controller, raw_text: str) -> str:
     result = controller.user_runtime.submit_admin_password(text)
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller)
+        if emit_bridge_events:
+            _queue_active_user_changed(controller, preserve_transcript=True)
+            _queue_style_status(controller)
     return str(getattr(result, "message", "") or "[UI] Admin sign-in failed.")
 
 
@@ -209,22 +344,154 @@ def _apply_voice_identity_match(controller, engine) -> None:
         _log_voice_identity_ui("consume_match empty")
         return
     try:
-        matched_user, similarity = match
+        matched_user = match[0]
+        similarity = match[1]
+        decision_detail = dict(match[2] or {}) if len(match) >= 3 and isinstance(match[2], dict) else {}
     except Exception:
         _log_voice_identity_ui(f"bad_match_payload match={match!r}")
         return
-    if not matched_user:
+    if not matched_user and decision_detail:
+        _log_voice_identity_ui(
+            "no_switch "
+            f"best_user={decision_detail.get('best_user') or 'none'} "
+            f"best_score={float(decision_detail.get('best_score') or 0.0):.3f} "
+            f"second_score={float(decision_detail.get('second_score') or 0.0):.3f} "
+            f"margin={float(decision_detail.get('margin') or 0.0):.3f} "
+            f"best_is_admin={str(bool(decision_detail.get('best_is_admin'))).lower()} "
+            f"threshold={float(decision_detail.get('threshold') or 0.0):.3f} "
+            f"margin_threshold={float(decision_detail.get('margin_threshold') or 0.0):.3f} "
+            f"final_decision={decision_detail.get('final_decision') or 'unknown'} "
+            f"reason={decision_detail.get('reason') or 'none'}"
+        )
+    elif not matched_user:
         _log_voice_identity_ui(f"no_selected_user score={float(similarity or 0.0):.3f}")
-        return
     try:
         old_profile = controller.user_runtime.active_profile()
         previous_was_unknown = getattr(old_profile, "is_unknown", False)
-        result = controller.user_runtime.activate_voice_match(str(matched_user), float(similarity or 0.0))
+        tracker = _voice_drift_tracker(controller)
+        target_profile = _voice_target_profile(controller, str(matched_user or ""))
+        target_user_id = str(getattr(target_profile, "user_id", "") or "").strip()
+
+        if not previous_was_unknown and matched_user:
+            if target_user_id == str(getattr(old_profile, "user_id", "") or ""):
+                _reset_voice_drift_tracker(controller)
+            else:
+                threshold_turns = _voice_drift_confirmation_turns()
+                prior_candidate = str(tracker.get("candidate_user_id") or "")
+                candidate_count = int(tracker.get("candidate_count") or 0)
+                candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
+                tracker.update(
+                    {
+                        "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                        "candidate_user_id": target_user_id,
+                        "candidate_count": candidate_count,
+                        "unknown_count": 0,
+                        "admin_revoked": bool(tracker.get("admin_revoked")),
+                    }
+                )
+                if candidate_count < threshold_turns:
+                    _log_voice_identity_ui(
+                        f"drift_pending from={getattr(old_profile, 'user_id', '')} "
+                        f"candidate={target_user_id or matched_user} count={candidate_count}/{threshold_turns}"
+                    )
+                    return
+                previous_was_unknown = False
+                matched_user = target_user_id or matched_user
+                _set_voice_drift_tracker(controller, tracker)
+
+        elif not previous_was_unknown and not matched_user:
+            threshold_turns = _voice_drift_confirmation_turns()
+            unknown_count = int(tracker.get("unknown_count") or 0) + 1
+            tracker.update(
+                {
+                    "from_user_id": str(getattr(old_profile, "user_id", "") or ""),
+                    "candidate_user_id": "",
+                    "candidate_count": 0,
+                    "unknown_count": unknown_count,
+                    "admin_revoked": bool(tracker.get("admin_revoked")),
+                }
+            )
+            if unknown_count >= threshold_turns:
+                if not getattr(controller.user_runtime.active_profile(), "is_unknown", False):
+                    controller.user_runtime.switch_active_user("unknown")
+                    _apply_active_user_switch(controller, previous_was_unknown=False)
+                    _queue_active_user_changed(controller, preserve_transcript=False)
+                _announce_voice_identity_event(
+                    controller,
+                    "I'm no longer confident who is speaking, so I'm treating this as an unknown speaker.",
+                )
+                _reset_voice_drift_tracker(controller)
+            else:
+                _set_voice_drift_tracker(controller, tracker)
+                _log_voice_identity_ui(
+                    f"unknown_pending from={getattr(old_profile, 'user_id', '')} "
+                    f"count={unknown_count}/{threshold_turns}"
+                )
+            return
+
+        elif previous_was_unknown and tracker.get("from_user_id"):
+            threshold_turns = _voice_drift_confirmation_turns()
+            if matched_user and target_user_id:
+                if target_user_id == str(tracker.get("from_user_id") or ""):
+                    _log_voice_identity_ui(f"post_revoke_returning_speaker user={target_user_id}")
+                    previous_was_unknown = True
+                    matched_user = target_user_id
+                else:
+                    prior_candidate = str(tracker.get("candidate_user_id") or "")
+                    candidate_count = int(tracker.get("candidate_count") or 0)
+                    candidate_count = candidate_count + 1 if prior_candidate == target_user_id else 1
+                    tracker.update(
+                        {
+                            "candidate_user_id": target_user_id,
+                            "candidate_count": candidate_count,
+                            "unknown_count": 0,
+                        }
+                    )
+                    if candidate_count < threshold_turns:
+                        _log_voice_identity_ui(
+                            f"post_revoke_drift_pending candidate={target_user_id} "
+                            f"count={candidate_count}/{threshold_turns}"
+                        )
+                        return
+                    previous_was_unknown = False
+                    matched_user = target_user_id
+            else:
+                unknown_count = int(tracker.get("unknown_count") or 0) + 1
+                tracker.update({"candidate_user_id": "", "candidate_count": 0, "unknown_count": unknown_count})
+                if unknown_count >= threshold_turns:
+                    _announce_voice_identity_event(
+                        controller,
+                        "I'm no longer confident who is speaking, so I'm treating this as an unknown speaker.",
+                    )
+                    _reset_voice_drift_tracker(controller)
+                else:
+                    _log_voice_identity_ui(f"post_revoke_unknown_pending count={unknown_count}/{threshold_turns}")
+                return
+
+        if not matched_user:
+            return
+        margin = decision_detail.get("margin") if decision_detail else None
+        result = controller.user_runtime.activate_voice_match(
+            str(matched_user),
+            float(similarity or 0.0),
+            margin=float(margin) if margin is not None else None,
+        )
     except Exception as exc:
         _log_voice_identity_ui(f"activate_failed user={matched_user} score={float(similarity or 0.0):.3f} error={type(exc).__name__}: {exc}")
         return
     if getattr(result, "switched", False):
         _apply_active_user_switch(controller, previous_was_unknown=previous_was_unknown)
+        _queue_active_user_changed(controller, preserve_transcript=previous_was_unknown)
+        if previous_was_unknown:
+            _announce_voice_identity_event(
+                controller,
+                f"I identified the current speaker as {result.profile.name}.",
+            )
+        else:
+            _announce_voice_identity_event(
+                controller,
+                f"I think {result.profile.name} is speaking now, so I switched to {result.profile.name}.",
+            )
         _log_voice_identity_ui(
             f"activated user={getattr(result.profile, 'user_id', matched_user)} score={float(similarity or 0.0):.3f}"
         )
@@ -670,7 +937,12 @@ def refresh_live_screen_ui(controller) -> None:
 def _start_live_screen(controller) -> None:
     def on_capture(path: Path) -> None:
         rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", f"Image saved to: {rel_path}"))
+        controller.ui_queue.put(("show_image", {
+            "path": str(rel_path),
+            "url": f"/images/{path.name}",
+            "filename": path.name,
+            "caption": f"Image saved to: {rel_path}",
+        }))
 
     def on_error(message: str) -> None:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen capture error: {message}"))
@@ -710,7 +982,12 @@ def _recapture_live_screen(controller) -> None:
     try:
         path = controller.live_screen.capture_once()
         rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", f"Image saved to: {rel_path}"))
+        controller.ui_queue.put(("show_image", {
+            "path": str(rel_path),
+            "url": f"/images/{path.name}",
+            "filename": path.name,
+            "caption": f"Image saved to: {rel_path}",
+        }))
     except Exception as exc:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen refresh error: {exc}"))
 
@@ -766,6 +1043,7 @@ def on_new_session(controller) -> None:
     except Exception:
         pass
     _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
+    controller._conversation_summary_override = ""
     controller.chat_state.new_session()
     controller.session_meta = "Session: fresh"
     controller.stage_meta = ""
@@ -778,6 +1056,7 @@ def on_new_session(controller) -> None:
 
 def on_clear(controller) -> None:
     _clear_conversation_summary_file_at(Path(controller.user_runtime.current_conversation_summary_path()))
+    controller._conversation_summary_override = ""
     controller.chat_state.clear()
     controller.session_meta = "Session: active"
     controller.stage_meta = ""
@@ -791,30 +1070,50 @@ def on_clear(controller) -> None:
     controller.refresh_interaction_state()
 
 
-def on_send(controller) -> None:
+def _clear_input_widget(controller, *, focus: bool = False) -> None:
+    if not dpg.does_item_exist(controller.tags.input_box):
+        return
+    dpg.set_value(controller.tags.input_box, "")
+    if focus:
+        dpg.focus_item(controller.tags.input_box)
+
+
+def submit_text_input(
+    controller,
+    input_text: str,
+    *,
+    clear_input_widget: bool = False,
+    emit_bridge_events: bool = False,
+) -> None:
+    """Handle one user text submission through Piper's shared UI path.
+
+    DearPyGui and Web UI both need commands, auth, interrupts, code-session
+    forwarding, and normal generation to pass through the same backend rails.
+    The widget cleanup flag keeps native input-box behavior out of Web mode.
+    """
     if not controller.boot_ready:
         return
 
-    raw = dpg.get_value(controller.tags.input_box) or ""
-    input_text = str(raw).rstrip("\n")
+    input_text = str(input_text or "").rstrip("\n")
     if controller.has_active_operations():
         text = input_text.strip()
         if not text or _is_active_turn_cancel_request(text):
-            if dpg.does_item_exist(controller.tags.input_box):
-                dpg.set_value(controller.tags.input_box, "")
+            if clear_input_widget:
+                _clear_input_widget(controller)
             on_stop(controller)
             return
         controller.chat_append("system", "[UI] Piper is busy. Press Stop or type `stop` / `cancel` to interrupt the running turn.")
-        if dpg.does_item_exist(controller.tags.input_box):
-            dpg.set_value(controller.tags.input_box, "")
-            dpg.focus_item(controller.tags.input_box)
+        if clear_input_widget:
+            _clear_input_widget(controller, focus=True)
         return
 
     if not input_text.strip():
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
     if controller.has_active_code_session():
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         controller.activate_code_tab()
         sent = controller.send_code_session_input(input_text)
         if sent:
@@ -827,8 +1126,16 @@ def on_send(controller) -> None:
     user_text = input_text.strip()
 
     if controller.user_runtime.is_waiting_for_admin_password():
-        controller.chat_append("system", _submit_admin_password(controller, input_text))
-        dpg.set_value(controller.tags.input_box, "")
+        controller.chat_append(
+            "system",
+            _submit_admin_password(
+                controller,
+                input_text,
+                emit_bridge_events=emit_bridge_events,
+            ),
+        )
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     res = handle_command(user_text, style_mgr=controller.style_mgr)
@@ -842,7 +1149,14 @@ def on_send(controller) -> None:
         elif res.action == "show_active_user":
             controller.chat_append("system", _render_active_user_message(controller))
         elif res.action == "switch_user" and res.user_query:
-            controller.chat_append("system", _switch_active_user(controller, res.user_query))
+            controller.chat_append(
+                "system",
+                _switch_active_user(
+                    controller,
+                    res.user_query,
+                    emit_bridge_events=emit_bridge_events,
+                ),
+            )
         elif res.action == "ingest_document" and res.document_path:
             _start_document_ingest(controller, [res.document_path])
         elif res.action == "vision_query" and res.vision_path and res.vision_prompt:
@@ -850,8 +1164,8 @@ def on_send(controller) -> None:
             controller.persist_turn("user", user_text)
             controller.session_meta = "Session: active"
             controller._refresh_top_bar()
-            dpg.set_value(controller.tags.input_box, "")
-            dpg.focus_item(controller.tags.input_box)
+            if clear_input_widget:
+                _clear_input_widget(controller, focus=True)
             controller.show_thinking_placeholder()
             threading.Thread(
                 target=do_vision_query,
@@ -868,25 +1182,37 @@ def on_send(controller) -> None:
         elif res.action == "set_admin_password" and res.password_value is not None:
             outcome = controller.user_runtime.set_admin_password(res.password_value)
             controller.chat_append("system", outcome.message)
-            dpg.set_value(controller.tags.input_box, "")
+            if clear_input_widget:
+                _clear_input_widget(controller)
             return
         if res.style_filename:
             try:
                 controller.user_runtime.set_active_style_filename(res.style_filename)
+                _set_runtime_default_style_filename(controller, res.style_filename)
             except Exception:
                 pass
             style_state = controller.load_style_state()
             mode = style_state.name.upper() if style_state.name.lower() != "default" else ""
             controller.set_mode_indicator(f"MODE: {mode}" if mode else "")
+            if emit_bridge_events:
+                _queue_style_status(controller)
         if res.ui_message:
             controller.chat_append("system", res.ui_message)
-        dpg.set_value(controller.tags.input_box, "")
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     if _try_resume_langgraph_interrupt(controller, user_text):
+        if clear_input_widget:
+            _clear_input_widget(controller)
         return
 
     controller.submit_user_text(user_text)
+
+
+def on_send(controller) -> None:
+    raw = dpg.get_value(controller.tags.input_box) or ""
+    submit_text_input(controller, str(raw), clear_input_widget=True)
 
 
 def on_code_send(controller) -> None:
@@ -1075,8 +1401,18 @@ def on_restart(controller) -> None:
         print("[System] Restart requested.")
         controller.restart_requested = True
         controller.set_status("Restarting...")
-        controller.boot_mgr.shutdown()
-        dpg.stop_dearpygui()
+
+        def _shutdown_worker() -> None:
+            try:
+                controller.boot_mgr.shutdown()
+            except Exception as exc:
+                print(f"[System] Shutdown error: {exc}")
+            try:
+                dpg.stop_dearpygui()
+            except Exception:
+                pass
+
+        threading.Thread(target=_shutdown_worker, daemon=True).start()
     except Exception as exc:
         print(f"[System] Restart failed: {exc}")
 
@@ -1085,9 +1421,12 @@ def on_event_speech_mode_changed(controller, sender=None, app_data=None, user_da
     controller.set_event_speech_mode(normalize_event_speech_mode(app_data), announce=True)
 
 
-def handle_show_image(controller, payload: str) -> None:
+def handle_show_image(controller, payload) -> None:
     try:
-        fname = payload.split(": ")[-1].strip()
+        if isinstance(payload, dict):
+            fname = str(payload.get("path") or payload.get("filename") or "").strip()
+        else:
+            fname = str(payload).split(": ")[-1].strip()
         img_path = _resolve_ui_image_path(fname)
 
         print(f"[UI] Attempting to load image: {img_path}")
@@ -1165,25 +1504,43 @@ def handle_search_result(controller, payload: Dict[str, str]) -> None:
     if isinstance(cancel_token, CancellationToken):
         controller.retain_cancel_token(cancel_token)
 
+    _report_trace_path = Path(CFG.DATA_DIR) / "debug" / "search_trace.log"
+    def _report_trace(msg: str) -> None:
+        ts = datetime.now().isoformat()
+        line = f"{ts} | {msg}\n"
+        try:
+            _report_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(_report_trace_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+        controller.ui_queue.put(("agent_log", msg))
+
     def report_findings() -> None:
         acquired_lock = False
         try:
+            _report_trace("[SEARCH REPORT] Acquiring lock...")
             while not controller.gen_lock.acquire(timeout=0.1):
                 if isinstance(cancel_token, CancellationToken):
                     cancel_token.raise_if_cancelled()
             acquired_lock = True
+            _report_trace("[SEARCH REPORT] Lock acquired. Starting report turn...")
             if isinstance(cancel_token, CancellationToken):
                 cancel_token.raise_if_cancelled()
             run_agent_loop(controller.build_orchestrator_config(cancel_token=cancel_token))
+            _report_trace("[SEARCH REPORT] Report turn completed.")
         except OperationCancelled:
             controller.ui_queue.put(("status_widget_dashboard_activity", "Search summary canceled."))
+            _report_trace("[SEARCH REPORT] Canceled.")
         except Exception as exc:
             controller.ui_queue.put(("error", f"Async Report Error: {exc}"))
+            _report_trace(f"[SEARCH REPORT] Error: {exc}")
         finally:
             if isinstance(cancel_token, CancellationToken):
                 _finalize_operation(controller, cancel_token)
             if acquired_lock:
                 controller.gen_lock.release()
+                _report_trace("[SEARCH REPORT] Lock released.")
 
     worker = threading.Thread(target=report_findings, daemon=True)
     try:

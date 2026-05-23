@@ -52,5 +52,9 @@ resemblyzer          # Voice fingerprinting (CPU-only, optional)
 # ── Computer use (browser automation) ───────────────────────────────────────
 playwright           # Browser control (ComputerUseEngine WIP)
 
+# ── Web UI bridge ────────────────────────────────────────────────────────────
+websockets           # WebSocket server for the web UI bridge
+pywebview            # Optional desktop window wrapper (PIPER_WEB_UI_WINDOW=true)
+
 # ── Dev / testing ────────────────────────────────────────────────────────────
 pytest

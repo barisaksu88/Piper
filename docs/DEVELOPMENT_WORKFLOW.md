@@ -181,6 +181,119 @@ If such work is pushed before it is stable:
 
 ---
 
+## 7.1 Local Gate Scripts
+
+Before asking GPT for review, run the local gate scripts from the repo root.
+
+### Repo Hygiene
+
+Use:
+
+```powershell
+python scripts/check_repo_hygiene.py --json
+```
+
+Purpose:
+
+- catches tracked private/runtime/generated files
+- catches tracked `.claude/` or `.codex/` local agent files
+- catches large binary/model artifacts
+- catches ignored-but-tracked files
+- catches suspicious path typos
+- catches local absolute paths in tracked text files
+
+Expected review state:
+
+```text
+verdict: SHIP
+```
+
+If the verdict is `WARN` or `BLOCKED`, fix the issue before asking for review unless GPT explicitly accepts the warning.
+
+### Release Gate
+
+Use:
+
+```powershell
+python scripts/release_gate.py --json
+```
+
+Purpose:
+
+- reports branch name and whether work is on `main`
+- reports dirty/staged/unstaged/untracked files
+- reports changed files versus `main`
+- detects high-risk domains
+- recommends smoke tests
+- gives a review verdict
+
+Expected review states:
+
+- `SHIP`: reviewable and low-risk
+- `NEEDS_EVIDENCE`: high-risk domains changed; run/capture required tests
+- `BLOCKED`: unsafe state, wrong branch, staged risky files, or private/runtime artifacts
+
+`NEEDS_EVIDENCE` is acceptable for high-risk branches only if the required evidence is captured and the remaining manual gates are clearly documented.
+
+### Task Eval Harness
+
+Use:
+
+```powershell
+python scripts/task_eval_harness.py --json
+```
+
+Purpose:
+
+- deterministic scoring for route/interceptor/boundary/file-stage policy behavior
+- checks outcomes, not final answer style
+- does not require live model calls
+- useful before expanding task execution, browser/computer-use, or orchestrator behavior
+
+Expected review state:
+
+```text
+PASS
+```
+
+Failing cases should block review unless GPT explicitly accepts the failure as unrelated.
+
+### Typical Pre-Review Command Set
+
+```powershell
+git status --short
+python -m compileall app.py config.py core ui memory tools llm
+python scripts/check_repo_hygiene.py --json
+python scripts/release_gate.py --json
+```
+
+For branches touching routing, task execution, file-stage policy, or orchestrator behavior, also run:
+
+```powershell
+python scripts/task_eval_harness.py --json
+```
+
+For voice identity / runtime branches, also run:
+
+```powershell
+python scripts/voice_identity_inference_smoke_test.py --json
+python scripts/user_runtime_smoke_test.py --json
+python scripts/voice_identity_drift_smoke_test.py --json
+python scripts/orchestrator_graph_smoke_test.py --json
+python scripts/piper_graph_smoke_test.py --json
+```
+
+### Rule
+
+A branch is not ready for GPT review if:
+
+- `git status --short` is not clean
+- `check_repo_hygiene.py` is not `SHIP`
+- `release_gate.py` is `BLOCKED`
+- required smoke evidence is missing
+
+---
+
 ## 8. When to Use Codex
 
 **Use Codex when:**
@@ -286,4 +399,3 @@ A new GPT session should be started with:
 - **Treating a green test as proof of full behavior if the test is too narrow**
 - **Letting autonomous agents continue to the next phase without human/GPT review**
 - **Silently implementing out-of-scope discoveries instead of reporting them**
-

@@ -2,8 +2,7 @@
 
 LangGraph StateGraph builder for the Piper orchestrator.
 
-Phase 4 — Wires the four extracted nodes (ROUTE, MANAGER, VERIFY, PERSONA)
-into a compiled graph with checkpoint support.
+Phase 4 — Wires the top-level nodes into a compiled graph with checkpoint support.
 
 Phase 5 — Adds AWAIT_INTERRUPT node for pause-and-resume approval flows.
 """
@@ -15,19 +14,26 @@ from typing import Any
 from core.graph_nodes import (
     PiperState,
     await_interrupt_node,
+    document_focus_node,
+    explain_node,
     manager_node,
     persona_node,
+    reminder_set_node,
+    reporter_node,
     route_node,
+    search_node,
+    undo_node,
     verify_node,
 )
 
 
 def build_piper_graph(*, checkpointer: Any | None = None) -> Any:
-    """Compile a LangGraph that runs ROUTE → MANAGER → VERIFY → PERSONA.
+    """Compile a LangGraph that runs Piper's top-level phases.
 
     Conditional edge from ROUTE:
-      - decision in ("CHAT", "SEARCH") → PERSONA (skip MANAGER)
-      - decision == "TASK"              → MANAGER
+      - dispatch based on ``orc.next_stage`` so SEARCH / REPORTER /
+        DOC_FOCUS / UNDO / REMINDER_SET / EXPLAIN bypasses are preserved
+      - fallback to route_decision only if ``next_stage`` is missing
 
     Conditional edge from VERIFY:
       - interrupt_payload present       → AWAIT_INTERRUPT
@@ -51,7 +57,13 @@ def build_piper_graph(*, checkpointer: Any | None = None) -> Any:
     builder = StateGraph(PiperState)
 
     builder.add_node("ROUTE", route_node)
+    builder.add_node("DOC_FOCUS", document_focus_node)
+    builder.add_node("SEARCH", search_node)
+    builder.add_node("REPORTER", reporter_node)
     builder.add_node("MANAGER", manager_node)
+    builder.add_node("UNDO", undo_node)
+    builder.add_node("REMINDER_SET", reminder_set_node)
+    builder.add_node("EXPLAIN", explain_node)
     builder.add_node("VERIFY", verify_node)
     builder.add_node("AWAIT_INTERRUPT", await_interrupt_node)
     builder.add_node("PERSONA", persona_node)
@@ -60,18 +72,79 @@ def build_piper_graph(*, checkpointer: Any | None = None) -> Any:
     # ROUTE routing
     # ------------------------------------------------------------------
 
-    def _route_routing(state: PiperState) -> str:
+    def _route_routing(state: PiperState, config=None) -> str:
+        runtime = (config or {}).get("configurable", {}) if config else {}
+        orc = runtime.get("orchestrator")
+        next_stage = str(getattr(orc, "next_stage", "") or "").strip().upper() if orc is not None else ""
+        if next_stage in {
+            "DOC_FOCUS",
+            "SEARCH",
+            "REPORTER",
+            "MANAGER",
+            "UNDO",
+            "REMINDER_SET",
+            "EXPLAIN",
+            "PERSONA",
+        }:
+            return next_stage
         decision = str((state.get("route_decision") or {}).get("decision") or "").strip().upper()
-        if decision in ("CHAT", "SEARCH"):
-            return "PERSONA"
-        return "MANAGER"
+        if decision == "TASK":
+            return "MANAGER"
+        if decision == "SEARCH":
+            return "SEARCH"
+        return "PERSONA"
 
     builder.add_edge(START, "ROUTE")
     builder.add_conditional_edges(
         "ROUTE",
         _route_routing,
-        {"MANAGER": "MANAGER", "PERSONA": "PERSONA"},
+        {
+            "DOC_FOCUS": "DOC_FOCUS",
+            "SEARCH": "SEARCH",
+            "REPORTER": "REPORTER",
+            "MANAGER": "MANAGER",
+            "UNDO": "UNDO",
+            "REMINDER_SET": "REMINDER_SET",
+            "EXPLAIN": "EXPLAIN",
+            "PERSONA": "PERSONA",
+        },
     )
+
+    def _next_stage_routing(state: PiperState, config=None) -> str:
+        runtime = (config or {}).get("configurable", {}) if config else {}
+        orc = runtime.get("orchestrator")
+        next_stage = str(getattr(orc, "next_stage", "") or "").strip().upper()
+        if next_stage in {
+            "ROUTE",
+            "DOC_FOCUS",
+            "SEARCH",
+            "REPORTER",
+            "MANAGER",
+            "UNDO",
+            "REMINDER_SET",
+            "EXPLAIN",
+            "PERSONA",
+        }:
+            return next_stage
+        return "END"
+
+    for stage_name in ("DOC_FOCUS", "SEARCH", "REPORTER", "UNDO", "REMINDER_SET", "EXPLAIN"):
+        builder.add_conditional_edges(
+            stage_name,
+            _next_stage_routing,
+            {
+                "ROUTE": "ROUTE",
+                "DOC_FOCUS": "DOC_FOCUS",
+                "SEARCH": "SEARCH",
+                "REPORTER": "REPORTER",
+                "MANAGER": "MANAGER",
+                "UNDO": "UNDO",
+                "REMINDER_SET": "REMINDER_SET",
+                "EXPLAIN": "EXPLAIN",
+                "PERSONA": "PERSONA",
+                "END": END,
+            },
+        )
 
     # ------------------------------------------------------------------
     # MANAGER → VERIFY

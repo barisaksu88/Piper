@@ -9,17 +9,19 @@ import secrets
 import shutil
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from config import data_state_path
-from memory.brain import get_brain
-from memory.documents import DocumentMemoryManager
 from memory.state_owner import SharedStateOwner
 from memory.stores import JsonDictStore, WorldModelStore
-from memory.transient_state import TransientStateManager
-from memory.world_model import WorldModelManager
+
+if TYPE_CHECKING:
+    from memory.documents import DocumentMemoryManager
+    from memory.transient_state import TransientStateManager
+    from memory.world_model import WorldModelManager
 
 
 DEFAULT_ADMIN_USER_ID = "admin_baris"
@@ -59,16 +61,19 @@ _IDENTITY_STOPWORDS = {
     "just",
     "me",
     "my",
+    "not",
     "sleepy",
     "stressed",
     "still",
     "testing",
     "tired",
     "trying",
+    "turkish",
     "using",
     "we",
     "we're",
     "working",
+    "british",
 }
 _IDENTITY_LEADING_STOPWORDS = {
     "his",
@@ -112,13 +117,42 @@ _IDENTITY_RELATION_TOKENS = {
     "neighbor",
     "neighbour",
 }
+_IDENTITY_NAME_CHARS = "A-Za-zÇĞİÖŞÜçğıöşü"
+_IDENTITY_WORD_RE = re.compile(rf"[{_IDENTITY_NAME_CHARS}]+")
+_SPELLED_NAME_SEQUENCE_RE = re.compile(
+    rf"(?i)\b(?P<seq>[{_IDENTITY_NAME_CHARS}](?:\s*[-,.\s]\s*[{_IDENTITY_NAME_CHARS}]){{1,23}})\b"
+)
+_SPELLED_NAME_TRIGGER_RE = re.compile(
+    r"(?i)\b(?:"
+    r"spell(?:ed|ing)?(?:\s+out)?(?:\s+(?:my|the)\s+name|\s+it)?|"
+    r"(?:my\s+)?name(?:'?s|\s+is)"
+    r")\b"
+)
+_TURKISH_ASCII_MAP = str.maketrans(
+    {
+        "ç": "c",
+        "Ç": "C",
+        "ğ": "g",
+        "Ğ": "G",
+        "ı": "i",
+        "I": "I",
+        "İ": "I",
+        "ö": "o",
+        "Ö": "O",
+        "ş": "s",
+        "Ş": "S",
+        "ü": "u",
+        "Ü": "U",
+    }
+)
+_IDENTITY_NAME_PATTERN = rf"[{_IDENTITY_NAME_CHARS}][{_IDENTITY_NAME_CHARS} .'-]{{0,40}}?"
 _SELF_IDENTIFY_PATTERNS = (
-    re.compile(r"(?is)^\s*my name is\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
-    re.compile(r"(?is)^\s*this is\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
-    re.compile(r"(?is)^\s*(?:i am|i'm|im)\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"),
+    re.compile(rf"(?is)^\s*my name is\s+(?P<name>{_IDENTITY_NAME_PATTERN})(?:\s*,.*)?\s*[.?!]*$"),
+    re.compile(rf"(?is)^\s*this is\s+(?P<name>{_IDENTITY_NAME_PATTERN})(?:\s*,.*)?\s*[.?!]*$"),
+    re.compile(rf"(?is)^\s*(?:i am|i'm|im)\s+(?P<name>{_IDENTITY_NAME_PATTERN})(?:\s*,.*)?\s*[.?!]*$"),
     re.compile(
-        r"(?is)^\s*(?:(?:no|nah|nope|wait|sorry)\s+)?(?:i\s+mean\s+)?"
-        r"(?:it'?s|its)\s+me\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*,.*)?\s*[.?!]*$"
+        rf"(?is)^\s*(?:(?:no|nah|nope|wait|sorry)\s+)?(?:i\s+mean\s+)?"
+        rf"(?:it'?s|its)\s+me\s+(?P<name>{_IDENTITY_NAME_PATTERN})(?:\s*,.*)?\s*[.?!]*$"
     ),
 )
 _RELATION_TO_ADMIN_PATTERNS = (
@@ -152,14 +186,116 @@ _RELATION_DISAMBIGUATION_LABELS = {
 }
 
 
+def _ascii_fold(value: str) -> str:
+    text = str(value or "").translate(_TURKISH_ASCII_MAP)
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
 def _slugify(value: str) -> str:
-    text = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    text = re.sub(r"[^a-z0-9]+", "_", _ascii_fold(value).strip().lower())
     text = re.sub(r"_+", "_", text).strip("_")
     return text or "user"
 
 
 def _normalize_token(value: str) -> str:
-    return " ".join(str(value or "").strip().lower().split())
+    return " ".join(_ascii_fold(value).strip().lower().split())
+
+
+def _identity_key(value: str) -> str:
+    text = _ascii_fold(value).casefold()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+def _identity_words(value: str) -> list[str]:
+    return [_identity_key(item) for item in _IDENTITY_WORD_RE.findall(str(value or "")) if _identity_key(item)]
+
+
+def _display_identity_name(value: str) -> str:
+    text = " ".join(str(value or "").strip().split()).strip(" ,.!?")
+    if not text:
+        return ""
+    words = text.split()
+    display_words: list[str] = []
+    for word in words:
+        if not word:
+            continue
+        if word.islower() or word.isupper():
+            display_words.append(word[:1].upper() + word[1:].lower())
+        else:
+            display_words.append(word)
+    return " ".join(display_words)
+
+
+def _normalize_alias_values(values: Any) -> tuple[str, ...]:
+    raw_values: list[str] = []
+    if isinstance(values, str):
+        raw_values = [values]
+    elif isinstance(values, (list, tuple, set)):
+        raw_values = [str(item or "") for item in values]
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        value = _display_identity_name(raw)
+        key = _identity_key(value)
+        if not value or not key or key in seen:
+            continue
+        seen.add(key)
+        aliases.append(value)
+    return tuple(aliases)
+
+
+def _identity_match_keys(*values: str) -> set[str]:
+    keys: set[str] = set()
+    for value in values:
+        key = _identity_key(value)
+        if key:
+            keys.add(key)
+        slug = _slugify(value)
+        if slug and slug != "user":
+            keys.add(slug.replace("_", " "))
+    return keys
+
+
+def _spelled_identity_name(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    search_space = raw
+    trigger = _SPELLED_NAME_TRIGGER_RE.search(raw)
+    if trigger:
+        search_space = raw[trigger.end() :]
+    elif not re.fullmatch(rf"\s*[{_IDENTITY_NAME_CHARS}](?:\s*[-,.\s]\s*[{_IDENTITY_NAME_CHARS}]){{1,23}}\s*[.?!]?\s*", raw):
+        return ""
+    match = _SPELLED_NAME_SEQUENCE_RE.search(search_space)
+    if not match:
+        return ""
+    letters = _IDENTITY_WORD_RE.findall(match.group("seq") or "")
+    if not (2 <= len(letters) <= 24):
+        return ""
+    if any(len(letter) != 1 for letter in letters):
+        return ""
+    return _display_identity_name("".join(letters))
+
+
+def _spoken_variant_keys_for_name(name: str) -> set[str]:
+    """Return conservative ASR-neighbour keys used only for spelling correction."""
+    key = _identity_key(name).replace(" ", "")
+    if not (3 <= len(key) <= 12):
+        return set()
+    variants: set[str] = set()
+    if key.startswith("e"):
+        variants.add("a" + key[1:])
+    return variants
+
+
+def _names_are_spoken_variants(left: str, right: str) -> bool:
+    left_key = _identity_key(left).replace(" ", "")
+    right_key = _identity_key(right).replace(" ", "")
+    if not left_key or not right_key or left_key == right_key:
+        return False
+    return right_key in _spoken_variant_keys_for_name(left) or left_key in _spoken_variant_keys_for_name(right)
 
 
 def _is_reserved_identity_token(value: str) -> bool:
@@ -213,6 +349,9 @@ class UserProfile:
     memory_silo: str = ""
     voice_embedding_path: str = ""
     style_filename: str = ""
+    canonical_key: str = ""
+    spoken_aliases: tuple[str, ...] = ()
+    spelling_aliases: tuple[str, ...] = ()
 
     @property
     def is_admin(self) -> bool:
@@ -239,6 +378,14 @@ class IdentityCandidate:
     @property
     def primary_relation(self) -> str:
         return self.relations[0] if self.relations else ""
+
+
+@dataclass(frozen=True)
+class IdentityNameEvidence:
+    name: str
+    display_authoritative: bool = False
+    spoken_aliases: tuple[str, ...] = ()
+    spelling_aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -305,7 +452,10 @@ def _clean_identity_name(text: str) -> str:
     candidate = " ".join(str(text or "").strip().split())
     if not candidate:
         return ""
-    original_tokens = re.findall(r"[a-z]+", candidate.lower())
+    spelled = _spelled_identity_name(candidate)
+    if spelled and not _is_reserved_identity_token(spelled):
+        return spelled
+    original_tokens = _identity_words(candidate)
     # Strip trailing junk words that often follow a name in casual speech.
     candidate = re.sub(
         r"(?i)\b(?:"
@@ -322,7 +472,7 @@ def _clean_identity_name(text: str) -> str:
         return ""
     if _is_reserved_identity_token(candidate):
         return ""
-    tokens = re.findall(r"[a-z]+", candidate.lower())
+    tokens = _identity_words(candidate)
     if not tokens or len(tokens) > 3:
         return ""
     if len(tokens) == 1 and len(original_tokens) > 1:
@@ -335,7 +485,22 @@ def _clean_identity_name(text: str) -> str:
         return ""
     if any(token in {"working", "watching", "playing", "debugging", "thinking"} for token in tokens):
         return ""
-    return candidate
+    return _display_identity_name(candidate)
+
+
+def _extract_identity_name_evidence(text: str) -> IdentityNameEvidence:
+    spelled = _spelled_identity_name(text)
+    if spelled:
+        return IdentityNameEvidence(
+            name=spelled,
+            display_authoritative=True,
+            spoken_aliases=tuple(sorted(_spoken_variant_keys_for_name(spelled))),
+            spelling_aliases=(_identity_key(spelled).replace(" ", ""),),
+        )
+    candidate = _extract_self_identified_name(text)
+    if candidate:
+        return IdentityNameEvidence(name=candidate)
+    return IdentityNameEvidence(name="")
 
 
 def _extract_self_identified_name(text: str) -> str:
@@ -344,7 +509,7 @@ def _extract_self_identified_name(text: str) -> str:
         return ""
     correction_match = re.search(
         r"(?is)\b(?:i\s+am|i'm|im)\s+not\b[^.?!,;]{0,80}[,;]\s*"
-        r"(?:but\s+)?(?:i\s+am|i'm|im)\s+(?P<name>[a-z][a-z .'-]{0,40}?)(?:\s*[,.!?]|\s+and\s|\s+but\s|\s+or\s|$)",
+        rf"(?:but\s+)?(?:i\s+am|i'm|im)\s+(?P<name>{_IDENTITY_NAME_PATTERN})(?:\s*[,.!?]|\s+and\s|\s+but\s|\s+or\s|$)",
         raw,
     )
     if correction_match:
@@ -364,16 +529,16 @@ def _extract_self_identified_name(text: str) -> str:
     # positives low on risky patterns like "it's <name>" and "call me <name>".
     _NAME_STOP_BOUNDARY = r"(?:\s*[,.!?]|\s+and\s|\s+from\s|\s+not\s|\s+but\s|\s+or\s|$)"
     _SEARCH_FALLBACK_PATTERNS = (
-        re.compile(rf"(?i)\bmy name(?:'?s| is)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\bthis is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\b(?:it'?s me|it is me)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\b(?:i'm|i am|im)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bmy name(?:'?s| is)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bthis is\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:it'?s me|it is me)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:i'm|i am|im)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
         # Natural variants that need the non-name filter in _clean_identity_name
-        re.compile(rf"(?i)\b(?:it'?s|its)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\bcall me\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\b(?:you can call me|people call me|everyone calls me|my friends call me)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\b(?:i go by|goes by)\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
-        re.compile(rf"(?i)\bname is\s+(?P<name>[a-z][a-z .'-]{{0,40}}?){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:it'?s|its)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bcall me\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:you can call me|people call me|everyone calls me|my friends call me)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\b(?:i go by|goes by)\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
+        re.compile(rf"(?i)\bname is\s+(?P<name>{_IDENTITY_NAME_PATTERN}){_NAME_STOP_BOUNDARY}"),
     )
     for pattern in _SEARCH_FALLBACK_PATTERNS:
         match = pattern.search(raw)
@@ -392,15 +557,14 @@ def _extract_relation_to_admin(text: str) -> str:
     for pattern, relation in _RELATION_TO_ADMIN_PATTERNS:
         if pattern.search(blob):
             return relation
-    if re.search(r"(?i)\bbaris\b", blob):
-        for pattern, relation in _GENERIC_RELATION_TO_ADMIN_PATTERNS:
-            if pattern.search(blob):
-                return relation
+    for pattern, relation in _GENERIC_RELATION_TO_ADMIN_PATTERNS:
+        if pattern.search(blob):
+            return relation
     return ""
 
 
 class UserRegistry:
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(
         self,
@@ -434,25 +598,35 @@ class UserRegistry:
         return label
 
     def _default_admin_payload(self) -> dict[str, Any]:
+        admin_display_name = self._guess_legacy_admin_name()
+        aliases = _normalize_alias_values([admin_display_name, self.admin_name, "Baris"])
         return {
             "user_id": self.admin_user_id,
-            "name": self._guess_legacy_admin_name(),
+            "name": admin_display_name,
+            "display_name": admin_display_name,
             "role": DEFAULT_ADMIN_ROLE,
             # Keep the admin user on the legacy root data dir for now so the
             # existing Baris state remains intact while we introduce per-user silos.
             "memory_silo": ".",
             "voice_embedding_path": "",
             "style_filename": self.default_style_filename,
+            "canonical_key": _identity_key(admin_display_name),
+            "spoken_aliases": list(aliases),
+            "spelling_aliases": [_identity_key(admin_display_name).replace(" ", "")],
         }
 
     def _default_guest_payload(self) -> dict[str, Any]:
         return {
             "user_id": DEFAULT_GUEST_USER_ID,
             "name": DEFAULT_GUEST_NAME,
+            "display_name": DEFAULT_GUEST_NAME,
             "role": DEFAULT_STANDARD_ROLE,
             "memory_silo": f"runtime/{DEFAULT_GUEST_USER_ID}",
             "voice_embedding_path": "",
             "style_filename": self.default_style_filename,
+            "canonical_key": _identity_key(DEFAULT_GUEST_NAME),
+            "spoken_aliases": [],
+            "spelling_aliases": [],
         }
 
     def _default_auth_payload(self) -> dict[str, Any]:
@@ -476,13 +650,16 @@ class UserRegistry:
 
     def _coerce_profile(self, raw: dict[str, Any], *, fallback_id: str = "") -> UserProfile:
         user_id = _slugify(str(raw.get("user_id") or fallback_id or "user"))
-        name = " ".join(str(raw.get("name") or user_id).strip().split()) or user_id
+        name = _display_identity_name(str(raw.get("display_name") or raw.get("name") or user_id)) or user_id
         role = str(raw.get("role") or DEFAULT_STANDARD_ROLE).strip().lower() or DEFAULT_STANDARD_ROLE
         if role not in {DEFAULT_ADMIN_ROLE, DEFAULT_STANDARD_ROLE}:
             role = DEFAULT_STANDARD_ROLE
         memory_silo = str(raw.get("memory_silo") or "").strip()
         voice_embedding_path = str(raw.get("voice_embedding_path") or "").strip()
         style_filename = str(raw.get("style_filename") or "").strip()
+        canonical_key = _identity_key(str(raw.get("canonical_key") or name))
+        spoken_aliases = _normalize_alias_values(raw.get("spoken_aliases") or raw.get("aliases") or [])
+        spelling_aliases = _normalize_alias_values(raw.get("spelling_aliases") or [])
         return UserProfile(
             user_id=user_id,
             name=name,
@@ -490,6 +667,9 @@ class UserRegistry:
             memory_silo=memory_silo,
             voice_embedding_path=voice_embedding_path,
             style_filename=style_filename,
+            canonical_key=canonical_key,
+            spoken_aliases=spoken_aliases,
+            spelling_aliases=spelling_aliases,
         )
 
     def _coerce_auth_payload(self, raw: Any, *, users: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -539,10 +719,14 @@ class UserRegistry:
                 users[profile.user_id] = {
                     "user_id": profile.user_id,
                     "name": profile.name,
+                    "display_name": profile.name,
                     "role": profile.role,
                     "memory_silo": profile.memory_silo,
                     "voice_embedding_path": profile.voice_embedding_path,
                     "style_filename": profile.style_filename,
+                    "canonical_key": profile.canonical_key or _identity_key(profile.name),
+                    "spoken_aliases": list(profile.spoken_aliases),
+                    "spelling_aliases": list(profile.spelling_aliases),
                 }
         users.pop("guest", None)
         if not users:
@@ -569,10 +753,14 @@ class UserRegistry:
             normalized_users[normalized_id] = {
                 "user_id": normalized_id,
                 "name": profile.name,
+                "display_name": profile.name,
                 "role": profile.role,
                 "memory_silo": profile.memory_silo,
                 "voice_embedding_path": profile.voice_embedding_path,
                 "style_filename": profile.style_filename,
+                "canonical_key": profile.canonical_key or _identity_key(profile.name),
+                "spoken_aliases": list(profile.spoken_aliases),
+                "spelling_aliases": list(profile.spelling_aliases),
             }
         if self.admin_user_id not in normalized_users:
             normalized_users[self.admin_user_id] = self._default_admin_payload()
@@ -650,7 +838,8 @@ class UserRegistry:
 
     def matching_profiles(self, token: str) -> list[UserProfile]:
         normalized = _normalize_token(token)
-        if not normalized:
+        token_keys = _identity_match_keys(token)
+        if not normalized or not token_keys:
             return []
         if normalized in {
             _normalize_token(DEFAULT_GUEST_USER_ID),
@@ -661,16 +850,23 @@ class UserRegistry:
             return []
         exact_id_matches: list[UserProfile] = []
         name_matches: list[UserProfile] = []
+        alias_matches: list[UserProfile] = []
         for profile in self.list_profiles():
-            if _normalize_token(profile.user_id) == normalized:
+            profile_id_keys = _identity_match_keys(profile.user_id)
+            if token_keys & profile_id_keys or _normalize_token(profile.user_id) == normalized:
                 exact_id_matches.append(profile)
                 continue
-            if _normalize_token(profile.name) == normalized:
+            profile_name_keys = _identity_match_keys(profile.name, profile.canonical_key)
+            if token_keys & profile_name_keys or _normalize_token(profile.name) == normalized:
                 name_matches.append(profile)
                 continue
             if _normalize_token(profile.name.replace(" ", "_")) == normalized:
                 name_matches.append(profile)
-        return exact_id_matches or name_matches
+                continue
+            alias_keys = _identity_match_keys(*profile.spoken_aliases, *profile.spelling_aliases)
+            if token_keys & alias_keys:
+                alias_matches.append(profile)
+        return exact_id_matches or name_matches or alias_matches
 
     def active_profile(self) -> UserProfile:
         with self._lock:
@@ -712,8 +908,15 @@ class UserRegistry:
             index += 1
         return candidate
 
-    def _new_standard_profile(self, name: str, *, preferred_user_id: str = "") -> UserProfile:
-        clean_name = " ".join(str(name or "").strip().split()) or "User"
+    def _new_standard_profile(
+        self,
+        name: str,
+        *,
+        preferred_user_id: str = "",
+        spoken_aliases: tuple[str, ...] = (),
+        spelling_aliases: tuple[str, ...] = (),
+    ) -> UserProfile:
+        clean_name = _display_identity_name(name) or "User"
         user_id = self._allocate_specific_user_id(preferred_user_id) if preferred_user_id else self._allocate_user_id(clean_name)
         return UserProfile(
             user_id=user_id,
@@ -722,17 +925,27 @@ class UserRegistry:
             memory_silo=f"users/{user_id}",
             voice_embedding_path="",
             style_filename=self.default_style_filename,
+            canonical_key=_identity_key(clean_name),
+            spoken_aliases=_normalize_alias_values(spoken_aliases),
+            spelling_aliases=_normalize_alias_values(spelling_aliases),
         )
 
     @staticmethod
     def _profile_payload(profile: UserProfile) -> dict[str, Any]:
+        canonical_key = profile.canonical_key or _identity_key(profile.name)
+        spoken_aliases = _normalize_alias_values(profile.spoken_aliases)
+        spelling_aliases = _normalize_alias_values(profile.spelling_aliases)
         return {
             "user_id": profile.user_id,
             "name": profile.name,
+            "display_name": profile.name,
             "role": profile.role,
             "memory_silo": profile.memory_silo,
             "voice_embedding_path": profile.voice_embedding_path,
             "style_filename": profile.style_filename,
+            "canonical_key": canonical_key,
+            "spoken_aliases": list(spoken_aliases),
+            "spelling_aliases": list(spelling_aliases),
         }
 
     def activate_profile(self, profile: UserProfile) -> UserSwitchResult:
@@ -750,6 +963,50 @@ class UserRegistry:
             payload["auth"] = auth
             self.save_payload(payload)
         return UserSwitchResult(profile=profile, created=created)
+
+    def update_profile_identity_metadata(
+        self,
+        profile: UserProfile,
+        *,
+        display_name: str = "",
+        spoken_aliases: tuple[str, ...] = (),
+        spelling_aliases: tuple[str, ...] = (),
+    ) -> UserProfile:
+        if profile.is_unknown:
+            return profile
+        clean_display = _display_identity_name(display_name) if display_name else profile.name
+        if not clean_display or _is_reserved_identity_token(clean_display):
+            clean_display = profile.name
+        with self._lock:
+            payload = self.load_payload()
+            users = dict(payload.get("users") or {})
+            raw = dict(users.get(profile.user_id) or self._profile_payload(profile))
+            current = self._coerce_profile(raw, fallback_id=profile.user_id)
+            merged_spoken = _normalize_alias_values(
+                [
+                    *current.spoken_aliases,
+                    *spoken_aliases,
+                    *( [current.name] if clean_display and _identity_key(current.name) != _identity_key(clean_display) else [] ),
+                ]
+            )
+            merged_spelling = _normalize_alias_values([*current.spelling_aliases, *spelling_aliases])
+            updated = UserProfile(
+                user_id=current.user_id,
+                name=clean_display,
+                role=current.role,
+                memory_silo=current.memory_silo,
+                voice_embedding_path=current.voice_embedding_path,
+                style_filename=current.style_filename,
+                canonical_key=_identity_key(clean_display),
+                spoken_aliases=merged_spoken,
+                spelling_aliases=merged_spelling,
+            )
+            users[updated.user_id] = self._profile_payload(updated)
+            payload["users"] = users
+            if str(payload.get("active_user_id") or "") == profile.user_id:
+                payload["active_user_id"] = profile.user_id
+            self.save_payload(payload)
+        return updated
 
     def switch_active_user(self, token: str) -> UserSwitchResult:
         normalized = " ".join(str(token or "").strip().split())
@@ -869,14 +1126,18 @@ class ActiveUserRuntime:
         return "user"
 
     @staticmethod
+    def extract_spelled_identity_name(text: str) -> str:
+        return _spelled_identity_name(text)
+
+    @staticmethod
     def _node_matches_identity_name(node: dict[str, Any], name: str) -> bool:
-        candidate = _normalize_token(name)
-        if not candidate or not isinstance(node, dict):
+        candidate_keys = _identity_match_keys(name)
+        if not candidate_keys or not isinstance(node, dict):
             return False
-        if _normalize_token(node.get("label") or "") == candidate:
+        if candidate_keys & _identity_match_keys(str(node.get("label") or "")):
             return True
-        aliases = [_normalize_token(item) for item in (node.get("aliases") or [])]
-        return candidate in aliases
+        aliases = [str(item or "") for item in (node.get("aliases") or [])]
+        return bool(candidate_keys & _identity_match_keys(*aliases))
 
     def _identity_candidates_for_name(self, name: str) -> list[IdentityCandidate]:
         normalized_name = _normalize_token(name)
@@ -968,10 +1229,50 @@ class ActiveUserRuntime:
         clean_name = " ".join(str(name or "").strip().split()) or "that name"
         return f"[UI] I know more than one person named {clean_name} in Baris's world memory. {question}"
 
-    def _resolve_identity_target_profile(self, name: str, relation_hint: str = "") -> tuple[UserProfile | None, bool, str]:
+    def _maybe_apply_identity_name_evidence(
+        self,
+        profile: UserProfile,
+        evidence: IdentityNameEvidence,
+    ) -> UserProfile:
+        if profile.is_admin or profile.is_unknown or not evidence.name:
+            return profile
+        aliases = list(evidence.spoken_aliases)
+        if evidence.display_authoritative and _identity_key(profile.name) != _identity_key(evidence.name):
+            aliases.append(profile.name)
+        if not evidence.display_authoritative and not aliases and not evidence.spelling_aliases:
+            return profile
+        updated = self.registry.update_profile_identity_metadata(
+            profile,
+            display_name=evidence.name if evidence.display_authoritative else profile.name,
+            spoken_aliases=tuple(aliases),
+            spelling_aliases=evidence.spelling_aliases,
+        )
+        if updated.name != profile.name or updated.spoken_aliases != profile.spoken_aliases:
+            self._initialize_profile_state(updated)
+            self._mirror_profile_graph_to_admin(updated.user_id)
+        return updated
+
+    def _resolve_identity_target_profile(
+        self,
+        name: str,
+        relation_hint: str = "",
+        *,
+        evidence: IdentityNameEvidence | None = None,
+    ) -> tuple[UserProfile | None, bool, str]:
+        evidence = evidence or IdentityNameEvidence(name=name)
         normalized_token = _normalize_token(name)
         if not normalized_token:
             return None, False, ""
+
+        current = self.active_profile()
+        if (
+            evidence.display_authoritative
+            and not current.is_unknown
+            and not current.is_admin
+            and _names_are_spoken_variants(current.name, evidence.name)
+        ):
+            updated_current = self._maybe_apply_identity_name_evidence(current, evidence)
+            return updated_current, False, ""
 
         direct_matches = self.registry.matching_profiles(name)
         exact_profile = next(
@@ -983,7 +1284,7 @@ class ActiveUserRuntime:
             None,
         )
         if exact_profile is not None:
-            return exact_profile, False, ""
+            return self._maybe_apply_identity_name_evidence(exact_profile, evidence), False, ""
         if len(direct_matches) == 1 and direct_matches[0].is_admin:
             return direct_matches[0], False, ""
 
@@ -999,34 +1300,58 @@ class ActiveUserRuntime:
             if len(relation_matches) == 1:
                 target = relation_matches[0]
                 if target.profile is not None:
-                    return target.profile, False, ""
-                return self.registry._new_standard_profile(target.name or name, preferred_user_id=target.user_id), True, ""
+                    return self._maybe_apply_identity_name_evidence(target.profile, evidence), False, ""
+                return self.registry._new_standard_profile(
+                    target.name or name,
+                    preferred_user_id=target.user_id,
+                    spoken_aliases=evidence.spoken_aliases,
+                    spelling_aliases=evidence.spelling_aliases,
+                ), True, ""
             if len(relation_matches) > 1:
                 return None, False, self._build_identity_clarification_message(name, relation_matches)
             if len(candidates) == 1 and not candidates[0].relations:
                 target = candidates[0]
                 if target.profile is not None:
-                    return target.profile, False, ""
-                return self.registry._new_standard_profile(target.name or name, preferred_user_id=target.user_id), True, ""
+                    return self._maybe_apply_identity_name_evidence(target.profile, evidence), False, ""
+                return self.registry._new_standard_profile(
+                    target.name or name,
+                    preferred_user_id=target.user_id,
+                    spoken_aliases=evidence.spoken_aliases,
+                    spelling_aliases=evidence.spelling_aliases,
+                ), True, ""
             if len(candidates) > 1:
                 return None, False, self._build_identity_clarification_message(name, candidates)
             preferred_user_id = _relation_scoped_user_id(name, relation_key)
-            return self.registry._new_standard_profile(name, preferred_user_id=preferred_user_id), True, ""
+            return self.registry._new_standard_profile(
+                name,
+                preferred_user_id=preferred_user_id,
+                spoken_aliases=evidence.spoken_aliases,
+                spelling_aliases=evidence.spelling_aliases,
+            ), True, ""
 
         if len(candidates) == 1:
             target = candidates[0]
             if target.profile is not None:
-                return target.profile, False, ""
-            return self.registry._new_standard_profile(target.name or name, preferred_user_id=target.user_id), True, ""
+                return self._maybe_apply_identity_name_evidence(target.profile, evidence), False, ""
+            return self.registry._new_standard_profile(
+                target.name or name,
+                preferred_user_id=target.user_id,
+                spoken_aliases=evidence.spoken_aliases,
+                spelling_aliases=evidence.spelling_aliases,
+            ), True, ""
         if len(candidates) > 1:
             return None, False, self._build_identity_clarification_message(name, candidates)
-        return self.registry._new_standard_profile(name), True, ""
+        return self.registry._new_standard_profile(
+            name,
+            spoken_aliases=evidence.spoken_aliases,
+            spelling_aliases=evidence.spelling_aliases,
+        ), True, ""
 
     def _extract_bare_known_identity_name(self, text: str) -> str:
         raw = " ".join(str(text or "").strip().split())
         if not raw:
             return ""
-        if not re.fullmatch(r"[A-Za-z][A-Za-z .'-]{0,40}[.]?", raw):
+        if not re.fullmatch(rf"[{_IDENTITY_NAME_CHARS}][{_IDENTITY_NAME_CHARS} .'-]{{0,40}}[.]?", raw):
             return ""
         candidate = _clean_identity_name(raw)
         if not candidate:
@@ -1068,7 +1393,11 @@ class ActiveUserRuntime:
         if _is_reserved_identity_token(normalized):
             profile = self.active_profile()
             return UserActivationResult(status="noop", profile=profile, message=self.active_user_label())
-        target_profile, created, clarification_message = self._resolve_identity_target_profile(normalized)
+        evidence = IdentityNameEvidence(name=normalized)
+        target_profile, created, clarification_message = self._resolve_identity_target_profile(
+            normalized,
+            evidence=evidence,
+        )
         if target_profile is None:
             profile = self.active_profile()
             return UserActivationResult(
@@ -1098,7 +1427,13 @@ class ActiveUserRuntime:
             message = f"[UI] Switched to {profile.name} [{profile.user_id}; {role}].{hint}"
         return UserActivationResult(status="switched", profile=profile, created=result.created, message=message)
 
-    def activate_voice_match(self, matched_user_id: str, similarity: float = 0.0) -> UserActivationResult | None:
+    def activate_voice_match(
+        self,
+        matched_user_id: str,
+        similarity: float = 0.0,
+        *,
+        margin: float | None = None,
+    ) -> UserActivationResult | None:
         """Activate a profile from a verified voice-recognition match.
 
         The mic path supplies this only from voice-engine evidence. It can be a
@@ -1118,6 +1453,25 @@ class ActiveUserRuntime:
             return None
 
         current = self.active_profile()
+        if target_profile.is_admin:
+            from config import CFG
+
+            score = float(similarity or 0.0)
+            match_margin = float(margin or 0.0)
+            if score < float(CFG.VOICE_ADMIN_SIMILARITY_THRESHOLD):
+                return UserActivationResult(
+                    status="blocked",
+                    profile=current,
+                    created=False,
+                    message="[UI] Voice best guess was Baris, but the score was below the admin unlock threshold.",
+                )
+            if match_margin < float(CFG.VOICE_ADMIN_MARGIN_THRESHOLD):
+                return UserActivationResult(
+                    status="blocked",
+                    profile=current,
+                    created=False,
+                    message="[UI] Voice best guess was Baris, but the margin was too small for admin unlock.",
+                )
         if current.user_id == target_profile.user_id:
             if target_profile.is_admin:
                 self._admin_unlocked = True
@@ -1137,13 +1491,29 @@ class ActiveUserRuntime:
             ),
         )
 
-    def apply_router_identity_intent(self, name: str, *, relation_hint: str = "") -> UserActivationResult | None:
-        candidate = _clean_identity_name(name)
+    def apply_router_identity_intent(
+        self,
+        name: str,
+        *,
+        relation_hint: str = "",
+        source_text: str = "",
+    ) -> UserActivationResult | None:
+        source_evidence = _extract_identity_name_evidence(source_text)
+        if source_evidence.name and _identity_key(source_evidence.name) == _identity_key(name):
+            evidence = source_evidence
+        else:
+            candidate_from_name = _clean_identity_name(name)
+            evidence = IdentityNameEvidence(name=candidate_from_name)
+        candidate = evidence.name
         current = self.active_profile()
         if not candidate:
             return None
         relation = str(relation_hint or "").strip().lower()
-        target_profile, created, clarification_message = self._resolve_identity_target_profile(candidate, relation)
+        target_profile, created, clarification_message = self._resolve_identity_target_profile(
+            candidate,
+            relation,
+            evidence=evidence,
+        )
         if target_profile is None:
             return UserActivationResult(
                 status="identity_clarification_required",
@@ -1164,16 +1534,29 @@ class ActiveUserRuntime:
         )
 
     def observe_typed_identity_hint(self, text: str) -> UserActivationResult | None:
-        candidate = _extract_self_identified_name(text)
+        evidence = _extract_identity_name_evidence(text)
+        candidate = evidence.name
         relation_hint = _extract_relation_to_admin(text)
         current = self.active_profile()
         if not candidate and current.is_unknown:
             candidate = self._extract_bare_known_identity_name(text)
+            evidence = IdentityNameEvidence(name=candidate)
         if not candidate:
             if relation_hint and not current.is_admin and not current.is_unknown:
                 self._upsert_admin_relationship_hint(current.user_id, relation_hint)
             return None
-        target_profile, created, clarification_message = self._resolve_identity_target_profile(candidate, relation_hint)
+        if evidence.display_authoritative and not current.is_unknown and not current.is_admin:
+            evidence = IdentityNameEvidence(
+                name=evidence.name,
+                display_authoritative=True,
+                spoken_aliases=_normalize_alias_values([*evidence.spoken_aliases, current.name]),
+                spelling_aliases=evidence.spelling_aliases,
+            )
+        target_profile, created, clarification_message = self._resolve_identity_target_profile(
+            candidate,
+            relation_hint,
+            evidence=evidence,
+        )
         if target_profile is None:
             return UserActivationResult(
                 status="identity_clarification_required",
@@ -1362,9 +1745,21 @@ class ActiveUserRuntime:
             aliases.append("user")
         if "me" not in alias_tokens:
             aliases.append("me")
+        for alias in [profile.name, *profile.spoken_aliases, *profile.spelling_aliases]:
+            alias_text = str(alias or "").strip()
+            if alias_text and alias_text.lower() not in alias_tokens:
+                aliases.append(alias_text)
+                alias_tokens.add(alias_text.lower())
         if profile.name and profile.name.lower() not in alias_tokens:
             aliases.append(profile.name)
-        if not str(root.get("label") or "").strip() or str(root.get("label") or "").strip().lower() == "user":
+        current_label = str(root.get("label") or "").strip()
+        alias_keys = {_identity_key(item) for item in aliases if str(item or "").strip()}
+        if (
+            not current_label
+            or current_label.lower() == "user"
+            or _identity_key(current_label) in alias_keys
+            or _identity_key(current_label) == _identity_key(profile.user_id)
+        ):
             root["label"] = profile.name
         root["aliases"] = aliases
         root["updated_at"] = int(time.time())
@@ -1396,6 +1791,8 @@ class ActiveUserRuntime:
             manager = self._knowledge_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.world_model import WorldModelManager
+
             owner = self.state_owner_for(key)
             profile = self.registry.profile_for_id(key)
             if profile is None:
@@ -1428,6 +1825,8 @@ class ActiveUserRuntime:
             manager = self._transient_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.transient_state import TransientStateManager
+
             owner = self.state_owner_for(key)
             manager = TransientStateManager(
                 situational_store=owner.situational_state_store,
@@ -1446,6 +1845,8 @@ class ActiveUserRuntime:
             manager = self._document_managers.get(key)
             if manager is not None:
                 return manager
+            from memory.documents import DocumentMemoryManager
+
             profile = self.registry.profile_for_id(key)
             if profile is None:
                 raise KeyError(f"Unknown user_id: {user_id}")
@@ -1460,6 +1861,8 @@ class ActiveUserRuntime:
         profile = self.registry.profile_for_id(user_id)
         if profile is None:
             raise KeyError(f"Unknown user_id: {user_id}")
+        from memory.brain import get_brain
+
         return get_brain(profile.resolved_data_dir(self.data_dir))
 
     def current_brain(self) -> Any:
@@ -1519,7 +1922,7 @@ class ActiveUserRuntime:
         person_node["label"] = label
 
         aliases = [str(item).strip() for item in (source_root.get("aliases") or []) if str(item).strip()]
-        aliases.extend([profile.name, profile.user_id])
+        aliases.extend([profile.name, profile.user_id, *profile.spoken_aliases, *profile.spelling_aliases])
         person_node["aliases"] = self._normalize_aliases([item for item in aliases if item.lower() not in {"user", "me"}])
 
         attributes = person_node.get("attributes")
@@ -1565,7 +1968,9 @@ class ActiveUserRuntime:
         target_id = f"person:{_slugify(profile.user_id)}"
         admin_manager._ensure_root(admin_graph)
         target = admin_manager._ensure_node(admin_graph, target_id, "person", profile.name)
-        target["aliases"] = self._normalize_aliases([*(target.get("aliases") or []), profile.name, profile.user_id])
+        target["aliases"] = self._normalize_aliases(
+            [*(target.get("aliases") or []), profile.name, profile.user_id, *profile.spoken_aliases, *profile.spelling_aliases]
+        )
         admin_manager._merge_relationship(
             admin_graph,
             {

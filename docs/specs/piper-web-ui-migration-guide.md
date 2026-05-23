@@ -1,0 +1,1003 @@
+# Piper Web UI Migration Guide
+
+> **Version:** 1.5 (Phase 17C)  
+> **Branch:** `feature/web-ui-bridge`  
+> **Base:** `fix/guest-voice-name-disambiguation` (commit `1414316`)  
+> **Status:** Phase 17C complete. Web UI desktop mode is the default. DearPyGui remains available as explicit fallback.
+
+---
+
+## 1. Purpose
+
+This guide is the canonical reference for Piper's Web UI migration. It reconciles:
+- the original v2.0/v2.1 architecture plan
+- the actual modified phase history used during implementation
+- the remaining parity roadmap
+
+### Key definitions
+- **Web UI** means React/HTML/CSS rendering technology. The browser tab used during development is for debugging only.
+- **Production target** remains a dedicated Piper desktop window (Tauri or pywebview wrapper — deferred until after parity).
+- **Web UI desktop mode** is the default UI path. DearPyGui remains available as explicit fallback via `PIPER_WEB_UI_ENABLED=false`.
+- **Parity** means the Web UI can do everything DearPyGui does today, without regressions.
+
+### High-level goal
+Build a thin WebSocket bridge (`web_ui/bridge/`) and a React frontend (`web_ui/frontend/`) that consume the same `ui_queue` tuples DearPyGui already uses. The backend (`core/`, `memory/`, `llm/`, `tools/`) requires **zero changes**.
+
+---
+
+## 2. Current Status
+
+| Metric | Value |
+|---|---|
+| Branch | `feature/web-ui-bridge` |
+| Base commit | `1414316` (`fix/guest-voice-name-disambiguation`) |
+| Completed phase | **Phase 17C** |
+| Python tests | **250+ passing** |
+| Frontend typecheck | **Passing** |
+| Frontend build | **Passing** (215 kB JS + 10 kB CSS) |
+| Manual tested by Baris | **Checkpoint 2 passed** — all panels, chat, streaming, single-reply, no router leak |
+| Desktop window | **Accepted** — pywebview wrapper works on main thread |
+| Native MIC bridge | **Accepted** — backend STT + voice identity via Web UI control |
+| Next phase | **Stabilization** — monitor daily use for regressions; DearPyGui fallback preserved indefinitely |
+
+### Acceptance checkpoint
+**Canonical acceptance document:** `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`
+
+This checkpoint records:
+- Green features accepted for daily use
+- Deferred features (quarantined mic upload, browser TTS, packaging)
+- Default-readiness criteria (1+ week daily use, no regressions, DPG fallback preserved)
+- DearPyGui retirement criteria
+- Manual acceptance checklist
+- Rollback/fallback instructions for all three launch modes
+
+### What works today
+- Bridge server (`BridgeServer`) forwards `ui_queue` events to WebSocket clients
+- Adapter converts 30+ backend event kinds to JSON frames
+- Frontend receives and renders: chat, streaming, status, activity/logs, boot sequence, raw event inspector
+- Frontend sends actions: `send_message`, `stop`, `new_session`, `restart_piper`, `event_speech_mode`, `live_screen_mode`, `live_screen_interval`, `code_send`, `code_run`, `code_clear`, `document_picker_selected`, `document_picker_cancel`
+- `chat.sync` sends visible transcript to each new WebSocket client
+- Delta coalescing (~16 ms) and auto-scroll in chat panel
+- Thinking placeholder lifecycle (`assistant` and `system` roles)
+- DPG guard prevents native DearPyGui crash in Web mode
+- **Code Session panel** (Phase 9): output, status, preview, stdin, run, send, clear
+- **Document ingestion panel** (Phase 10): path input, selected paths list, ingest, cancel
+- **Image / Vision panel** (Phase 11): `<img>` preview via safe static HTTP serving from `CFG.WORKSPACE_DIR`, vision notes, caption/path fallback
+- **System / Identity panel** (Phase 12): user changed events, stats refresh, config reload log, controls refresh counter
+- Safe static file serving with path traversal guards, extension whitelist, CORS headers
+- **Web UI / WebView mic capture** (Phase 15A) — Native backend mic control bridge. Web UI MIC button sends `mic_start`/`mic_stop` actions; backend uses existing `sounddevice` + Faster-Whisper STT + voice identity. No browser audio upload.
+- **Experimental MediaRecorder upload** (Phase 14B) — Quarantined. Available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` only.
+- **Backend-served frontend** (Phase 15B) — Bridge server serves the built React app from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`. No Vite dev server required for normal use.
+- **Desktop window wrapper** (Phase 15C) — Optional pywebview desktop window. Enabled with `PIPER_WEB_UI_WINDOW=true`. Falls back gracefully if pywebview is not installed.
+- **Threading fix** (Phase 15C.1) — pywebview requires the main thread on Windows. In window mode, the desktop window blocks the main thread while the Web UI action/pump loop runs in a background thread. Browser mode is unchanged (pump loop stays on main thread).
+- **Log hygiene** (Phase 15C.2) — Per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed in Web UI mode.
+- **Frontend auto-build** (Phase 17C) — `app.py` rebuilds `web_ui/frontend` automatically on startup when `src/` is newer than `dist/`, so normal launches do not require a manual `npm run build`.
+- **Restart closes window** (Phase 17C) — restart now closes the pywebview window from the handler before re-exec.
+- **Frontend modularization** (Phase 17C) — `App.tsx` is now a 472-line orchestrator over 6 modules, and CSS lives in 10 modular files under `web_ui/frontend/src/css/`.
+- **Acceptance checkpoint** (Phase 15D) — Formal green/deferred/default-readiness criteria documented in `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`.
+
+### What does NOT work yet
+- TTS in browser / window (native OS TTS still plays; no browser TTS integration)
+- Search result display panel (raw inspector only; results still surface through reporter flow)
+- Native OS packaging / installer (no `.exe` or Start Menu shortcut)
+- DearPyGui retirement (fallback preserved)
+- Settings mutation UI (config reload is read-only)
+- Browser MediaRecorder mic upload (quarantined behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`)
+
+---
+
+## 3. Original Plan vs Modified Plan
+
+The original v2.1 plan proposed 7 phases over ~5 weeks. Live testing revealed safety issues that forced insertions and re-numbering. The table below maps original intent to what was actually built.
+
+| Original plan phase | Original intent | Actual modified phase(s) | Why it changed |
+|---|---|---|---|
+| Phase 0 — Contract Map | Read-only doc: map all events/actions | **Phase 0** | Unchanged. Produced `web_ui/bridge/CONTRACT.md`. |
+| Phase 1 — Pure Adapter | `adapter.py` + `message_schema.py` + smoke tests | **Phase 1** + **Phase 1.1** | Phase 1.1 added: `sourceKind` field, strict unknown-event policy, leakage guard for voice-identity events, action parsing tests. These were discovered during first test run. |
+| Phase 2 — Bridge Server | Standalone WebSocket/HTTP server | **Phase 2** | Unchanged core server. Added `ws_path` enforcement (`/ws` only) and `on_client_connect` callback (Phase 7) later. |
+| Phase 3 — Runtime Wiring | Wire `app.py` + `controller.py` branch | **Phase 3** + **Phase 3.1** | Phase 3.1 added hardening: DPG-guarded dispatch audit, verified no unsafe DPG calls in Web mode, proved `pump_ui_queue_web` does not call DPG. Found `does_item_exist` hard-exit risk. |
+| Phase 4 — React Shell | Scaffold Vite + React + layout | **Phase 4** | Simplified from full cockpit shell to functional chat + sidebar + controls. TypeScript compiles clean. |
+| Phase 5 — Live Connection | Wire WebSocket, streaming, status | **Phase 5** | Required 3 live smoke fixes: `boot_ready` state drift, DPG `does_item_exist` crash, `chat_append` broadcast gap. Introduced `pump_ui_queue_web`, `bridge_queue`, `_state_synced` protocol. |
+| Phase 6 — Controls | Wire all buttons + keyboard shortcuts | **Phase 6** | Became regression lock + parity baseline. Added 10 new tests and 16-row parity table in CONTRACT.md instead of finishing all controls. |
+| Phase 7 — Validate + Retire | Parity checklist, flip default | **Phase 7** + **Phase 7.1** | Split into backend chat sync + frontend chat hardening (Phase 7), then thinking placeholder role fix (Phase 7.1). Retirement deferred far into the future. |
+
+### Why the phase numbering diverged
+
+Live testing on Windows revealed issues the original plan did not anticipate:
+
+1. **ui_queue single-consumer problem** — `queue.Queue.get()` removes items. Having both DPG and Web bridge read from the same queue causes message theft. Fixed with `pump_ui_queue_web` + `bridge_queue` separation (Phase 5).
+2. **boot_ready state drift** — Web mode never saw `boot_ready` because DPG's deferred-hide logic gated it. Fixed by making `boot_ready` forward in both modes (Phase 5).
+3. **DPG hard-exit risk** — `run_web()` called DPG's `does_item_exist` directly, causing a native crash when no DPG context existed. Fixed with monkeypatch guard + restoration (Phase 3.1 / Phase 5).
+4. **chat_append broadcast gap** — `chat_append` events were not reaching WebSocket clients because `ui_queue` was consumed by DPG pump. Fixed with bridge queue forwarding (Phase 5).
+5. **Thinking placeholder role mismatch** — Piper creates "Thinking..." as an `assistant` message, but frontend only checked `role === "system"`. Fixed in Phase 7.1.
+
+### Current frontend shape
+
+- `web_ui/frontend/src/App.tsx` is the top-level orchestrator for bridge state, UI routing, and panel wiring
+- `web_ui/frontend/src/components/` holds the panel-level UI pieces, including chat and fullscreen image views
+- `web_ui/frontend/src/css/` contains the modular stylesheet split, imported through `src/css/index.css`
+- `web_ui/frontend/src/components/ChatPanel.tsx` and `VisionWorkspace.tsx` both support fullscreen image viewing
+- `web_ui/frontend/src/components/` and `src/css/` are the intended extension points for future UI polish
+
+---
+
+## 4. Completed Modified Phase History
+
+### Phase 0 — Contract Map
+
+**Goal:** Read-only documentation of every `ui_queue` event kind, payload shape, visibility rule, and action callback.
+
+**Files read:** `AGENTS.md`, `docs/DOCUMENTS_MAP.md`, `docs/WIP.md`, `docs/architecture/TRIGGER_FLOW.md`, `notes/debug-protocol.md`, `ui/controller_queue.py`, `ui/controller.py`, `ui/layout.py`, `ui/controller_actions.py`, `ui/controller_status.py`, `ui/controller_render.py`, `app.py`, `config.py`, `core/contracts.py`.
+
+**Deliverable:** `web_ui/bridge/CONTRACT.md`
+
+**Proof:** Contract exists, committed as `docs(web-ui): map UI bridge contract`.
+
+---
+
+### Phase 1 — Pure Adapter
+
+**Goal:** Build the translation layer with deterministic tests. No WebSocket, no HTTP, no `app.py` changes.
+
+**New files:**
+- `web_ui/__init__.py`
+- `web_ui/bridge/__init__.py`
+- `web_ui/bridge/message_schema.py` — dataclass schemas, `KNOWN_EVENT_KINDS`, `KNOWN_ACTION_NAMES`
+- `web_ui/bridge/adapter.py` — `ui_tuple_to_ws_frame()`, `parse_action_frame()`, strict validation
+- `web_ui/bridge/test_adapter.py` — pytest smoke tests (one per event kind)
+
+**Key design:**
+- `ui_tuple_to_ws_frame()` raises `ValueError` on unknown event kinds
+- `parse_action_frame()` raises `ValueError` on unknown action names
+- Every frame includes `timestamp`, `requestId`, `sourceKind`
+
+**Proof:** `python -m pytest web_ui/bridge/test_adapter.py -v` — all pass.
+
+---
+
+### Phase 1.1 — Adapter Corrections
+
+**Goal:** Harden adapter with `sourceKind` presence, leakage guard, and stricter validation.
+
+**What changed:**
+- Added `sourceKind` field to every outgoing frame (prevents silent schema drift)
+- Added leakage prevention: voice-identity clarification events, `[UI]` system noise, and disambiguation messages are suppressed (`_suppressed: true`)
+- `user_role` messages are never suppressed
+- Added `is_known_event_kind()`, `get_frontend_event_name()`, `get_event_schema()` helpers
+- Added action parsing tests for all 17 actions
+
+**Why:** First test run against real Piper runtime revealed that internal system messages were leaking into the frontend chat. The adapter needed to enforce the same filtering rules DPG already used.
+
+**Proof:** `TestSourceKindPresence`, `TestLeakagePrevention`, `TestUnknownEventStrictness` classes in `test_adapter.py`.
+
+---
+
+### Phase 2 — Standalone Bridge Server
+
+**Goal:** Add the WebSocket + HTTP server using the adapter from Phase 1. Still no `app.py` changes.
+
+**New file:** `web_ui/bridge/server.py`
+
+**Key design:**
+- `websockets` library (pure Python, single dependency)
+- Runs in a **daemon thread** — crash does not take down Piper
+- Reads from `ui_queue` via `get_nowait()` loop, broadcasts to all connected WS clients
+- Receives action frames from clients, places them on `action_queue`
+- Serves static files from `web_ui/frontend/dist/`
+- `ws_path` enforcement: only `/ws` accepted; other paths get HTTP 403
+- `on_client_connect` callback (added Phase 7): sends initial sync frames per client
+
+**Proof:** `python -m pytest web_ui/bridge/test_server.py -v` — all pass.
+
+---
+
+### Phase 3 — Opt-in Runtime Wiring
+
+**Goal:** Connect the bridge to the actual Piper runtime.
+
+**Files changed:**
+- `config.py` — added `WEB_UI_ENABLED`, `WEB_UI_HOST`, `WEB_UI_PORT`, `WEB_UI_WS_PATH`
+- `ui/controller.py` — added `run_web()` method
+- `app.py` — branch: if `WEB_UI_ENABLED`, start bridge + call `run_web()`
+
+**Key design:**
+- Config flag selects ONE path at startup (alternate-consumer model)
+- `run_web()` does everything `run()` does EXCEPT `build_ui()` and `dpg.render_dearpygui_frame()`
+- Instead: `pump_ui_queue_web()` in a tight loop (~60 fps)
+
+**Proof:** `python -m pytest web_ui/bridge/test_runtime_wiring.py::TestAppBranch -v`
+
+---
+
+### Phase 3.1 — Runtime Dispatch Hardening
+
+**Goal:** Ensure Web mode never calls unsafe DPG functions.
+
+**What changed:**
+- Added `pump_ui_queue_web()` in `ui/controller_queue.py` — DPG-free state updates
+- Verified every web action handler uses only controller methods, not DPG tags
+- Proved `pump_ui_queue_web` does not call `dpg.does_item_exist`, `dpg.set_value`, etc.
+- Added `_dpg_item_exists()` safe wrapper for optional DPG checks
+
+**Why:** Live test showed that `controller._refresh_chat_ui()` called `dpg.does_item_exist`, which crashes when no DPG context exists. The Web mode needed a completely separate pump path.
+
+**Proof:** `TestWebDispatchDpgSafety`, `TestWebDispatchNeverCallsPumpUiQueue` in `test_runtime_wiring.py`.
+
+---
+
+### Phase 4 — React Frontend Shell
+
+**Goal:** Scaffold Vite + React + TypeScript. Build functional layout with live connection.
+
+**Files created:**
+- `web_ui/frontend/package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`
+- `web_ui/frontend/src/main.tsx`, `App.tsx`, `index.css`
+- `web_ui/frontend/src/types.ts` — `BackendFrame`, `ChatMessage`, `ConnectionState`, `RawEvent`
+- `web_ui/frontend/src/bridge.ts` — `PiperBridge` class with auto-reconnect
+
+**Key design:**
+- Single `App.tsx` with chat panel, status sidebar, activity/logs, raw event inspector, controls footer
+- `PiperBridge` handles WebSocket lifecycle, JSON parsing, state change callbacks
+- `handleFrame` switch dispatches events to React state
+- No separate component files yet — everything in `App.tsx` for velocity
+
+**Proof:** `npm run typecheck` and `npm run build` both pass.
+
+---
+
+### Phase 5 — Live Smoke Fixes
+
+**Goal:** Make the live WebSocket connection actually work with a running Piper backend.
+
+**Bugs found and fixed:**
+
+#### Bug 1: `boot_ready` never true in Web mode
+- **Symptom:** Frontend never received `boot.ready`, status stayed stuck
+- **Root cause:** DPG's `refresh_top_bar()` gated `boot_ready` behind `_boot_ui_min_visible_until` and DPG tag existence checks
+- **Fix:** `boot_ready` event now forwards unconditionally in both `pump_ui_queue()` and `pump_ui_queue_web()`
+
+#### Bug 2: DPG `does_item_exist` hard-exit
+- **Symptom:** `run_web()` crashed with native DearPyGui exception
+- **Root cause:** `run_web()` called `build_ui()` which called `dpg.does_item_exist()` before DPG context existed
+- **Fix:** Monkeypatch `dpg.does_item_exist = lambda _tag: False` during `run_web()`, restore in `finally`
+
+#### Bug 3: `chat_append` not broadcast to WebSocket
+- **Symptom:** User messages appeared in frontend locally but assistant responses never arrived
+- **Root cause:** `BridgeServer` consumed `controller.ui_queue` directly, but DPG pump also consumed from the same queue (message theft)
+- **Fix:** Introduced `bridge_queue` — `pump_ui_queue_web()` forwards events from `ui_queue` to `bridge_queue`, and `BridgeServer` consumes `bridge_queue`
+
+**New concepts introduced:**
+- `bridge_queue`: separate queue consumed by BridgeServer
+- `_state_synced`: marker on `chat_append` events to prevent double-appending to `chat_state`
+- `pump_ui_queue_web()`: DPG-free pump that forwards to bridge queue
+
+**Proof:** `TestBootReadyWebState`, `TestDpgHardExitGuardLifecycle`, `TestBridgeQueueSeparation`, `TestChatAppendBroadcastContract` in `test_runtime_wiring.py`.
+
+---
+
+### Phase 6 — Regression Lock + Parity Baseline
+
+**Goal:** Ensure Phase 5 fixes stay fixed. Document parity gaps.
+
+**What changed:**
+- Added 10 new regression tests across 7 test classes
+- Updated `CONTRACT.md` with 16-row parity table (DearPyGui vs Web UI status)
+- Locked test count at 140 (later 147 after Phase 7)
+
+**New test classes:**
+- `TestBootReadyWebState` — `boot_ready` forwards in Web mode
+- `TestStateSyncedDuplicatePrevention` — `_state_synced` skips re-append
+- `TestDpgHardExitGuardLifecycle` — monkeypatch restores on exit
+- `TestBridgeQueueSeparation` — BridgeServer uses bridge_queue
+- `TestChatAppendBroadcastContract` — `chat_append` emits `_state_synced`
+- `TestDpgPumpCompatibility` — DPG pump still works without forward_queue
+- `TestNonSyncedChatAppendWebState` — non-synced events still append
+
+**Proof:** All 140 tests pass. Parity table in CONTRACT.md Section 11.2.
+
+---
+
+### Phase 7 — Chat Sync + Frontend Chat Hardening
+
+**Goal:** On WebSocket connect, sync visible transcript. Harden chat UX.
+
+**Backend changes:**
+- Added `chat_sync` → `chat.sync` event mapping in `message_schema.py`
+- Added `_normalize_chat_sync_payload()` in `adapter.py`
+- `BridgeServer.__init__` accepts `on_client_connect` callback
+- `run_web()` passes `_build_chat_sync_frames` callback to BridgeServer
+- `_build_chat_sync_frames` calls `renderable_chat_messages()` to exclude hidden/system noise
+
+**Frontend changes:**
+- `chat.sync` handler: replaces transcript, dedupes, preserves local user messages and active streaming state
+- Auto-scroll: `chatBoxRef` + `useEffect` on `messages`
+- Stream delta coalescing: `pendingDeltasRef` + 16 ms flush timer
+- Thinking placeholder: `stream.start` clears thinking, `chat.clear_thinking` filters placeholders
+
+**New tests:**
+- `TestChatSyncUsesRenderableMessages` — proves hidden messages excluded, correct payload shape
+
+**Proof:** 147/147 tests pass. Frontend build passes.
+
+---
+
+### Phase 7.1 — Thinking Placeholder Role Fix
+
+**Goal:** `isThinkingPlaceholder()` matched only `role === "system"`, but Piper creates the placeholder as an `assistant` message.
+
+**Fix:**
+```typescript
+function isThinkingPlaceholder(m: ChatMessage): boolean {
+  const text = m.content.trim();
+  return (
+    (m.role === "assistant" || m.role === "system") &&
+    (text === "Thinking..." || text === "Thinking…" || text.startsWith("Thinking"))
+  );
+}
+```
+
+**Proof:** Frontend typecheck + build pass. No runtime changes.
+
+---
+
+## 5. Current Architecture
+
+### Data flow (backend → frontend)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Piper Backend                                                │
+│  core/orchestrator.py → ui_queue.put((kind, payload))        │
+│  controller.chat_append(role, content) → chat_state           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ui/controller_queue.py                                       │
+│  pump_ui_queue_web(controller, forward_queue=bridge_queue)   │
+│  • handles _state_synced marker                               │
+│  • skips DPG calls entirely                                   │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  BridgeServer (daemon thread)                                 │
+│  • consumes bridge_queue                                      │
+│  • on_client_connect → sends chat.sync frame                  │
+│  • adapter.ui_tuple_to_ws_frame(kind, payload) → JSON        │
+│  • broadcasts to all WS clients                               │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ ws://127.0.0.1:8787/ws
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  React Frontend (App.tsx)                                     │
+│  • PiperBridge receives JSON frames                           │
+│  • handleFrame() dispatches to React state                    │
+│  • chat panel, status sidebar, activity/logs, inspector       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data flow (frontend → backend)
+
+```
+React controls → sendAction(action, payload)
+→ PiperBridge.send() → WebSocket → BridgeServer
+→ action_queue → PiperController._dispatch_web_action()
+→ controller method (submit_user_text, on_stop, etc.)
+```
+
+### Key safety mechanisms
+
+| Mechanism | Purpose | Location |
+|---|---|---|
+| `bridge_queue` | Prevents `ui_queue` double-consumption | `controller_queue.py`, `server.py` |
+| `_state_synced` | Prevents duplicate `chat_state.append` | `controller.py`, `controller_queue.py` |
+| DPG guard | Prevents native DPG crash in Web mode | `controller.py` (`run_web()`) |
+| `ws_path` enforcement | Only `/ws` accepted; blocks probe traffic | `server.py` |
+| Unknown-event strictness | Adapter raises on unmapped events | `adapter.py` |
+| Leakage guard | Suppresses voice-identity/system noise | `adapter.py` |
+| Delta coalescing | Batches rapid stream deltas (~16 ms) | `App.tsx` |
+| Auto-reconnect | Frontend reconnects after disconnect | `bridge.ts` (3 s timer) |
+
+### DearPyGui path (unchanged)
+
+When `PIPER_WEB_UI_ENABLED=false` (default):
+```
+ui_queue → pump_ui_queue() → DPG widgets
+```
+
+`run()` is called instead of `run_web()`. No bridge thread starts. All existing behavior is preserved.
+
+---
+
+## 6. Event and Action Contract
+
+**Authoritative low-level contract:** `web_ui/bridge/CONTRACT.md`
+
+Do not duplicate CONTRACT.md here. The migration guide is the roadmap; CONTRACT.md is the frame-format reference.
+
+### Summary
+
+| Dimension | Count |
+|---|---|
+| Backend event kinds | 30+ |
+| Frontend actions | 17 |
+| Unknown event policy | Strict — adapter raises `ValueError` |
+| Unknown action policy | Strict — parser raises `ValueError` |
+| `sourceKind` | Preserved on every outgoing frame |
+| Hidden/system leakage | Blocked by adapter suppression rules |
+| Chat visibility | `renderable_chat_messages()` filter enforced backend + frontend |
+
+### Event categories
+
+- **Streaming:** `stream.start`, `stream.delta`, `stream.end`
+- **Chat:** `chat.append`, `chat.sync`, `chat.clear_thinking`
+- **Status:** `status.set`, `status.mode`, `status.step`
+- **Activity/Log:** `activity.append`, `boot.log`, `boot.ready`, `log.agent`
+- **System:** `error`, `ui_controls_refresh`, `config_reloaded`
+- **Code:** `code.launch`, `code.reset`, `code.output`, `code.status`, `code.active`, `code.focus`, `code.preview`
+- **Documents:** `document.view`, `document.ingest_active`
+- **Image/Vision:** `image.show`, `vision.note`
+- **System/Identity:** `stats_view_refresh`, `active_user_changed`, `config_reloaded`, `ui_controls_refresh`
+- **Future (not wired to frontend yet):** `search_result`, `live_screen_refresh`
+
+### Action categories
+
+- **Chat controls:** `send_message`, `stop`, `new_session`, `clear_chat`
+- **System:** `restart_piper`, `event_speech_mode`
+- **Screen:** `live_screen_mode`, `live_screen_interval`
+- **Code:** `code_send`, `code_run`, `code_clear`
+- **Documents:** `document_picker_selected`, `document_picker_cancel`
+- **Future (not wired):** `mic_toggle`, `snapshot`
+
+---
+
+## 7. Manual Testing Policy
+
+**Baris should not manually test every phase.** Manual testing begins only when instructed after a stable checkpoint.
+
+### Manual test checkpoint 1 (completed)
+**Trigger:** After Phase 8 guide consolidation.
+
+**Result:** Chat, streaming, status, New Session, Restart verified by Baris.
+
+### Manual test checkpoint 2 (passed)
+**Trigger:** After Phase 12.5–12.8 (this document). All sidebar panels are now wired.
+
+**Retest coverage:**
+- Chat basics (connect, send, stream, stop, New Session, Restart)
+- Turkish character rendering correct
+- Single assistant reply for normal chat prompts (no double bubble)
+- No visible `[ROUTER]` or `[RECALL:...]` in chat
+- Code Session, Document Ingestion, Image/Vision, System/Identity panels functional
+- Sidebar layout acceptable
+
+**What NOT to test yet:**
+- TTS in browser
+- Desktop wrapper (Tauri/pywebview)
+- Settings mutation (config is read-only in Web UI)
+- File picker native dialog (document panel uses path text input)
+
+### Regression notes
+
+**Phase 12.6 — Web stream lifecycle & internal marker scrubbing**
+- Bug: Web UI showed raw `assistant_stream_delta` text while DPG showed scrubbed text from `chat_state`. `[ROUTER]` and `[RECALL:...]` leaked into visible chat.
+- Fix: `TagScrubber` strips `[ROUTER]` / `[RECALL:...]`; `pump_ui_queue_web` forwards **clean** deltas; `App.tsx` `stream.start` replaces existing streaming bubble; `renderable_chat_messages` last-line filter excludes internal markers.
+
+**Phase 12.7 — Router loopback after visible reply**
+- Bug: Persona emitted visible answer + hidden `[ROUTER]` → backend looped to `ROUTE` → second assistant reply for same user turn.
+- Fix: `_should_ignore_router_after_visible_reply(clean_answer, router_requested)` guard in `_run_persona_core`. If `clean_answer.strip()` is truthy, `[ROUTER]` is ignored and turn finishes. Pure `[ROUTER]` / empty visible answer still allows loopback.
+
+### Manual test checklist — Checkpoint 2
+
+**Production-like flow (Phase 15B):**
+
+### Default launch (desktop window)
+
+No environment variables required. Builds and opens the Web UI desktop window by default.
+
+```powershell
+cd web_ui/frontend
+npm run build
+cd ..\..
+python app.py
+```
+
+**Expected:**
+- Dedicated "Piper" window opens (no address bar)
+- WebSocket connects automatically
+- Chat, MIC, and all panels work
+- Closing the window triggers clean shutdown
+
+**If pywebview is missing:** Falls back to browser mode with a warning. Open `http://127.0.0.1:8787/` manually, or install pywebview.
+
+### Browser mode (no desktop window)
+
+```powershell
+cd web_ui/frontend
+npm run build
+cd ..\..
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "false"
+python app.py
+```
+
+**Then open:** `http://127.0.0.1:8787/`
+
+### DearPyGui fallback
+
+```powershell
+$env:PIPER_WEB_UI_ENABLED = "false"
+python app.py
+```
+
+**Notes:**
+- pywebview must run on the main thread (Windows requirement). The Web UI action/pump loop moves to a background thread only when `PIPER_WEB_UI_WINDOW=true`.
+- In browser mode (`PIPER_WEB_UI_WINDOW=false`), the pump loop remains on the main thread.
+
+**Dev flow (still supported):**
+
+**1. Start backend:**
+```powershell
+python app.py
+```
+
+**2. Start frontend (separate terminal):**
+```powershell
+cd web_ui/frontend
+npm run dev
+```
+
+**3. Open:**
+```
+http://localhost:3000
+```
+
+**4. Chat test:**
+- [ ] DearPyGui does **not** open
+- [ ] Web UI connects (badge shows "connected")
+- [ ] Boot logs appear in sidebar Activity & Logs panel
+- [ ] `boot.ready` appears, status shows "IDLE"
+- [ ] Send one simple message (e.g., "hello")
+- [ ] Response streams character-by-character
+- [ ] "Thinking..." placeholder appears then disappears
+- [ ] Browser refresh restores transcript through `chat.sync`
+- [ ] Stop button interrupts generation
+- [ ] New Session clears chat
+- [ ] Restart exits cleanly (no orphan llama-server processes)
+
+**5. New Session summary reset test:**
+- [ ] Have a conversation (3+ turns)
+- [ ] Click New Session
+- [ ] Chat clears
+- [ ] Send a new message
+- [ ] Piper should not hallucinate context from the previous session
+
+**6. Code Session panel (light test):**
+- [ ] Panel shows "idle" status
+- [ ] Enter a Python script path in the path input
+- [ ] Click Run
+- [ ] Output appears in the panel
+- [ ] Click Clear resets output
+
+**7. Document Ingestion panel (light test):**
+- [ ] Enter a file path in the path input (e.g., `C:\temp\test.txt`)
+- [ ] Click Add
+- [ ] Path appears in the selected list
+- [ ] Click Ingest Selected
+- [ ] Status shows "Ingesting..." then returns to "Idle"
+- [ ] Click Clear empties the selected list
+
+**8. Image / Vision panel (test if image exists):**
+- [ ] If Piper generates an image, the panel shows the image preview
+- [ ] If the image fails to load, caption and path are shown as fallback
+- [ ] Vision notes appear below the image when live screen is active
+- [ ] Click Clear Notes empties vision notes
+
+**9. System / Identity panel (observation only):**
+- [ ] Panel shows Identity, Stats, Controls Refresh, Config Reloads
+- [ ] When config changes, a new entry appears in Config Reloads with timestamp
+- [ ] Controls Refresh counter increments when UI controls change
+- [ ] Click Clear Stats and Clear Config Log work
+
+**10. Raw Events inspector:**
+- [ ] Every backend event appears in the Raw Events panel
+- [ ] Events are collapsible (click to expand payload JSON)
+
+**11. Cleanup:**
+- [ ] Close browser tab
+- [ ] Stop frontend dev server (Ctrl+C in frontend terminal)
+- [ ] Stop backend (Ctrl+C in backend terminal)
+- [ ] Verify no lingering `python.exe` or `llama-server.exe` processes
+
+**If any checklist item fails:**
+1. Capture the symptom
+2. Check `notes/debug-protocol.md` for symptom-to-file lookup
+3. File a bug with: phase, symptom, reproduction steps, expected vs actual
+
+---
+
+## 8. Remaining Roadmap
+
+### Phase 9 — Code Session Panel ✅ COMPLETE
+
+**Delivered:** Frontend-only panel with output, status, preview, stdin, run/send/clear controls.
+
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
+
+---
+
+### Phase 10 — Document Ingestion ✅ COMPLETE
+
+**Delivered:** Path text input, Add/Ingest/Cancel controls, selected paths list, ingest status.
+
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
+
+---
+
+### Phase 11 — Image / Vision Display ✅ COMPLETE
+
+**Delivered:** Safe static file serving (`GET /workspace/<filename>`) with traversal guards, extension whitelist, CORS. `<img>` preview with caption/path fallback. Vision notes panel.
+
+**Files touched:**
+- `web_ui/bridge/server.py`
+- `web_ui/bridge/adapter.py`
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
+
+---
+
+### Phase 12 — Stats / Settings / Identity Surface ✅ COMPLETE
+
+**Delivered:** Identity status, stats refresh, config reload log with timestamps, controls refresh counter. All read-only observation.
+
+**Files touched:**
+- `web_ui/frontend/src/App.tsx`
+- `web_ui/frontend/src/styles.css`
+
+---
+
+### Phase 14A — Backend Mic Audio Submission Foundation ✅ COMPLETE
+
+**Delivered:** Backend-only action `mic_audio_submit`, local audio decoder (`tools/audio_decode.py`), `STTEngine.transcribe_buffer()`, `mic.status` event, payload validation, config guards.
+
+**Not delivered:** Frontend MediaRecorder capture (Phase 14B). No Web UI mic button exists yet.
+
+**Architecture:**
+- Web UI / WebView records one complete utterance (future Phase 14B).
+- Frontend sends base64 audio via `mic_audio_submit` action.
+- Backend decodes with ffmpeg (WebM/Opus → 16 kHz mono WAV).
+- Backend runs existing offline Faster-Whisper STT via `transcribe_buffer()`.
+- Backend runs existing voice identity/auth path unchanged.
+- Final transcript enters Piper as a voice input via `submit_user_text()`.
+
+**Security:**
+- Max decoded size: `PIPER_WEB_MIC_MAX_DECODED_BYTES` (default 10 MiB).
+- Max duration: `PIPER_WEB_MIC_MAX_SECONDS` (default 60 s).
+- Temp files only; cleaned up in `finally`.
+- No base64 audio logged; only sizes and status.
+- Backend busy guard rejects audio while Piper is generating.
+
+**Files touched:**
+- `tools/audio_decode.py` — new local audio decoder
+- `tools/stt.py` — `transcribe_buffer()`, refactored shared helpers
+- `ui/controller.py` — `_handle_web_mic_audio_submit()`, dispatch branch
+- `web_ui/bridge/message_schema.py` — `mic_audio_submit`, `mic_status`
+- `web_ui/bridge/adapter.py` — `mic.status` normalizer
+- `config.py` — `WEB_MIC_MAX_DECODED_BYTES`, `WEB_MIC_MAX_SECONDS`
+
+**Tests added:** Action parsing, event normalization, audio decode (mock ffmpeg), controller dispatch (mock STT), config defaults.
+
+---
+
+### Phase 14B — Frontend MediaRecorder / WebView Mic Capture ⚠️ EXPERIMENTAL / QUARANTINED
+
+**Delivered:** Frontend MediaRecorder API for utterance capture (WebM/Opus), mic button with state machine, abort/discard behavior, `mic.status` event handling, per-stage progress, ffmpeg timeout, frontend watchdog, and large-frame WS handling.
+
+**Status:** Manual smoke testing failed. The base64 JSON → WebSocket → backend path is unreliable in real browser testing (oversized frames, silent failures, backend worker hangs). The code is preserved for future experiments but is **disabled by default** in the frontend.
+
+**Files touched:**
+- `web_ui/frontend/src/App.tsx` — mic state machine, MediaRecorder lifecycle, base64 encode, abort helpers
+- `web_ui/frontend/src/styles.css` — mic button pulse animation, error state, status text
+
+**Behavior when enabled (`VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`):**
+- MIC button: idle → requesting_permission → listening (STOP) → transcribing → idle/error
+- Permission denied: shows user-safe error message
+- Global Stop / New Session / Restart / disconnect: aborts active recording and discards audio
+- Backend `mic.status` drives frontend mic state (transcribing → idle/error)
+- Transcript appears through normal backend `chat.append` path (no duplicate frontend injection)
+- No Web Speech API or cloud STT used
+
+---
+
+### Phase 14C — Mic Upload Quarantine Decision ✅ COMPLETE
+
+**Decision:** Do not present the MediaRecorder upload path as the accepted mic solution.
+
+**Reasoning:**
+- Browser audio upload (base64 JSON over WebSocket) is fragile at production scale
+- Manual smoke tests repeatedly failed at the submit/transcribing boundary
+- Debugging browser ↔ backend audio pipelines is low ROI compared to reusing the existing native mic stack
+
+**What changed:**
+- Frontend MIC button is disabled by default
+- Status text explains: "Mic upload experimental; native mic bridge planned"
+- MediaRecorder path remains available behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true` for future experiments
+- All backend code (`mic_audio_submit`, `tools/audio_decode.py`, STT worker) is preserved
+- All 220+ backend tests are preserved
+
+**Preferred future direction:**
+Web UI / WebView should control Piper's existing native/backend mic pipeline:
+- Web UI button → `mic_toggle` / `mic_start` / `mic_stop` action
+- Backend runs existing native mic capture → STT → voice identity
+- Transcript enters Piper through normal `submit_user_text()` path
+- No browser audio upload; no base64 encoding; no WebSocket frame size issues
+
+---
+
+### Phase 14 — Desktop Wrapper
+
+**Scope:**
+- **Tauri first** (Rust-based, small binary)
+- **pywebview second** (Python-native, simpler build)
+- Browser app-mode fallback only for temporary debugging
+
+**Files likely touched:**
+- New top-level directory `desktop/` or `tauri/`
+- Build scripts for `.exe` generation
+
+**Constraint:** Do not start before Web UI parity is proven. The wrapper is just a chrome-less browser.
+
+---
+
+### Phase 15A — Native Mic Bridge ✅ COMPLETE
+
+**Goal:** Replace the experimental MediaRecorder upload path with a Web UI → native mic control bridge.
+
+**Delivered:**
+- New Web UI actions: `mic_start`, `mic_stop`, `mic_toggle`
+- Backend `_handle_web_mic_start()` and `_handle_web_mic_stop()` reuse existing `STTEngine.start_recording()` / `stop_recording()`
+- STT + voice identity run unchanged on the backend
+- Transcript enters Piper through normal `submit_user_text()` path
+- `mic_status` events drive frontend state: idle → listening → transcribing → idle/error
+- No browser audio encoding, no base64, no oversized WebSocket frames
+
+**Files touched:**
+- `web_ui/bridge/message_schema.py` — `mic_start`, `mic_stop` added to `KNOWN_ACTION_NAMES`
+- `ui/controller.py` — `_handle_web_mic_start()`, `_handle_web_mic_stop()`, native mic dispatch in `_dispatch_web_action()`
+- `web_ui/frontend/src/App.tsx` — MIC button sends `mic_start`/`mic_stop` by default; experimental upload behind flag
+
+**Why this is preferred:**
+- Reuses proven, tested native mic code instead of fighting browser audio APIs
+- Eliminates WebSocket frame size concerns entirely
+- Voice identity and STT logic require zero changes
+- Aligns with Piper's offline-first philosophy
+
+---
+
+### Phase 15B — Serve Built Frontend from Backend Bridge
+
+**Goal:** Eliminate the need to run `npm run dev` for normal Web UI use. The backend bridge serves the built React app directly.
+
+**Delivered:**
+- `BridgeServer` accepts `frontend_dist_dir` and serves files from it over HTTP
+- `GET /` returns `index.html`
+- `GET /assets/...` returns built JS/CSS assets
+- Unknown non-API paths fall back to `index.html` for React Router compatibility
+- `/workspace/...` image serving is unchanged
+- Path traversal is blocked; files outside `frontend_dist_dir` cannot be accessed
+- Configurable via `PIPER_WEB_UI_FRONTEND_DIST_DIR` (default: `<repo>/web_ui/frontend/dist`)
+
+**Production-like launch flow:**
+```powershell
+cd web_ui/frontend
+npm run build
+cd ..\..
+$env:PIPER_WEB_UI_ENABLED = "true"
+python app.py
+# Open http://127.0.0.1:8787/
+```
+
+**Vite dev mode remains available:**
+```powershell
+# Frontend developers can still use hot-reload
+npm run dev
+# Open http://localhost:3000
+# WebSocket still connects to ws://127.0.0.1:8787/ws
+```
+
+**Files touched:**
+- `web_ui/bridge/server.py` — `_serve_frontend_file()`, `frontend_dist_dir` parameter
+- `config.py` — `WEB_UI_FRONTEND_DIST_DIR`
+- `ui/controller.py` — passes `frontend_dist_dir` to `BridgeServer`
+
+**Tests added:** `TestFrontendServing` in `test_server.py`
+
+---
+
+### Phase 15C — Desktop Window Wrapper
+
+**Goal:** Provide a dedicated desktop app window for the Web UI without requiring a browser tab.
+
+**Delivered:**
+- New config/env flag: `PIPER_WEB_UI_WINDOW` (default `false`)
+- Thin wrapper module: `web_ui/window.py`
+- Uses pywebview to open a window titled "Piper" at `http://127.0.0.1:8787/`
+- Default size: 1280×820, resizable, no address bar
+- Runs in a daemon thread so the backend is not blocked
+- Graceful fallback if pywebview is missing: logs a warning with the manual URL
+- Works with both backend-served frontend and Vite dev mode
+
+**Launch flow:**
+```powershell
+cd web_ui/frontend
+npm run build
+cd ..\..
+$env:PIPER_WEB_UI_ENABLED = "true"
+$env:PIPER_WEB_UI_WINDOW = "true"
+python app.py
+```
+
+**Files touched:**
+- `web_ui/window.py` — new wrapper module
+- `config.py` — `WEB_UI_WINDOW` flag
+- `ui/controller.py` — calls `launch_window_thread` after bridge starts
+- `requirements.txt` — added `pywebview` (optional)
+
+**Tests added:**
+- `TestWindowModule` — graceful missing-pywebview behavior, thread launch
+- `TestRunWebWindowFlag` — window flag on/off wiring through `run_web`
+- `TestConfigDefaults` / `TestConfigEnvOverrides` — config default and env override
+
+---
+
+### Phase 15C.2 — Quiet Noisy Backend Logs in Web UI Mode
+
+**Goal:** Reduce backend console spam during Web UI streaming and normal operation.
+
+**Delivered:**
+- Replaced per-token `print("[STREAM DEBUG] ...")` in `chat_upsert_streaming_assistant` with `_LOG.debug(...)`. Silent at default INFO level.
+- Normal WebSocket closes (codes 1000/1001) are logged at DEBUG instead of WARNING in `BridgeServer._handle_connection`.
+- `websockets.server` logger level is set to WARNING when Web UI mode is active, suppressing per-connection INFO noise.
+- Real errors (unexpected exceptions, payload too large) still log at WARNING.
+
+**Files touched:**
+- `ui/controller.py` — `_LOG.debug` instead of `print`
+- `web_ui/bridge/server.py` — normal close classification
+- `app.py` — `websockets.server` log level adjustment
+
+**Tests added:**
+- `TestHandleConnectionErrors` — normal close → DEBUG; unexpected failure → WARNING
+- `TestAppBranch.test_app_quietens_websockets_server_in_web_ui_mode` — verifies log level change
+
+---
+
+### Phase 15D — Web UI Acceptance Checkpoint
+
+**Goal:** Formally document what is green, what is deferred, and what must happen before Web UI can become the default.
+
+**Delivered:**
+- Acceptance checkpoint document: `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md`
+- Green features recorded: desktop window, typed chat, streaming, native MIC, voice identity, all panels, backend-served frontend, Vite dev mode, DPG fallback
+- Deferred features recorded: quarantined mic upload, browser TTS, OS packaging, deep visual polish
+- Default-readiness criteria defined: 1+ week daily use, no regressions, clean startup/shutdown, manual checklist passes
+- DearPyGui retirement criteria defined: fallback preserved until explicit approval
+- Rollback instructions for all three launch modes (browser, desktop window, DearPyGui)
+
+**Status:** Web UI desktop mode is **the default** as of Phase 17C. DearPyGui remains available as an explicit fallback.
+
+---
+
+### Phase 15E — DearPyGui Retirement Decision (Future)
+
+**Criteria for retirement:**
+1. All default-readiness criteria from Phase 15D are met
+2. Windows desktop wrapper or installer is available
+3. Baris explicitly approves the switch
+4. Rollback to DearPyGui is documented and tested
+
+**Transition plan:**
+1. Change `WEB_UI_ENABLED` default from `False` to `True`
+2. Keep DearPyGui code in `ui/` as emergency fallback
+3. Document `PIPER_WEB_UI_ENABLED=false` for legacy mode
+4. Archive DPG retirement plan in `docs/archive/`
+
+**Do not retire DearPyGui before criteria are met.**
+
+---
+
+## 9. Non-goals Until Later
+
+The following are explicitly out of scope until their respective phases:
+
+| Non-goal | Why deferred | Target phase |
+|---|---|---|
+| Tauri / pywebview wrapper | Need stable Web UI first | 14 |
+| Avatar / persona visual | Not needed for functional parity | Post-15 |
+| Cloud dependency | Piper is offline-first by design | Never |
+| TTS port 8765 conflict | Already reserved; bridge uses 8787 | N/A |
+| DearPyGui removal | Fallback must remain until parity proven | 15 |
+| Web UI as default | Must be opt-in until Baris accepts it | 15 |
+| Browser mic/STT | Native backend mic control (Phase 15A); experimental upload quarantined (Phase 14B) | 15A |
+| File picker native dialog | Needs Web-safe path handling | 10 |
+| WebGL / canvas animations | Visual polish, not functional | Post-15 |
+
+---
+
+## 10. Validation Commands
+
+Run these before every commit to `feature/web-ui-bridge`:
+
+### Python
+```bash
+# Syntax check
+python -m compileall web_ui ui app.py config.py
+
+# Targeted bridge tests (fast)
+python -m pytest web_ui/bridge/test_adapter.py web_ui/bridge/test_server.py web_ui/bridge/test_runtime_wiring.py -v
+
+# Full bridge test suite (slower)
+python -m pytest web_ui/bridge/ -q
+```
+
+### Frontend
+```bash
+cd web_ui/frontend
+npm run typecheck
+npm run build
+```
+
+### Pre-push checklist
+- [ ] `python -m compileall` passes
+- [ ] All 213 bridge tests pass
+- [ ] `npm run typecheck` passes
+- [ ] `npm run build` passes
+- [ ] No changes to `data/users.json` unless intentionally part of the PR
+- [ ] No generated files (`dist/`, `node_modules/`) committed
+
+---
+
+## 11. Source of Truth
+
+| Document | Role |
+|---|---|
+| **This migration guide** (`docs/specs/piper-web-ui-migration-guide.md`) | High-level roadmap, phase history, remaining work |
+| **`web_ui/bridge/CONTRACT.md`** | Authoritative low-level event/action contract (frame formats, payload shapes, parity table) |
+| **Tests** (`web_ui/bridge/test_*.py`) | Proof source — behavior is defined by passing tests |
+| **`AGENTS.md`** | Repository doctrine — architectural boundaries all agents must respect |
+| **`notes/debug-protocol.md`** | Operational debugging guide for live issues |
+| **DearPyGui** | Fallback UI until Web UI parity is verified and accepted |
+
+If this guide and CONTRACT.md conflict, **tests win**. The code is the final authority.
+
+---
+
+## 12. Document History
+
+| Date | Change |
+|---|---|
+| 2026-05-14 | v2.0 original architecture plan (`docs/archive/piper-ui-architecture-plan.md`) |
+| 2026-05-14 | v2.1 corrected plan (`docs/specs/piper-ui-architecture-plan-v2.md`) — port 8787, alternate consumer, adapter-first order |
+| 2026-05-09 | Phase 8 — This migration guide created to reconcile original plan with modified phase history |
+| 2026-05-09 | Phase 12 complete — System/Identity panel, image serving, document ingestion, code session |
+| 2026-05-09 | Phase 12.5 — Manual checkpoint 2 prep: layout audit, CSS safety fix, updated checklist |
+| 2026-05-09 | Phase 12.6 — Fixed duplicate assistant replies and `[ROUTER]` / `[RECALL:...]` leak into visible chat |
+| 2026-05-09 | Phase 12.7 — Fixed backend router loopback after visible reply; pure router still routes |
+| 2026-05-09 | Phase 12.8 — Checkpoint 2 marked passed; docs updated; next: Phase 13 planning |
+| 2026-05-09 | Phase 14A — Backend mic audio submission foundation: decoder, transcribe_buffer, mic_audio_submit action, mic.status event, tests |
+| 2026-05-09 | Phase 14A.1 — Enforce WEB_MIC_MAX_SECONDS duration guard; remove unused sample_rate_hint parsing |
+| 2026-05-09 | Phase 14B — Frontend MediaRecorder mic capture: idle/listening/transcribing/error state machine, abort/discard, mic.status wired |
+| 2026-05-09 | Phase 14B.1 — Fixed abort/discard race with discardNextMicStopRef |
+| 2026-05-09 | Phase 14B.2 — Added per-stage mic progress, ffmpeg timeout, frontend watchdog |
+| 2026-05-09 | Phase 14B.3 — Added large-frame WS handling, sendAction return value, 10s local timeout, receive failure logging |
+| 2026-05-09 | Phase 14C — Quarantined MediaRecorder upload path; disabled by default; documented native mic bridge as preferred direction |
+| 2026-05-09 | Phase 15A — Native mic control bridge: Web UI sends `mic_start`/`mic_stop`; backend reuses existing `sounddevice` + STT + voice identity pipeline |
+| 2026-05-15 | Phase 15B — Backend serves built React frontend from `web_ui/frontend/dist` at `http://127.0.0.1:8787/`; Vite dev mode remains supported |
+| 2026-05-15 | Phase 15C — Optional pywebview desktop window wrapper (`PIPER_WEB_UI_WINDOW=true`); graceful fallback if missing |
+| 2026-05-15 | Phase 15C.1 — Fixed pywebview main-thread requirement: window runs on main thread, Web UI pump loop runs in background thread only in window mode |
+| 2026-05-15 | Phase 15C.2 — Reduced backend console noise in Web UI mode: per-token STREAM DEBUG print removed, normal WebSocket closes logged at DEBUG, websockets.server INFO logs suppressed |
+| 2026-05-15 | Phase 15D — Web UI acceptance checkpoint: formal green/deferred/default-readiness criteria documented in `docs/checkpoints/WEB_UI_ACCEPTANCE_CHECKPOINT.md` |

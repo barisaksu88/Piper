@@ -104,9 +104,15 @@ When the feature flag is set, `Orchestrator.run()` delegates to `_run_langgraph(
 START
   │
   ▼
-ROUTE  ──[conditional]──► MANAGER  (if TASK)
+ROUTE  ──[conditional]──► MANAGER       (if TASK)
   │                         │
-  └───────────────────────► PERSONA  (if CHAT / SEARCH)
+  ├───────────────────────► SEARCH       (if SEARCH)
+  ├───────────────────────► REPORTER     (pending search payload)
+  ├───────────────────────► DOC_FOCUS    (document-chat bypass)
+  ├───────────────────────► UNDO         (undo interceptor)
+  ├───────────────────────► REMINDER_SET (reminder interceptor)
+  ├───────────────────────► EXPLAIN      (explain interceptor)
+  └───────────────────────► PERSONA      (if CHAT)
                             │
                             ▼
                           VERIFY
@@ -133,14 +139,21 @@ ROUTE  ──[conditional]──► MANAGER  (if TASK)
 | Node | File | Delegates to |
 |---|---|---|
 | `ROUTE` | `core/graph_nodes.py` → `route_node()` | `_run_route_core()` in `orchestrator_phases.py` |
+| `DOC_FOCUS` | `core/graph_nodes.py` → `document_focus_node()` | `dispatch_stage("DOC_FOCUS")` |
+| `SEARCH` | `core/graph_nodes.py` → `search_node()` | `dispatch_stage("SEARCH")` |
+| `REPORTER` | `core/graph_nodes.py` → `reporter_node()` | `dispatch_stage("REPORTER")` |
 | `MANAGER` | `core/graph_nodes.py` → `manager_node()` | `_run_manager_core()` in `orchestrator_phases.py` |
+| `UNDO` | `core/graph_nodes.py` → `undo_node()` | `dispatch_stage("UNDO")` |
+| `REMINDER_SET` | `core/graph_nodes.py` → `reminder_set_node()` | `dispatch_stage("REMINDER_SET")` |
+| `EXPLAIN` | `core/graph_nodes.py` → `explain_node()` | `dispatch_stage("EXPLAIN")` |
 | `VERIFY` | `core/graph_nodes.py` → `verify_node()` | Reads `orc.last_verification` + pending interrupt state |
 | `AWAIT_INTERRUPT` | `core/graph_nodes.py` → `await_interrupt_node()` | Calls `langgraph.types.interrupt()`, applies resume helper |
 | `PERSONA` | `core/graph_nodes.py` → `persona_node()` | `_run_persona_core()` in `orchestrator_phases.py` |
 
 **Conditional edges:**
 
-- `ROUTE → {MANAGER, PERSONA}` — based on `route_decision.decision`
+- `ROUTE → {DOC_FOCUS, SEARCH, REPORTER, MANAGER, UNDO, REMINDER_SET, EXPLAIN, PERSONA}` — based on `orc.next_stage` first, with `route_decision.decision` only as fallback
+- `DOC_FOCUS / SEARCH / REPORTER / UNDO / REMINDER_SET / EXPLAIN → {ROUTE, DOC_FOCUS, SEARCH, REPORTER, MANAGER, UNDO, REMINDER_SET, EXPLAIN, PERSONA, END}` — based on `orc.next_stage`
 - `VERIFY → {AWAIT_INTERRUPT, MANAGER, ROUTE, PERSONA}` — based on `interrupt_payload` + `orc.next_stage`
 - `PERSONA → {END, ROUTE, MANAGER}` — based on `orc.next_stage` (mirrors legacy [ROUTER] / auto-reroute)
 
@@ -274,11 +287,84 @@ The router receives a filtered history block:
 **Triggered by:** router returning `SEARCH`
 **File:** `orchestrator_phases.py` → `phase_search()`
 
+### Search architecture
+
+The search stack is intentionally split into separate responsibilities:
+
+1. `core/routing/route_normalizer.py` decides whether the turn should become `SEARCH`
+2. `core/search/topic_resolver.py` resolves the exact query that should be searched
+3. `tools/search.py` selects the active backend adapter and performs retrieval
+4. Reporter and Persona summarize the grounded results after retrieval finishes
+
+That split matters for safety: the router decides intent, the topic resolver decides query shape, the backend decides retrieval, and the response layers must stay honest about what was actually found.
+
 ### Flow:
 
 1. **Substantive first-pass response** — a context-backed LLM response is streamed to the user immediately while the search runs. It engages with what Piper already knows about the topic instead of only saying "checking the web".
 2. **Background search thread** — `perform_search()` runs in a daemon thread, queues `("search_result", {...})` on completion
 3. **Sets next stage:** `FINISHED` — the turn ends here
+
+### SearXNG backend
+
+SearXNG is Piper's local/self-hosted metasearch backend option. It is useful for local live testing because the manual search results in this branch have been better than the fallback backend, but it remains an optional local service rather than a core startup dependency.
+
+Current config values documented for this branch:
+
+- `SEARCH_BACKEND = "searxng"`
+- `SEARXNG_URL = "http://127.0.0.1:8888"`
+- `SEARXNG_TIMEOUT_S = 10.0`
+- `SEARXNG_AUTO_START = True`
+- `SEARXNG_STOP_ON_EXIT = True`
+- `SEARXNG_DOCKER_CONTAINER = "piper-searxng"`
+- `SEARXNG_DOCKER_IMAGE = "searxng/searxng:latest"`
+- `SEARXNG_DOCKER_HOST_PORT = 8888`
+- `SEARXNG_DOCKER_CONTAINER_PORT = 8080`
+- `SEARXNG_DOCKER_CONFIG_DIR = ".local/searxng"`
+- `SEARXNG_REQUIRE = False`
+
+Lifecycle intent for this branch:
+
+- If SearXNG is already reachable when Piper boots, Piper uses it but does not claim ownership
+- If SearXNG is unreachable and `SEARXNG_AUTO_START` is true, Piper may start the Docker container
+- If Piper started the container and `SEARXNG_STOP_ON_EXIT` is true, Piper may stop it on shutdown
+- If the container was already running before Piper booted, Piper must not stop it
+- Docker commands must not run during import or module load
+- Docker or SearXNG failure must not crash unrelated chat or normal Piper startup
+
+The implementation should fail gracefully if Docker is missing or SearXNG cannot start. A broken search backend should degrade search, not the rest of Piper.
+
+Manual checks that match the docs:
+
+- `docker --version`
+- `docker info`
+- `docker run --rm -d --name piper-searxng -p 8888:8080 -v C:\Projects\Piper\.local\searxng:/etc/searxng searxng/searxng:latest`
+- `Invoke-RestMethod "http://127.0.0.1:8888/search?q=test&format=json"`
+- `docker stop piper-searxng`
+
+The local config file `.local/searxng/settings.yml` is generated/owned locally and must not be committed. JSON output must be enabled there:
+
+```yaml
+use_default_settings: true
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "piper-local-test-only-change-me"
+  limiter: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json
+```
+
+Troubleshooting notes:
+
+- `docker : The term 'docker' is not recognized` means Docker Desktop is not installed or not on `PATH`
+- `403 Forbidden` from `/search?q=test&format=json` usually means JSON output is not enabled or the config mount is missing
+- A pre-existing container should be inspected with `docker ps -a` and stopped with `docker stop piper-searxng` before retrying
+- Individual engines failing is not fatal if SearXNG still returns usable results
 
 ### Why async:
 

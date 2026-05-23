@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(./.venv/Scripts/python.exe -m py_compile memory/stores.py core/operational_state_service.py core/agent.py)"
-    ]
-  }
-}

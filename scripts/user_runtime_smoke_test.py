@@ -4,8 +4,18 @@ import argparse
 import json
 import sys
 import tempfile
+import types
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+# Prevent heavy ML libraries from hanging the smoke test at import time.
+class _StubModule(types.ModuleType):
+    def __getattr__(self, name: str):
+        raise ImportError(f"{self.__name__} is stubbed in smoke test")
+
+for _mod_name in ("resemblyzer", "sentence_transformers"):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = _StubModule(_mod_name)
 
 from _bootstrap import ROOT_DIR
 
@@ -15,7 +25,10 @@ if str(ROOT_DIR) not in sys.path:
 from AGENTS.harness.session import PiperHarness
 from core.commands import handle_command
 from core.style import StyleManager
+import memory.brain as brain_module
 from memory.user_runtime import ActiveUserRuntime
+
+brain_module.PiperBrain._vector_backend_dependencies_available = staticmethod(lambda: False)
 
 
 @dataclass(frozen=True)
@@ -116,6 +129,30 @@ def _runtime_checks() -> dict[str, object]:
         active_after_resolved_friend_ekin = runtime.active_profile().user_id
         runtime.switch_active_user(standard_profile.user_id)
 
+        spelling_data_dir = Path(raw_tmp) / "spelling_case"
+        spelling_runtime = ActiveUserRuntime(
+            spelling_data_dir,
+            llm_client=None,
+            admin_user_id="admin_baris",
+            admin_name="Baris",
+            default_style_filename=style_mgr.active_filename,
+        )
+        spelling_akin_intro = spelling_runtime.observe_typed_identity_hint("I'm Akin")
+        spelling_akin_profile = spelling_runtime.active_profile()
+        spelling_correction = spelling_runtime.observe_typed_identity_hint("I will spell my name, e-k-i-n.")
+        spelling_corrected_profile = spelling_runtime.active_profile()
+        spelling_alias_matches = spelling_runtime.registry.matching_profiles("Akin")
+        spelling_duplicate_ekin_profile = spelling_runtime.registry.profile_for_id("ekin")
+        spelling_relation = spelling_runtime.observe_typed_identity_hint("I am his girlfriend. I am Turkish.")
+        spelling_admin_graph = spelling_runtime.knowledge_manager_for("admin_baris").load_graph()
+        spelling_partner_relation = any(
+            str(edge.get("source") or "") == "person:user"
+            and str(edge.get("target") or "") == f"person:{spelling_corrected_profile.user_id}"
+            and str(edge.get("relation") or "") == "partner"
+            for edge in (spelling_admin_graph.get("edges") or [])
+            if isinstance(edge, dict)
+        )
+
         standard_memory_path = runtime.current_memory_path()
         standard_summary_path = runtime.current_conversation_summary_path()
         standard_document_dir = runtime.current_document_manager().data_dir
@@ -182,7 +219,7 @@ def _runtime_checks() -> dict[str, object]:
         restart_active_after_corrective = restarted.active_profile().user_id
         restart_unknown_memory_path = restarted.current_memory_path()
         restart_unknown_summary_path = restarted.current_conversation_summary_path()
-        voice_result = restarted.activate_voice_match("baris", 0.94)
+        voice_result = restarted.activate_voice_match("baris", 0.94, margin=0.20)
         voice_active_profile = restarted.active_profile()
         voice_admin_unlocked = restarted.is_admin_unlocked()
 
@@ -233,6 +270,17 @@ def _runtime_checks() -> dict[str, object]:
                 "manual_same_name_switch_requires_clarification": bool(getattr(manual_ekin_switch, "requires_identity_clarification", False)),
                 "manual_same_name_switch_keeps_unknown_active": active_after_manual_ekin_switch == "unknown",
                 "relation_hint_resolves_same_name_identity": bool(getattr(resolved_friend_ekin, "switched", False)) and active_after_resolved_friend_ekin == "ekin_friend",
+                "spelled_ekin_correction_keeps_same_profile": bool(getattr(spelling_akin_intro, "switched", False))
+                and spelling_akin_profile.user_id == spelling_corrected_profile.user_id,
+                "spelled_ekin_displays_corrected_name": bool(getattr(spelling_correction, "switched", False) or getattr(spelling_correction, "status", "") == "noop")
+                and spelling_corrected_profile.name == "Ekin",
+                "spelled_ekin_stores_akin_spoken_alias": "Akin" in set(spelling_corrected_profile.spoken_aliases),
+                "spoken_akin_matches_corrected_ekin": any(
+                    profile.user_id == spelling_corrected_profile.user_id and profile.name == "Ekin"
+                    for profile in spelling_alias_matches
+                ),
+                "spelled_ekin_does_not_create_plain_duplicate": spelling_duplicate_ekin_profile is None,
+                "generic_his_girlfriend_attaches_partner_relation": spelling_relation is None and bool(spelling_partner_relation),
                 "public_baris_privacy_guidance_present": "private memory is not surfaced in this public session" in public_active_user_block.lower(),
                 "admin_mirror_has_person_node": str(mirrored_max.get("label") or "").lower() == "max",
                 "admin_mirror_copies_stable_fact": "coffee" in [item.lower() for item in mirrored_drinks],
@@ -285,6 +333,7 @@ def _command_checks() -> dict[str, bool]:
 
 
 def _harness_checks() -> dict[str, bool]:
+    print("[harness] Starting PiperHarness integration checks (this may take a while)...", flush=True)
     harness = PiperHarness(isolated_data=True, keep_data_copy=False)
     try:
         duplicate_name = "Talin"
@@ -296,13 +345,16 @@ def _harness_checks() -> dict[str, bool]:
             for message in harness.chat_state.get_messages_snapshot()
             if str(message.get("role") or "").lower() == "system"
         ]
+        print("[harness] Sending ambiguous relation turn...", flush=True)
         ambiguous_turn = harness.send_text("i am his friend, do you know baris?")
         profile_after_ambiguous_turn = harness.user_runtime.active_profile()
         profiles_after_ambiguous = {profile.user_id for profile in harness.user_runtime.list_profiles()}
+        print("[harness] Sending intro turn...", flush=True)
         intro_turn = harness.send_text("I'm Max")
         active_profile = harness.user_runtime.active_profile()
         intro_memory_path = str(harness.chat_state.memory_path)
         max_memory_path = str(harness.user_runtime.current_memory_path())
+        print("[harness] Sending relation turn...", flush=True)
         relation_turn = harness.send_text("i am his friend, do you know baris?")
         profile_after_relation_turn = harness.user_runtime.active_profile()
         switch_messages = [
@@ -321,29 +373,37 @@ def _harness_checks() -> dict[str, bool]:
         harness.user_runtime.set_active_style_filename("secretary.style")
         harness.user_runtime.set_admin_password("rosebud")
         harness._handle_command("/user Max")
+        print("[harness] Sending password prompt turn...", flush=True)
         prompt_turn = harness.send_text("I'm Baris")
+        print("[harness] Sending wrong password turn...", flush=True)
         wrong_turn = harness.send_text("wrong")
+        print("[harness] Sending correct password turn...", flush=True)
         correct_turn = harness.send_text("rosebud")
         active_after_correct_password = harness.user_runtime.active_profile().user_id
         style_after_correct_password = harness.style_mgr.active_filename
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
         harness.chat_state.begin_fresh_session(wipe_persistent=False)
+        print("[harness] Sending bare prompt turn...", flush=True)
         bare_prompt_turn = harness.send_text("Baris")
         harness.send_text("/cancel")
+        print("[harness] Sending corrective prompt turn...", flush=True)
         corrective_prompt_turn = harness.send_text("no i mean its me baris")
         harness.send_text("/cancel")
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
         harness.chat_state.begin_fresh_session(wipe_persistent=False)
+        print("[harness] Sending duplicate-name partner turn...", flush=True)
         harness.send_text(f"I'm {duplicate_name}, Baris's partner")
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
         harness.chat_state.begin_fresh_session(wipe_persistent=False)
+        print("[harness] Sending duplicate-name friend turn...", flush=True)
         harness.send_text(f"I'm {duplicate_name}, Baris's friend")
         harness.user_runtime.switch_active_user("unknown")
         harness.chat_state.bind_memory_path(harness.user_runtime.current_memory_path())
         harness.chat_state.begin_fresh_session(wipe_persistent=False)
+        print("[harness] Sending ambiguous duplicate-name turn...", flush=True)
         duplicate_name_turn = harness.send_text(f"I'm {duplicate_name}")
         duplicate_name_active_profile = harness.user_runtime.active_profile()
         duplicate_name_command_handled = harness._handle_command(f"/user {duplicate_name}")
@@ -361,6 +421,7 @@ def _harness_checks() -> dict[str, bool]:
             for edge in (admin_graph.get("edges") or [])
             if isinstance(edge, dict)
         )
+        print("[harness] Integration checks complete.", flush=True)
         return {
             "startup_is_unknown": startup_profile.user_id == "unknown",
             "unknown_hidden_from_visible_profiles": "unknown" not in profiles_before_ambiguous,
@@ -419,50 +480,60 @@ def _harness_checks() -> dict[str, bool]:
         harness.close()
 
 
-def run_smoke() -> UserRuntimeSmokeReport:
+def run_smoke(include_harness: bool = False) -> UserRuntimeSmokeReport:
     runtime = _runtime_checks()
     command_checks = _command_checks()
     identity_checks = runtime["identity_checks"]
     auth_checks = runtime["auth_checks"]
-    harness_checks = _harness_checks()
+
+    if include_harness:
+        harness_checks = _harness_checks()
+    else:
+        harness_checks = {}
 
     startup_profile = runtime["startup_profile"]
     admin_profile = runtime["admin_profile"]
     unknown_profile = runtime["unknown_profile"]
     standard_profile = runtime["standard_profile"]
     users_payload = runtime["users_payload"]
-    success = all(
-        [
-            str(startup_profile.user_id) == "unknown",
-            str(admin_profile.user_id) == "admin_baris",
-            str(getattr(unknown_profile, "user_id", "")) == "unknown",
-            bool(getattr(admin_profile, "is_admin", False)),
-            bool(runtime["switch_created"]),
-            str(standard_profile.user_id) == "max",
-            users_payload.get("active_user_id") == "unknown",
-            "admin_baris" in (users_payload.get("users") or {}),
-            "unknown" not in (users_payload.get("users") or {}),
-            runtime["unknown_memory_path"].endswith("runtime/unknown/state/memory.jsonl"),
-            runtime["admin_memory_path"].endswith("state/memory.jsonl"),
-            runtime["standard_memory_path"].endswith("users/max/state/memory.jsonl"),
-            runtime["unknown_summary_path"].endswith("runtime/unknown/conversation_summary.json"),
-            runtime["admin_summary_path"].endswith("conversation_summary.json"),
-            runtime["standard_summary_path"].endswith("users/max/conversation_summary.json"),
-            runtime["admin_document_dir"] != runtime["standard_document_dir"],
-            runtime["admin_document_dir"].endswith("/data"),
-            runtime["standard_document_dir"].endswith("/data/users/max"),
-            runtime["admin_brain_dir"] != runtime["standard_brain_dir"],
-            runtime["admin_tasks"] == ["admin_task"],
-            runtime["standard_tasks"] == ["max_task"],
-            runtime["standard_root_label"] == "Max",
-            runtime["admin_style"] == "secretary.style",
-            runtime["standard_style"] == "grey.style",
-            all(command_checks.values()),
-            all(identity_checks.values()),
-            all(auth_checks.values()),
-            all(harness_checks.values()),
-        ]
-    )
+
+    def _path_endswith(path: str, suffix: str) -> bool:
+        return Path(path).as_posix().endswith(suffix)
+
+    base_success_checks = [
+        str(startup_profile.user_id) == "unknown",
+        str(admin_profile.user_id) == "admin_baris",
+        str(getattr(unknown_profile, "user_id", "")) == "unknown",
+        bool(getattr(admin_profile, "is_admin", False)),
+        bool(runtime["switch_created"]),
+        str(standard_profile.user_id) == "max",
+        users_payload.get("active_user_id") == "unknown",
+        "admin_baris" in (users_payload.get("users") or {}),
+        "unknown" not in (users_payload.get("users") or {}),
+        _path_endswith(runtime["unknown_memory_path"], "runtime/unknown/state/memory.jsonl"),
+        _path_endswith(runtime["admin_memory_path"], "state/memory.jsonl"),
+        _path_endswith(runtime["standard_memory_path"], "users/max/state/memory.jsonl"),
+        _path_endswith(runtime["unknown_summary_path"], "runtime/unknown/conversation_summary.json"),
+        _path_endswith(runtime["admin_summary_path"], "conversation_summary.json"),
+        _path_endswith(runtime["standard_summary_path"], "users/max/conversation_summary.json"),
+        runtime["admin_document_dir"] != runtime["standard_document_dir"],
+        _path_endswith(runtime["admin_document_dir"], "/data"),
+        _path_endswith(runtime["standard_document_dir"], "/data/users/max"),
+        runtime["admin_brain_dir"] != runtime["standard_brain_dir"],
+        runtime["admin_tasks"] == ["admin_task"],
+        runtime["standard_tasks"] == ["max_task"],
+        runtime["standard_root_label"] == "Max",
+        runtime["admin_style"] == "secretary.style",
+        runtime["standard_style"] == "grey.style",
+        all(command_checks.values()),
+        all(identity_checks.values()),
+        all(auth_checks.values()),
+    ]
+
+    if include_harness:
+        base_success_checks.append(all(harness_checks.values()))
+
+    success = all(base_success_checks)
 
     return UserRuntimeSmokeReport(
         success=bool(success),
@@ -494,13 +565,18 @@ def run_smoke() -> UserRuntimeSmokeReport:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Verify admin and standard-user silo wiring for multi-user Piper.")
     parser.add_argument("--json", action="store_true", dest="as_json", help="Print the final report as JSON.")
+    parser.add_argument(
+        "--include-harness",
+        action="store_true",
+        help="Also run full PiperHarness LLM integration checks (slower, may hang if server is unavailable).",
+    )
     return parser
 
 
 def main() -> int:
     _configure_stdio()
     args = build_parser().parse_args()
-    report = run_smoke()
+    report = run_smoke(include_harness=args.include_harness)
     if args.as_json:
         print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
     else:

@@ -143,6 +143,11 @@ class BootManager:
 
     def _wait_for_server(self):
         self.log("Starting LLM Server...")
+        # Kill any managed orphans from prior sessions BEFORE trusting an
+        # existing /health response.  A zombie server may still answer 200
+        # while being unable to serve real requests.
+        self._kill_orphans()
+
         try:
             req = urllib.request.Request(f"{CFG.LLAMA_SERVER_URL}/health", method='GET')
             with urllib.request.urlopen(req, timeout=1) as resp:
@@ -152,8 +157,6 @@ class BootManager:
                     return True
         except Exception:
             pass
-
-        self._kill_orphans()
 
         if not hasattr(CFG, 'LLAMA_SERVER_EXE') or not CFG.LLAMA_SERVER_EXE.exists():
             self.log(f"FATAL: Server binary not found at {CFG.LLAMA_SERVER_EXE}")
@@ -329,13 +332,43 @@ class BootManager:
         killed = False
         if self.process and self.process.poll() is None:
             self.log("[System] Terminating LLM Server...")
+            pid = self.process.pid
             try:
+                # Graceful termination first
                 self.process.terminate()
-                self.process.wait(timeout=5)
-            except Exception:
-                try: self.process.kill()
+                try:
+                    self.process.wait(timeout=3)
                 except Exception:
                     pass
+
+                # If still alive, force-kill the whole tree
+                if self.process.poll() is None:
+                    if psutil is not None:
+                        try:
+                            parent = psutil.Process(pid)
+                            for child in parent.children(recursive=True):
+                                try:
+                                    child.kill()
+                                except Exception:
+                                    pass
+                            parent.kill()
+                        except Exception:
+                            try:
+                                self.process.kill()
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            self.process.kill()
+                        except Exception:
+                            pass
+
+                    try:
+                        self.process.wait(timeout=3)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             finally:
                 self._close_server_log_handle()
             killed = True
