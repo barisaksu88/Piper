@@ -408,7 +408,7 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             continue
 
         if kind == "status":
-            from ui.controller_status import clean_ui_text, STAGE_STEP_RE, refresh_top_bar
+            from ui.controller_status import clean_ui_text, STAGE_STEP_RE
             clean = clean_ui_text(str(payload))
             if clean:
                 stage_match = STAGE_STEP_RE.search(clean)

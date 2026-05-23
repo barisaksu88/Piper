@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from web_ui.bridge.message_schema import (
-    ActionFrame,
-    ErrorFrame,
     EventFrame,
     get_frontend_event_name,
     is_known_action_name,
