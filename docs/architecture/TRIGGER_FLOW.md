@@ -626,6 +626,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change how persona narrates an outcome | `build_persona_runtime_pack()` in `core/prompt_context.py` + `core/engines/context_pack.py` |
 | Add a new engine | `core/engines/` + `core/engines/__init__.py` + update `AGENTS.md` |
 | Decide whether a module is an engine or a utility | `docs/architecture/ENGINE_UTILITY_CLASSIFICATION.md` |
+| Change search workflow behavior | `docs/architecture/SEARCH_WORKFLOW_EXTRACTION_PLAN.md` → then `core/engines/search_workflow.py` (future) |
 | Change verification logic | `VerificationEngine` in `core/engines/verification.py` |
 | Change file operation behavior | `FileWorkEngine` in `core/engines/file_work.py` |
 | Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
