@@ -1,6 +1,9 @@
 # Search Workflow Helper Extraction Plan
 
-**Status:** Completed on mainline (`audit/search-workflow-engine-mainline`). Stage 06 (`audit/search-context-builders`) adopted context builders in `phase_search` and `phase_reporter`.
+**Status:** Merged to `main`.  
+- Helper extraction: `audit/search-workflow-engine-mainline` → merged.  
+- Context builder adoption: `audit/search-context-builders` → merged.  
+- Search smoke suite is green (including `search_tool_fallback_smoke_test.py` log assertion fix).
 **Scope:** Extract pure helpers from `core/orchestrator_phases.py` into `core/engines/search_workflow.py`
 
 ---
@@ -79,6 +82,20 @@ Run with:
 ```bash
 python -m pytest tests/test_search_contracts.py tests/test_search_workflow_engine.py -v
 ```
+
+## Validation / Current State
+
+Search smoke suite (run sequentially to avoid llama-server lifecycle overlap):
+
+```bash
+python scripts/search_flow_smoke_test.py --json
+python scripts/search_prompt_isolation_smoke_test.py --json
+python scripts/search_web_pump_smoke_test.py
+python scripts/searxng_service_lifecycle_smoke_test.py --json
+python scripts/search_tool_fallback_smoke_test.py --json
+```
+
+All green as of the fallback smoke log assertion fix (`fix/search-tool-fallback-smoke-log`).
 
 ## Classification
 
