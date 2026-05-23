@@ -625,6 +625,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change what context persona sees | `ContextPackEngine` / `PromptContextService` |
 | Change how persona narrates an outcome | `build_persona_runtime_pack()` in `core/prompt_context.py` + `core/engines/context_pack.py` |
 | Add a new engine | `core/engines/` + `core/engines/__init__.py` + update `AGENTS.md` |
+| Decide whether a module is an engine or a utility | `docs/architecture/ENGINE_UTILITY_CLASSIFICATION.md` |
 | Change verification logic | `VerificationEngine` in `core/engines/verification.py` |
 | Change file operation behavior | `FileWorkEngine` in `core/engines/file_work.py` |
 | Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
@@ -1349,6 +1350,8 @@ Appends structured trace lines to `data/debug/langgraph_trace.jsonl` with stage 
 
 ## Appendix: Engine vs. Utility
 
+> **See also:** `docs/architecture/ENGINE_UTILITY_CLASSIFICATION.md` — authoritative live-code audit of every file in `core/engines/`, including hybrid modules and direct-call utilities.
+
 ### What Is an Engine
 
 An **engine** self-registers behavior via the hook or interceptor registry (`@register_hook`, `@register_tail_block`, `@register_route_interceptor`) so that orchestrator/executor/prompt layers invoke it indirectly through the registry, not by direct import and explicit call. Adding or removing an engine does not require editing `orchestrator_phases.py`, `route_normalizer.py`, or `prompt_context.py`.
@@ -1359,40 +1362,40 @@ A **utility** is imported and called directly by the orchestrator, executor, or 
 
 **Hybrid components:** A component may act as both an engine and a utility. In such cases, only the registry-driven behavior is considered "engine behavior"; direct calls remain utility behavior.
 
-### Components Using the Registry (Live)
+### Hybrid Modules (Registry + Direct Call)
 
-These files register hooks, tail blocks, or route interceptors at module load time:
+These files register hooks, tail blocks, or route interceptors **and** are directly imported and called by orchestrator/executor/prompt/UI layers. There are **no pure registry-exclusive engines** under `core/engines/` today.
 
-| Component | Registration Type | File |
-|-----------|----------------|------|
-| ChangeJournal | `@register_hook("on_task_verified")` | `core/engines/change_journal.py` |
-| ConversationCompressor | `@register_hook` | `core/engines/conversation_compressor.py` |
-| ContextPackEngine | `@register_tail_block` | `core/engines/context_pack.py` |
-| ProactiveMonitor | `@register_hook`, `@register_tail_block`, `@register_route_interceptor` | `core/engines/proactive_monitor.py` |
-| StatsCollector | `@register_hook("on_pre_route")` | `core/engines/stats_collector.py` |
-| File target confirmation | `@register_hook` | `core/engines/file_target_confirmation.py` |
-| Turn explanation | `@register_hook` | `core/engines/turn_explanation.py` |
-| Prompt context hooks | `@register_hook` | `core/prompt_context.py` |
+| Component | Registration Type | Direct-Call Ownership | File |
+|-----------|-------------------|----------------------|------|
+| ChangeJournal | `@register_hook("on_task_verified")` | `orchestrator.py` owns instance; `executor.py` calls snapshot helpers | `core/engines/change_journal.py` |
+| ConversationCompressor | `@register_hook("on_turn_end")` | `orchestrator.py` owns instance; calls `.load_summary()` / `.save_summary()` | `core/engines/conversation_compressor.py` |
+| ContextPackEngine | `@register_tail_block`, `@register_hook("on_turn_end")` | `prompt_context.py` directly constructs and calls pack builders | `core/engines/context_pack.py` |
+| ProactiveMonitor | `@register_route_interceptor`, `@register_tail_block`, `@register_hook("on_turn_end")` | `ui/controller.py` directly instantiates `ProactiveMonitor` and owns `.start()` / `.stop()` lifecycle | `core/engines/proactive_monitor.py` |
+| StatsCollector | `@register_hook("on_pre_route")` | `orchestrator.py` and `ui/controller.py` each own a direct instance | `core/engines/stats_collector.py` |
+| File target confirmation | `@register_hook` | `orchestrator_phases.py` directly imports confirmation helpers | `core/file_target_confirmation.py` |
+| Turn explanation | `@register_hook` | `orchestrator_phases.py` directly imports explanation helpers | `core/turn_explanation.py` |
+| Prompt context hooks | `@register_hook` | `prompt_context.py` directly fires its own registered hooks | `core/prompt_context.py` |
 
-**Note:** Some of these components also expose direct-call functionality; classification is based on how behavior is integrated, not file location.
+**Note:** `ProactiveMonitor` is **not** a pure engine. Its reminder route/persona behavior is registry-driven, but the UI directly instantiates `ProactiveMonitor` for background lifecycle ownership (`can_dispatch`, `is_inflight`, `dispatch_callback`). Classification is based on behavior, not directory name.
 
 ### Directly-Called Utilities (Live)
 
-These are imported and called explicitly by orchestrator/executor/prompt layers:
+These are imported and called explicitly by orchestrator/executor/prompt layers. They contain **no** registry registration.
 
 | Utility | Called From | File |
 |---------|-------------|------|
-| SummaryEngine | `orchestrator_phases.py` | `core/engines/summary.py` |
-| VerificationEngine | `orchestrator_phases.py` | `core/engines/verification.py` |
-| FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/engines/file_work.py` |
+| SummaryEngine | `orchestrator_phases.py`, `context_pack.py` | `core/engines/summary.py` |
+| VerificationEngine | `executor.py`, `orchestrator_phases.py` | `core/engines/verification.py` |
+| FileWorkEngine | `executor.py`, `file_stage_policy.py`, `route_normalizer.py` | `core/engines/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
-| RouteClarifier | `route_normalizer.py` | `core/engines/route_clarity.py` |
-| StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
+| RouteClarifier | `orchestrator_phases.py` | `core/engines/route_clarity.py` |
+| StateMutationEngine | `orchestrator_phases.py`, `route_normalizer.py` | `core/engines/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
-| ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
+| ComputerUseVerifier | `executor.py`, `verification.py` | `core/engines/computer_use_verifier.py` |
 | RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/engines/rollback_engine.py` |
 
-**Note:** Some of these live in `core/engines/` for historical reasons but function as utilities. Cleanup target: Phase 8+.
+**Note:** These live in `core/engines/` for historical reasons but function as direct-call utilities. Cleanup target: Phase 8+; see `ENGINE_UTILITY_CLASSIFICATION.md` for relocation rules and compatibility-shim policy.
 
 ### Future Features: Use the Registry
 
