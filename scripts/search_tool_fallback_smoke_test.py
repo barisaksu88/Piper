@@ -231,7 +231,7 @@ def main() -> int:
         and "Source: https://example.test/python-release" in relevant_deep_dive_result
         and "Source: https://example.test/python-whats-new" in relevant_deep_dive_result
         and "SOURCE COVERAGE: 2 readable source(s)" in relevant_deep_dive_result
-        and any("Skipped low-relevance page content: example.test/low-quality-infoq" in entry for entry in logs)
+        and any("Skipped (low relevance): example.test/low-quality-infoq" in entry for entry in logs)
         and any("Added 1 relevant result(s) from text: latest Python 3.13 release" in entry for entry in logs)
         and "Search Error:" not in rate_limit_fallback_result
         and "Source: https://www.python.org/downloads/release/python-31313/" in rate_limit_fallback_result
