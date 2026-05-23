@@ -1,7 +1,7 @@
 # Search Workflow Extraction Plan
 
-> **Status:** Stage 02 — documentation + tests only. No runtime behavior changed.
-> **Branch:** `audit/stage-02-search-workflow-inventory`
+> **Status:** Stage 03 — helper extraction complete. Pure helpers moved to `core/engines/search_workflow.py`. No runtime behavior changed.
+> **Branch:** `audit/stage-03-search-workflow-helper-extraction`
 > **Owner:** core search lifecycle
 
 This document is the pre-extraction blueprint for extracting `SearchWorkflowEngine` from `core/orchestrator_phases.py`. It records live-code truth as of the inventory date and prescribes safe boundaries for future extraction stages.
@@ -178,10 +178,12 @@ These behaviors are **cross-cutting concerns** that must not be hidden inside a 
 │    - build_background_search_content(...) → str                        │
 │    - normalize_search_error(value) → str                               │
 │                                                                         │
-│  State machine (holds in-flight / pending / completed state):          │
+│  State machine (future — NOT in Stage 03):                             │
 │    - retain_in_flight(query) / release_in_flight()                     │
 │    - can_accept_new_search() → bool                                    │
 │    - current_in_flight_query() → str | None                            │
+│    **In-flight state remains orchestrator/controller-owned until a      │
+│    dedicated migration stage decides otherwise.**                      │
 │                                                                         │
 │  Reporter orchestration (called by phase_reporter):                    │
 │    - prepare_reporter_turn(orc) → ReporterTurnContext                  │
@@ -197,7 +199,7 @@ These behaviors are **cross-cutting concerns** that must not be hidden inside a 
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note:** The engine is a **hybrid** (per Stage 01 doctrine). It will expose direct-call helpers for the orchestrator to use, and in a future stage may register tail blocks and a pre-route hook to make the workflow more self-contained.
+**Note:** The engine is currently a **direct-call utility** in Stage 03. It exposes pure helpers for `orchestrator_phases.py` to call through compatibility wrappers. Registry hooks (tail blocks, pre-route detection) are a future stage concern. In-flight state is explicitly **not** moved into the engine in this stage.
 
 ---
 

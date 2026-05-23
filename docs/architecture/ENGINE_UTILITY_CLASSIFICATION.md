@@ -37,7 +37,8 @@ Classification is based on **runtime integration behavior**, not directory name 
 | `computer_use_engine.py` | **Utility** | None | `core/executor.py` and `tools/` directly instantiate and call `ComputerUseEngine`. | Browser automation engine. No registry integration. |
 | `computer_use_verifier.py` | **Utility** | None | `core/executor.py` and `core/engines/verification.py` directly call `computer_use_verifier` functions. | Browser stage verification helpers. No registry integration. |
 | `rollback_engine.py` | **Utility** | None | `core/executor.py` and `core/orchestrator_phases.py` directly call `record_manifest()` and `invert_manifest()`. | Bulk mutation rollback manifests. No registry integration. |
-| `__init__.py` | Package surface | N/A | Re-exports `ConversationCompressor`, `ContextPackEngine`, `FileWorkEngine`, `FollowupResolutionEngine`, `RouteClarifier`, `StateMutationEngine`, `SummaryEngine`, `VerificationEngine`. | Does not contain behavior. |
+| `search_workflow.py` | **Utility** (Stage 03) | None | `core/orchestrator_phases.py` directly imports `SearchWorkflowEngine` and calls pure helper methods through compatibility wrappers. | Search lifecycle helpers: failure summaries, first-pass rules, preview/report history builders. No registry integration yet; may become hybrid if tail blocks / route hooks are added later. |
+| `__init__.py` | Package surface | N/A | Re-exports `ConversationCompressor`, `ContextPackEngine`, `FileWorkEngine`, `FollowupResolutionEngine`, `RouteClarifier`, `StateMutationEngine`, `SummaryEngine`, `VerificationEngine`, `SearchWorkflowEngine`. | Does not contain behavior. |
 
 ---
 
