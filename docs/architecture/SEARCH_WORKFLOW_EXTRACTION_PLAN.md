@@ -1,6 +1,6 @@
 # Search Workflow Helper Extraction Plan
 
-**Status:** Completed on mainline (`audit/search-workflow-engine-mainline`)
+**Status:** Completed on mainline (`audit/search-workflow-engine-mainline`). Stage 06 (`audit/search-context-builders`) adopted context builders in `phase_search` and `phase_reporter`.
 **Scope:** Extract pure helpers from `core/orchestrator_phases.py` into `core/engines/search_workflow.py`
 
 ---
@@ -31,6 +31,16 @@ The extraction preserves all current mainline behavior that evolved since the or
 3. **Summary query regex extraction** in `build_search_report_history` via `_SEARCH_SUMMARY_QUERY_RE`
 4. **Search trace logging** remains in `phase_search` (not extracted)
 5. **`orc.latest_search_query = query`** remains in `phase_reporter` (not extracted)
+
+## Stage 06: Context Builder Adoption
+
+`phase_search` and `phase_reporter` now call the context builders directly instead of invoking individual helpers inline:
+
+- `phase_search` uses `prepare_preview_context(user_msg=orc.user_msg, query=query)` and reads `preview_context.history`, `first_pass_rule`, `fallback_text`, and `recency_sensitive`.
+- `phase_reporter` uses `prepare_reporter_context(recent_history)` and reads `raw_content`, `instruction_content`, `query`, `data`, `failed`, and `normalized_error`.
+
+Runtime ownership remains in the orchestrator:
+- LLM streaming, threading, stats, UI events, cancel tokens, `search_in_flight`, `perform_search`, `_search_trace`, chat mutation, and `orc.latest_search_query` assignment stay in `phase_search` / `phase_reporter`.
 
 ## Compatibility Wrappers
 
