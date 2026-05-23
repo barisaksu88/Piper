@@ -82,25 +82,6 @@ _SCRATCHPAD_ERROR_PREFIXES = (
     "execution error:",
 )
 _SEARCH_RECENCY_HINT_RE = re.compile(r"(?i)\b(latest|current|recent|news|headline|headlines|today|this week|this month)\b")
-_SEARCH_PREVIEW_SOURCE_CHOICE_WORDS = {
-    "actually",
-    "do",
-    "internet",
-    "instead",
-    "it",
-    "online",
-    "please",
-    "pls",
-    "search",
-    "that",
-    "the",
-    "web",
-    "yeah",
-    "yep",
-    "yes",
-}
-_SEARCH_PREVIEW_SOURCE_WORDS = {"internet", "online", "web"}
-_SEARCH_SUMMARY_QUERY_RE = re.compile(r"(?is)^\[SEARCH SUMMARY FOR ['\"](?P<query>.+?)['\"]\]")
 _SEARCH_WORKFLOW_ENGINE = SearchWorkflowEngine()
 _INGESTED_DOC_META_ACTION_RE = re.compile(
     r"(?i)^\s*/ingest\b|\b(ingest|upload|import|attach|add)\b.*\b(document|pdf|docx|file)\b"

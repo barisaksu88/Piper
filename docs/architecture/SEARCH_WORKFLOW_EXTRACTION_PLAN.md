@@ -62,7 +62,8 @@ The following runtime concerns were intentionally **not** extracted:
 ## Tests
 
 - `tests/test_search_contracts.py` — wire-format contract tests
-- `tests/test_search_workflow_engine.py` — 108 pure-helper tests
+- `tests/test_search_workflow_engine.py` — 66 pure-helper tests
+- Total across both files: 108 tests
 
 Run with:
 ```bash
