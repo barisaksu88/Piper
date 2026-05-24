@@ -3,8 +3,8 @@
 **Status:** Audit complete — recommendation: add tests first  
 **Branch:** `audit/followup-resolution-service-readiness`  
 **Date:** 2026-05-24  
-**Source:** `core/engines/followup_resolution.py`  
-**Possible target:** `core/services/followup_resolution.py`
+**Source:** `core/services/followup_resolution.py` (relocated from `core/engines/followup_resolution.py`)  
+**Status:** Relocated ✅
 
 ---
 

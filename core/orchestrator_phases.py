@@ -15,7 +15,7 @@ from core.document_focus import build_document_focus_messages, extract_document_
 from core.debug_tools import log_prompt_debug
 from core.feature_hooks import fire_hooks
 from core.engines.context_pack import _hook_upsert_runtime_context
-from core.engines.followup_resolution import FollowupResolutionEngine
+from core.services.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.services.summary import SummaryEngine
 from core.services.search_workflow import SearchWorkflowEngine

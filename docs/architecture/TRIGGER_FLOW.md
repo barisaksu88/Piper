@@ -632,7 +632,7 @@ ChatPipeline → TagScrubber → TTS (lazy start) → UI render
 ## 8. Follow-up Resolution (FollowupResolutionEngine)
 
 **Triggered by:** `phase_route`, after the Router LLM call, as step 2 of the post-LLM normalization chain (`_resolve_followup_route_with_llm`)
-**File:** `core/engines/followup_resolution.py`
+**File:** `core/services/followup_resolution.py`
 
 **Important:** This engine runs at **route level**, not inside the executor loop. It refines the route decision before dispatch.
 
@@ -714,7 +714,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change verification logic | `VerificationEngine` in `core/services/verification.py` |
 | Change file operation behavior | `FileWorkEngine` in `core/services/file_work.py` |
 | Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
-| Change follow-up resolution patterns | `FollowupResolutionEngine` in `core/engines/followup_resolution.py` |
+| Change follow-up resolution patterns | `FollowupResolutionEngine` in `core/services/followup_resolution.py` |
 | Change memory read/write policy | `memory/stores.py` + `memory/transient_state.py` |
 | Change prompt structure / rendering | `core/prompt_builder.py` + `data/prompts/` |
 | Change streaming behavior | `core/stream_filter.py` + `core/pipeline.py` |
@@ -805,7 +805,7 @@ First-pass persona/search recall now pulls 9 memory candidates and filters low-r
 
 ### 13.5 Typed Schema Validation at LLM Output Boundaries ✓ IMPLEMENTED
 
-**Status:** Live in `core/route_boundary.py`, `core/orchestrator_phases.py`, `core/engines/followup_resolution.py`, and `core/services/route_clarity.py`.
+**Status:** Live in `core/route_boundary.py`, `core/orchestrator_phases.py`, `core/services/followup_resolution.py`, and `core/services/route_clarity.py`.
 
 Router, follow-up resolver, and route clarifier outputs now pass through explicit boundary validators before the phase code acts on them. Validation failures raise structured errors with one declared fallback per boundary:
 
@@ -819,7 +819,7 @@ Router, follow-up resolver, and route clarifier outputs now pass through explici
 
 The fallback rule now lives in the validator itself rather than in ad hoc parse glue inside the calling phase.
 
-**Files:** `core/route_boundary.py`; `core/orchestrator_phases.py`; `core/engines/followup_resolution.py`; `core/services/route_clarity.py`
+**Files:** `core/route_boundary.py`; `core/orchestrator_phases.py`; `core/services/followup_resolution.py`; `core/services/route_clarity.py`
 
 ---
 
@@ -1471,7 +1471,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | SummaryEngine | `orchestrator_phases.py` | `core/services/summary.py` |
 | VerificationEngine | `orchestrator_phases.py` | `core/services/verification.py` |
 | FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/services/file_work.py` |
-| FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
+| FollowupResolutionEngine | `orchestrator_phases.py` | `core/services/followup_resolution.py` |
 | RouteClarifier | `route_normalizer.py` | `core/services/route_clarity.py` |
 | StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |

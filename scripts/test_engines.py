@@ -1407,7 +1407,7 @@ class TestFollowupResolutionEngine:
 
     @pytest.fixture
     def followup_engine(self):
-        from core.engines.followup_resolution import FollowupResolutionEngine
+        from core.services.followup_resolution import FollowupResolutionEngine
         return FollowupResolutionEngine()
 
     @pytest.fixture
