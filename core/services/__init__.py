@@ -37,11 +37,13 @@ from core.services.context_pack_renderer import (
     render_context_arbitration_block,
 )
 from core.services.context_pack_service import ContextPackService
+from core.services.change_journal import ChangeJournal
 
 __all__ = [
     "build_verified_payload",
     "collect_runtime_context_paths",
     "ContextPackRenderer",
+    "ChangeJournal",
     "ContextPackService",
     "ConversationCompressionResult",
     "ConversationCompressor",

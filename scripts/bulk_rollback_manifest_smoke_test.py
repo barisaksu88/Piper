@@ -35,7 +35,7 @@ from core.services.rollback_engine import (
     is_bulk_action,
     record_manifest,
 )
-from core.engines.change_journal import ChangeJournal
+from core.services.change_journal import ChangeJournal
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -13,7 +13,7 @@ import sys
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.engines.change_journal import ChangeJournal
+from core.services.change_journal import ChangeJournal
 from core.routing.route_normalizer import detect_route_interceptor
 from tools.workspace_runtime import WorkspaceToolRuntime
 

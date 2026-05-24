@@ -1,8 +1,8 @@
 # ChangeJournal Split Readiness Audit
 
-**Status:** Audit complete — ready to split  
-**Scope:** `core/engines/change_journal.py`  
-**Branch:** `audit/change-journal-split-readiness`  
+**Status:** Split complete  
+**Scope:** `core/engines/change_journal.py` + `core/services/change_journal.py`  
+**Branch:** `split/change-journal-service`  
 **Date:** 2026-05-24
 
 ---
@@ -52,15 +52,15 @@ The class owns a single JSON file (`self.path`, default `data/change_journal.jso
 
 | Caller | Import / Usage |
 |---|---|
-| `scripts/change_journal_smoke_test.py` | `from core.engines.change_journal import ChangeJournal`; full smoke test |
-| `scripts/bulk_rollback_manifest_smoke_test.py` | `from core.engines.change_journal import ChangeJournal`; tests `record_turn` + `mark_entry_undone` |
+| `scripts/change_journal_smoke_test.py` | `from core.services.change_journal import ChangeJournal`; full smoke test |
+| `scripts/bulk_rollback_manifest_smoke_test.py` | `from core.services.change_journal import ChangeJournal`; tests `record_turn` + `mark_entry_undone` |
 | `scripts/undo_flow_smoke_test.py` | Clears `change_journal.json` before harness run; integration-level undo flow |
 | `scripts/file_target_correction_undo_smoke_test.py` | Clears `change_journal.json` before harness run |
 | `scripts/run_smoke_tests.py` | Filters `stem.startswith("change_journal_")` |
 
 ### No direct `_hook_record_change_journal` callers
 
-Grep confirms `_hook_record_change_journal` is **only** referenced inside `core/engines/change_journal.py` (definition). It is fired indirectly via `fire_hooks("on_task_verified", ...)` in `core/orchestrator_phases.py`.
+Grep confirms `_hook_record_change_journal` is **only** referenced inside `core/engines/change_journal.py` (definition). It is fired indirectly via `fire_hooks("on_task_verified", ...)` in `core/orchestrator_phases.py`. `ChangeJournal` itself is no longer defined in `core/engines/change_journal.py`.
 
 ---
 
@@ -102,7 +102,7 @@ Grep confirms `_hook_record_change_journal` is **only** referenced inside `core/
 |---|---|---|---|---|
 | `_hook_record_change_journal` | `fire_hooks("on_task_verified", orc, ...)` | `orc.last_change_journal_entry`, `orc.undo_notice_pending` | **Yes** | Self-registers via `@register_hook`. Thin wrapper around `ChangeJournal.record_turn()`. |
 
-The hook should remain in `core/engines/change_journal.py` (or a thin `core/engines/change_journal_hooks.py`) because it is lifecycle behavior. After the split, the hook would import `ChangeJournal` from `core.services.change_journal`.
+The hook remains in `core/engines/change_journal.py` because it is lifecycle behavior. The hook does not import `ChangeJournal`; it delegates to `orc.change_journal.record_turn(...)`.
 
 ---
 
@@ -198,7 +198,7 @@ Before moving `ChangeJournal` to `core/services/change_journal.py`, the followin
 
 ### Stage 1 — Add guard tests
 - Create `tests/test_change_journal.py` with the minimum viable guard set above.
-- Keep tests green against current `core/engines/change_journal.py`.
+- Keep tests green against `core/engines/change_journal.py` (now `core/services/change_journal.py` for `ChangeJournal`).
 - **Do not move code yet.**
 
 ### Stage 2 — Move `ChangeJournal` class and helpers to `core/services/change_journal.py`
