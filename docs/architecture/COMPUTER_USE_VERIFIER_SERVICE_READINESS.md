@@ -1,8 +1,7 @@
 # ComputerUseVerifier Service Readiness Audit
 
 **Status:** Relocated ✅  
-**Source:** `core/services/computer_use_verifier.py`  
-**Possible target:** `core/services/computer_use_verifier.py`  
+**Source:** `core/services/computer_use_verifier.py` (relocated from `core/engines/computer_use_verifier.py`)  
 **Date:** 2026-05-23
 
 ---
@@ -12,9 +11,7 @@
 **Bucket:** Direct-Call Utility  
 **No hooks, registries, tail-blocks, interceptors, or lifecycle participation.**
 
-`core/services/computer_use_verifier.py` is a module of standalone pure functions (not a class). It is imported and invoked directly by `core/executor.py` during COMPUTER_USE stage execution. It does not register itself with any engine lifecycle system.
-
-> **Note:** `ENGINE_UTILITY_CLASSIFICATION.md` incorrectly labels this as `ComputerUseVerifier` (implying a class). The module exposes four top-level functions: `new_stage_evidence`, `update_stage_evidence`, `evaluate_stage`, and `build_verified_payload`.
+`core/services/computer_use_verifier.py` is a module of standalone pure functions. It is imported and invoked directly by `core/executor.py` during COMPUTER_USE stage execution. It does not register itself with any engine lifecycle system.
 
 ---
 
@@ -23,9 +20,10 @@
 | Caller | Import line | Usage |
 |--------|-------------|-------|
 | `core/executor.py` | `from core.services.computer_use_verifier import (...)` | `new_stage_evidence` (stage init), `update_stage_evidence` (post-tool accumulation), `evaluate_stage` (verification), `build_verified_payload` (payload assembly) |
+| `tests/test_computer_use_verifier.py` | `from core.services.computer_use_verifier import (...)` | Direct unit tests for all four public functions |
 
 **Total production callers:** 1 file.  
-**Total test/script callers:** 0 files.
+**Total test/script callers:** 1 file.
 
 ---
 
@@ -94,30 +92,21 @@ Specifically:
 
 ### 7.1 Pytest Unit Tests
 
-**None.** No `test_computer_use_verifier.py` exists in `tests/`.
+`tests/test_computer_use_verifier.py` (49 tests) covers all four public functions.
 
 ### 7.2 Smoke Tests
 
-**None.** No script in `scripts/` exercises `computer_use_verifier.py`.
+**None.** No script in `scripts/` directly exercises `computer_use_verifier.py`.
 
 ### 7.3 Indirect Coverage
 
-**None.** The only caller (`core/executor.py`) is tested by executor-level tests, but `computer_use_verifier.py` functions are not directly exercised by any focused test.
+`core/executor.py` integration tests may exercise these functions through COMPUTER_USE stage execution, but the unit test file is the primary coverage.
 
 ---
 
-## 8. Missing Tests / Smokes
+## 8. Test Coverage Summary
 
-The following public functions have **no dedicated test coverage**:
-
-| Function | Risk level | Notes |
-|----------|-----------|-------|
-| `evaluate_stage` | **High** | Safety-critical verification logic with threshold scoring |
-| `build_verified_payload` | Medium | Payload assembly affects persona context |
-| `update_stage_evidence` | Low | Dict accumulation, mostly mechanical |
-| `new_stage_evidence` | Low | Simple dict builder |
-
-**Tests added:** `tests/test_computer_use_verifier.py` (49 tests) covers:
+`tests/test_computer_use_verifier.py` (49 tests) covers:
 - `new_stage_evidence()` — default structure, stage metadata preservation
 - `update_stage_evidence()` — URL/title, actions, extracts, downloads, field values, inventory, history navigation; deduplication; non-BROWSER_OP filtering
 - `evaluate_stage()` download verification — success, missing, hint match above threshold, hint mismatch below threshold, download directory filtering
@@ -156,13 +145,14 @@ The module already imports from `core.services.verification` (a relocated servic
 
 The relocation is mechanical: move file, update 1 import line in `core/executor.py`, update doc references. `compileall` + pytest + smoke tests would catch any import issue.
 
-**Recommended next steps for relocation:**
+**Relocation completed on branch:** `move/computer-use-verifier-service`
 
-1. Create `move/computer-use-verifier-service` branch.
-2. Move `core/services/computer_use_verifier.py` → `core/services/computer_use_verifier.py`.
-3. Update import in `core/executor.py`.
-4. Update doc references.
-5. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + `computer_use_engine_smoke_test.py` + `computer_use_browser_followup_harness_smoke_test.py`.
+- File moved from `core/engines/computer_use_verifier.py` → `core/services/computer_use_verifier.py`
+- Import updated in `core/executor.py`
+- Test import updated in `tests/test_computer_use_verifier.py`
+- `core/services/__init__.py` now exports `new_stage_evidence`, `update_stage_evidence`, `evaluate_stage`, `build_verified_payload`
+- `core/engines/__init__.py` does not export these functions
+- All stale doc references to the old path were updated
 
 ---
 
