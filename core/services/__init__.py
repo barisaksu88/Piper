@@ -36,12 +36,14 @@ from core.services.context_pack_renderer import (
     resolve_persona_turn_type,
     render_context_arbitration_block,
 )
+from core.services.context_pack_service import ContextPackService
 
 __all__ = [
     "build_verified_payload",
-    "ContextPackRenderer",
-    "ConversationCompressionResult",
     "collect_runtime_context_paths",
+    "ContextPackRenderer",
+    "ContextPackService",
+    "ConversationCompressionResult",
     "ConversationCompressor",
     "evaluate_stage",
     "FileWorkEngine",
@@ -49,8 +51,8 @@ __all__ = [
     "invert_manifest",
     "is_bulk_action",
     "new_stage_evidence",
-    "record_manifest",
     "normalize_runtime_context_path",
+    "record_manifest",
     "render_context_arbitration_block",
     "resolve_persona_turn_type",
     "RouteClarifier",

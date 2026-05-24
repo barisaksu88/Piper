@@ -2146,10 +2146,10 @@ class TestContextPackEngine:
         mock_brain,
         mock_document_memory,
     ):
-        """Create a context pack engine."""
-        from core.engines.context_pack import ContextPackEngine
+        """Create a context pack service."""
+        from core.services.context_pack_service import ContextPackService
 
-        return ContextPackEngine(
+        return ContextPackService(
             instruction_loader=mock_instruction_loader,
             environment_service=mock_environment_service,
             operational_state_service=mock_operational_state_service,
@@ -2157,6 +2157,13 @@ class TestContextPackEngine:
             brain=mock_brain,
             document_memory=mock_document_memory,
         )
+
+    @pytest.fixture
+    def directive_engine(self):
+        """Create a context pack directive engine."""
+        from core.engines.context_pack import ContextPackDirectiveEngine
+
+        return ContextPackDirectiveEngine()
 
     def test_build_persona_pack_includes_instructions(self, context_pack_engine):
         """Should include instructions in pack."""
@@ -2286,18 +2293,18 @@ class TestContextPackEngine:
         assert result.verification_recommendation == "RETRY"
         assert result.verification_checker_path == "STATE_CHECK"
 
-    def test_build_persona_directive_pack(self, context_pack_engine):
+    def test_build_persona_directive_pack(self, directive_engine):
         """Should build directive pack."""
         from core.contracts import PersonaDirectivePack
 
-        result = context_pack_engine.build_persona_directive_pack()
+        result = directive_engine.build_persona_directive_pack()
 
         assert isinstance(result, PersonaDirectivePack)
         assert isinstance(result.tail_system_blocks, list)
 
-    def test_build_persona_directive_pack_includes_no_mutation_rule(self, context_pack_engine):
+    def test_build_persona_directive_pack_includes_no_mutation_rule(self, directive_engine):
         """Should include no mutation rule for CHAT turns."""
-        result = context_pack_engine.build_persona_directive_pack(
+        result = directive_engine.build_persona_directive_pack(
             route_decision={"decision": "CHAT"},
         )
 
@@ -2312,9 +2319,9 @@ class TestContextPackEngine:
         assert has_arbitration
         assert has_no_mutation
 
-    def test_build_persona_directive_pack_includes_search_rule(self, context_pack_engine):
+    def test_build_persona_directive_pack_includes_search_rule(self, directive_engine):
         """Should include search report rule for search turns."""
-        result = context_pack_engine.build_persona_directive_pack(
+        result = directive_engine.build_persona_directive_pack(
             reporter_just_ran=True,
         )
 
@@ -2329,7 +2336,7 @@ class TestContextPackEngine:
         assert has_arbitration
         assert has_search_rule
 
-    def test_build_persona_directive_pack_includes_partial_verification_rule(self, context_pack_engine):
+    def test_build_persona_directive_pack_includes_partial_verification_rule(self, directive_engine):
         """Should include typed partial verification guidance for persona."""
         from core.contracts import PersonaRuntimePack
 
@@ -2341,7 +2348,7 @@ class TestContextPackEngine:
             verification_recommendation="RETRY",
             verification_checker_path="STATE_CHECK",
         )
-        result = context_pack_engine.build_persona_directive_pack(
+        result = directive_engine.build_persona_directive_pack(
             persona_runtime=runtime,
         )
 
@@ -2351,7 +2358,7 @@ class TestContextPackEngine:
         assert "Recommendation: RETRY" in verification_block
         assert "Evidence gap: Current state could not confirm the final artifact." in partial_block
 
-    def test_build_persona_directive_pack_includes_failed_verification_rule(self, context_pack_engine):
+    def test_build_persona_directive_pack_includes_failed_verification_rule(self, directive_engine):
         """Should include typed failed verification guidance for persona."""
         from core.contracts import PersonaRuntimePack
 
@@ -2362,7 +2369,7 @@ class TestContextPackEngine:
             verification_recommendation="STOP_FAILED",
             verification_checker_path="MUTATION",
         )
-        result = context_pack_engine.build_persona_directive_pack(
+        result = directive_engine.build_persona_directive_pack(
             persona_runtime=runtime,
         )
 
@@ -2382,13 +2389,13 @@ class TestEngineIntegration:
     """Tests for engine integration and delegation."""
 
     def test_context_pack_delegates_to_summary_engine(self):
-        """ContextPackEngine should delegate to SummaryEngine."""
-        from core.engines.context_pack import ContextPackEngine
+        """ContextPackService should delegate to SummaryEngine."""
+        from core.services.context_pack_service import ContextPackService
 
-        # extract_verified_result lives on SummaryEngine; ContextPackEngine
+        # extract_verified_result lives on SummaryEngine; ContextPackService
         # delegates to it inside build_persona_runtime_pack.
         import inspect
-        source = inspect.getsource(ContextPackEngine.build_persona_runtime_pack)
+        source = inspect.getsource(ContextPackService.build_persona_runtime_pack)
 
         assert "SummaryEngine.extract_verified_result" in source
 

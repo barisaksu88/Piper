@@ -1,8 +1,8 @@
 # Context Pack Split Readiness Audit
 
-**Status:** Tail-block registry extracted — staged split in progress  
-**Scope:** `core/engines/context_pack.py`  
-**Branch:** `split/context-pack-tail-block-registry`  
+**Status:** ContextPackService extracted — split complete  
+**Scope:** `core/engines/context_pack.py` + `core/services/context_pack_service.py`  
+**Branch:** `split/context-pack-service-core`  
 **Date:** 2026-05-24  
 
 ---
@@ -14,12 +14,12 @@
 | Behavior category | Owner in this file | Verdict |
 |---|---|---|
 | Registry / tail-block behavior | `_TAIL_BLOCK_REGISTRY`, `register_tail_block()`, 11 `@register_tail_block` builders (now in `core/engines/tail_block_registry.py`), `@register_hook("on_turn_end")` | Must stay in `core/engines/` |
-| Direct-call service behavior | `ContextPackEngine.build_persona_pack()`, `.build_runtime_context_pack()`, `.build_persona_runtime_pack()`, etc. | Could move to `core/services/` **after** registry is separated |
+| Direct-call service behavior | `ContextPackService.build_persona_pack()`, `.build_runtime_context_pack()`, `.build_persona_runtime_pack()`, etc. (now in `core/services/context_pack_service.py`) | **Moved** to `core/services/` |
 | Pure helper/value behavior | `resolve_persona_turn_type()`, `render_context_arbitration_block()`, `_clear_pack_field_value()` | **Extracted** to `core/services/context_pack_renderer.py` |
 | Registry / tail-block surface | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, all `@register_tail_block` builders | **Extracted** to `core/engines/tail_block_registry.py` |
 | Runtime path helpers | `_collect_runtime_context_paths`, `_normalize_runtime_context_path` | **Extracted** to `core/services/context_pack_paths.py` |
 
-The module is **not** a pure lifecycle engine (it exposes a wide direct-call API) and **not** a pure service (it owns global mutable registry state and a lifecycle hook). Because `build_persona_directive_pack()` iterates `_TAIL_BLOCK_REGISTRY` and because `orchestrator_phases.py` imports `_hook_upsert_runtime_context` directly, the engine class and the registry/hook are tightly bound. Moving the entire module would pull registry behavior into `core/services/`, violating the engine/service boundary.
+Historically, `core/engines/context_pack.py` was a **hybrid** module: it exposed a wide direct-call API *and* owned global mutable registry state plus a lifecycle hook. After the staged split, all direct-call service behavior lives in `core/services/context_pack_service.py` (`ContextPackService`). The remaining `core/engines/context_pack.py` is a thin engine module containing only `ContextPackDirectiveEngine` and `_hook_upsert_runtime_context`. It remains under `core/engines/` because directive generation reads the tail-block registry (which lives in `core/engines/tail_block_registry.py`) and the hook is lifecycle behavior.
 
 ---
 
@@ -29,18 +29,18 @@ The module is **not** a pure lifecycle engine (it exposes a wide direct-call API
 
 | File | Import / Usage |
 |---|---|
-| `core/engines/__init__.py` | `from core.engines.context_pack import ContextPackEngine` (re-export) |
-| `core/prompt_context.py` | `from core.engines.context_pack import ContextPackEngine`; wraps every public method in `PromptContextService` |
+| `core/engines/__init__.py` | `from core.engines.context_pack import ContextPackDirectiveEngine` (re-export) |
+| `core/prompt_context.py` | Composes `ContextPackService` (from `core.services.context_pack_service`) and `ContextPackDirectiveEngine` (from `core.engines.context_pack`); wraps every public method in `PromptContextService` |
 | `core/orchestrator_phases.py` | `from core.engines.context_pack import _hook_upsert_runtime_context`; direct call at line 1824; also calls `orc.prompt_context.*` |
-| `core/engines/proactive_monitor.py` | `from core.engines.context_pack import TailBlockContext, register_tail_block`; registers 2 tail blocks |
+| `core/engines/proactive_monitor.py` | `from core.engines.tail_block_registry import TailBlockContext, register_tail_block`; registers 2 proactive tail blocks |
 | `core/services/summary.py` | Comments only (method origin documentation); no runtime import |
 
 ### Test / script callers / imports
 
 | File | Import / Usage |
 |---|---|
-| `tests/test_context_pack_snapshots.py` | `ContextPackEngine`, `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block` |
-| `scripts/test_engines.py` | `ContextPackEngine` (class `TestContextPackEngine`) |
+| `tests/test_context_pack_snapshots.py` | `ContextPackService`, `ContextPackDirectiveEngine`, `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block` |
+| `scripts/test_engines.py` | `ContextPackService` / `ContextPackDirectiveEngine` (class `TestContextPackEngine`) |
 | `scripts/context_pack_engine_smoke_test.py` | Uses `PromptContextService` (integration smoke) |
 | `scripts/search_error_contract_smoke_test.py` | `ContextPackRenderer` |
 | `scripts/run_smoke_tests.py` | Filters `stem.startswith("context_pack_")` |
@@ -78,17 +78,17 @@ def register_tail_block(fn: TailBlockBuilder) -> TailBlockBuilder:
 
 | File | Builder | Condition |
 |---|---|---|
-| `core/engines/context_pack.py` | `_tail_block_no_mutation_rule` | CHAT + no outcome |
-| `core/engines/context_pack.py` | `_tail_block_context_arbitration` | Always |
-| `core/engines/context_pack.py` | `_tail_block_document_qa_rule` | `ingested_document_chat` |
-| `core/engines/context_pack.py` | `_tail_block_search_report_rule` | `reporter_just_ran` |
-| `core/engines/context_pack.py` | `_tail_block_explain_last_turn` | `system_notice.kind == "explain_last_turn"` |
-| `core/engines/context_pack.py` | `_tail_block_active_skill` | Always (empty if no skill) |
-| `core/engines/context_pack.py` | `_tail_block_verification_result` | Always (empty if no verdict) |
-| `core/engines/context_pack.py` | `_tail_block_file_work_report` | `needs_file_work_report_rule` |
-| `core/engines/context_pack.py` | `_tail_block_failed_verification` | `verification_verdict == "FAILED"` |
-| `core/engines/context_pack.py` | `_tail_block_failed_outcome_no_verification` | `outcome_failed` + no typed verdict |
-| `core/engines/context_pack.py` | `_tail_block_workspace_boundary` | `needs_file_work_report_rule` |
+| `core/engines/tail_block_registry.py` | `_tail_block_no_mutation_rule` | CHAT + no outcome |
+| `core/engines/tail_block_registry.py` | `_tail_block_context_arbitration` | Always |
+| `core/engines/tail_block_registry.py` | `_tail_block_document_qa_rule` | `ingested_document_chat` |
+| `core/engines/tail_block_registry.py` | `_tail_block_search_report_rule` | `reporter_just_ran` |
+| `core/engines/tail_block_registry.py` | `_tail_block_explain_last_turn` | `system_notice.kind == "explain_last_turn"` |
+| `core/engines/tail_block_registry.py` | `_tail_block_active_skill` | Always (empty if no skill) |
+| `core/engines/tail_block_registry.py` | `_tail_block_verification_result` | Always (empty if no verdict) |
+| `core/engines/tail_block_registry.py` | `_tail_block_file_work_report` | `needs_file_work_report_rule` |
+| `core/engines/tail_block_registry.py` | `_tail_block_failed_verification` | `verification_verdict == "FAILED"` |
+| `core/engines/tail_block_registry.py` | `_tail_block_failed_outcome_no_verification` | `outcome_failed` + no typed verdict |
+| `core/engines/tail_block_registry.py` | `_tail_block_workspace_boundary` | `needs_file_work_report_rule` |
 | `core/engines/proactive_monitor.py` | `_tail_block_proactive_trigger` | `system_notice.kind == "proactive_trigger"` |
 | `core/engines/proactive_monitor.py` | `_tail_block_reminder_set_result` | `system_notice.kind == "reminder_set_result"` |
 
@@ -113,24 +113,29 @@ def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> Non
 
 ## D. Direct-Call Service Behavior Map
 
-### `ContextPackEngine` methods
+### `ContextPackService` methods (moved to `core/services/context_pack_service.py`)
 
 | Method | Side effects | Dependencies | Safe to move later? |
 |---|---|---|---|
-| `build_persona_pack(...)` | None (read-only) | `instruction_loader`, `environment_service`, `operational_state_service`, `knowledge_mgr`, `brain`, `document_memory`, `vision_session_memory`, `transient_state_mgr`, `user_runtime` | Yes, if registry separated |
-| `apply_document_focus(pack, ...)` | None | Pure dataclass replace | Yes |
-| `clear_memory_for_file_work(pack)` | None | Pure dataclass replace | Yes |
-| `apply_context_arbitration(pack, ...)` | None | `PERSONA_CONTEXT_ARBITRATION_TABLE` | Yes |
-| `to_prompt_context(pack)` | None | Delegates to renderer | Yes |
-| `build_runtime_context_pack(orc, ...)` | None (read-only) | `orc.route_decision`, `orc.scratchpad`, `orc.latest_search_query`, `SummaryEngine` | Yes, if `orc` contract stable |
-| `render_runtime_context_message(pack)` | None | Delegates to renderer | Yes |
-| `build_persona_runtime_pack(scratchpad, ...)` | None (read-only) | `SummaryEngine` (6×), `FileStagePolicy`, `VerificationResult` | Yes |
+| `build_persona_pack(...)` | None (read-only) | `instruction_loader`, `environment_service`, `operational_state_service`, `knowledge_mgr`, `brain`, `document_memory`, `vision_session_memory`, `transient_state_mgr`, `user_runtime` | **Moved** |
+| `apply_document_focus(pack, ...)` | None | Pure dataclass replace | **Moved** |
+| `clear_memory_for_file_work(pack)` | None | Pure dataclass replace | **Moved** |
+| `apply_context_arbitration(pack, ...)` | None | `PERSONA_CONTEXT_ARBITRATION_TABLE` | **Moved** |
+| `to_prompt_context(pack)` | None | Delegates to renderer | **Moved** |
+| `build_runtime_context_pack(orc, ...)` | None (read-only) | `orc.route_decision`, `orc.scratchpad`, `orc.latest_search_query`, `SummaryEngine` | **Moved** |
+| `render_runtime_context_message(pack)` | None | Delegates to renderer | **Moved** |
+| `build_persona_runtime_pack(scratchpad, ...)` | None (read-only) | `SummaryEngine` (6×), `FileStagePolicy`, `VerificationResult` | **Moved** |
+
+### `ContextPackDirectiveEngine` methods (remain in `core/engines/context_pack.py`)
+
+| Method | Side effects | Dependencies | Safe to move later? |
+|---|---|---|---|
 | `build_persona_directive_pack(...)` | None (reads registry) | Iterates `_TAIL_BLOCK_REGISTRY` | **No** — bound to registry |
-| `_build_dependency_failure_direct_answer(...)` | None | Pure regex / text | Yes |
-| `_render_persona_active_skill_block(...)` | None | Pure text | Yes |
-| `_render_verification_result_block(...)` | None | Pure text | Yes |
-| `_collect_runtime_context_paths(orc)` | None | `orc.brain.workspace`, `orc.user_msg`, `orc.context_card`, `orc.scratchpad`, `CFG.DATA_DIR` | Yes |
-| `_normalize_runtime_context_path(...)` | None | `os.name`, `Path` | Yes |
+| `_build_dependency_failure_direct_answer(...)` | None | Pure regex / text | Stays with directive engine |
+| `_render_persona_active_skill_block(...)` | None | Pure text | Moved to `core/engines/tail_block_registry.py` |
+| `_render_verification_result_block(...)` | None | Pure text | Moved to `core/engines/tail_block_registry.py` |
+| `collect_runtime_context_paths(orc)` | None | `orc.brain.workspace`, `orc.user_msg`, `orc.context_card`, `orc.scratchpad`, `CFG.DATA_DIR` | **Moved** to `core/services/context_pack_paths.py` |
+| `normalize_runtime_context_path(...)` | None | `os.name`, `Path` | **Moved** to `core/services/context_pack_paths.py` |
 
 ### `ContextPackRenderer` methods
 
@@ -163,7 +168,7 @@ def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> Non
 ### Mutable state
 
 - `_TAIL_BLOCK_REGISTRY: list[TailBlockBuilder]` — global list mutated at import time by decorators.
-- No instance-level mutable state on `ContextPackEngine` or `ContextPackRenderer`.
+- No instance-level mutable state on `ContextPackService`, `ContextPackDirectiveEngine`, or `ContextPackRenderer`.
 
 ### File I/O
 
@@ -172,7 +177,7 @@ def _hook_upsert_runtime_context(orc, *, reporter_just_ran: bool = False) -> Non
 
 ### Memory / service dependencies
 
-`ContextPackEngine` is injected with:
+`ContextPackService` is injected with:
 - `instruction_loader`, `environment_service`, `operational_state_service`, `knowledge_mgr`, `brain`, `document_memory`, `vision_session_memory`, `transient_state_mgr`, `user_runtime`
 
 These are all read-only in the direct-call paths (no mutations on dependencies).
@@ -219,8 +224,8 @@ These are all read-only in the direct-call paths (no mutations on dependencies).
 
 | Test file | What's covered |
 |---|---|
-| `tests/test_context_pack_snapshots.py` | `ContextPackRenderer.render_runtime_context_message` (empty, task, search reporter, failed search), `ContextPackEngine.build_persona_directive_pack` (tail block presence, ordering, direct answers), `ContextPackEngine.build_persona_pack` (minimal, knowledge, brain hit filtering, document hits, apply_document_focus, clear_memory, context arbitration, to_prompt_context), `resolve_persona_turn_type`, `render_context_arbitration_block` |
-| `scripts/test_engines.py` (`TestContextPackEngine`) | `build_persona_pack` (instructions, style overlay, brain recall, filtering), `apply_document_focus`, `clear_memory_for_file_work`, `build_persona_runtime_pack` (success, failure, pause, typed verification), `build_persona_directive_pack` (no-mutation, search, partial, failed), delegation to `SummaryEngine` |
+| `tests/test_context_pack_snapshots.py` | `ContextPackRenderer.render_runtime_context_message` (empty, task, search reporter, failed search), `ContextPackDirectiveEngine.build_persona_directive_pack` (tail block presence, ordering, direct answers), `ContextPackService.build_persona_pack` (minimal, knowledge, brain hit filtering, document hits, apply_document_focus, clear_memory, context arbitration, to_prompt_context), `resolve_persona_turn_type`, `render_context_arbitration_block` |
+| `scripts/test_engines.py` (`TestContextPackEngine`) | `ContextPackService.build_persona_pack` (instructions, style overlay, brain recall, filtering), `apply_document_focus`, `clear_memory_for_file_work`, `build_persona_runtime_pack` (success, failure, pause, typed verification), `ContextPackDirectiveEngine.build_persona_directive_pack` (no-mutation, search, partial, failed), delegation to `SummaryEngine` |
 
 ### Existing smoke coverage
 
@@ -249,23 +254,24 @@ These are all read-only in the direct-call paths (no mutations on dependencies).
 
 ## H. Recommendation
 
-**D) Split first, then move only pure service pieces.**
+**D) Split complete.**
 
 Rationale:
 
-- The module is **hybrid**, not pure service. The registry (`_TAIL_BLOCK_REGISTRY`), the `register_tail_block` decorator, 11 tail-block builders, and the `on_turn_end` hook are true engine/lifecycle behavior and must remain in `core/engines/`.
-- `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block`, and related pure helpers have **no dependency** on the registry, hook, or orchestrator. They are safe to extract to `core/services/` **after** the registry is separated into its own stable surface.
-- `ContextPackEngine` is a **mixed class**: most methods are pure direct-call services, but `build_persona_directive_pack()` is tightly bound to `_TAIL_BLOCK_REGISTRY`. Splitting the class is possible (e.g., extract a `ContextPackService` for the pure methods and keep a thinner `ContextPackEngine` for registry-bound work), but that is a larger refactor than a file move and should only happen after the missing coverage above is added.
-- **Do not move the whole module** (options A or B) because that would relocate registry and hook behavior into `core/services/`, violating the engine/service boundary.
-- **Do not leave unchanged forever** (option C) because the pure renderer and helper surface is a legitimate service candidate, but only after staged separation.
+- The staged split is **finished**. `ContextPackService` now lives in `core/services/context_pack_service.py` and owns all pure direct-call service behavior.
+- `ContextPackDirectiveEngine` remains in `core/engines/context_pack.py` alongside the `@register_hook("on_turn_end")` `_hook_upsert_runtime_context`. These are true engine/lifecycle behavior and must stay in `core/engines/`.
+- The tail-block registry (`_TAIL_BLOCK_REGISTRY`), `register_tail_block`, `TailBlockContext`, all 11 builders, and tail-block-specific helpers (`_render_persona_active_skill_block`, `_render_verification_result_block`) live in `core/engines/tail_block_registry.py`.
+- `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block`, and related pure helpers live in `core/services/context_pack_renderer.py`.
+- Runtime path helpers (`collect_runtime_context_paths`, `normalize_runtime_context_path`) live in `core/services/context_pack_paths.py`.
+- `PromptContextService` composes both `ContextPackService` and `ContextPackDirectiveEngine`, providing a unified façade.
 
-### Proposed staging (future work, not this branch)
+### Staging history
 
 1. ✅ **Add missing tests** (proactive tail blocks, path normalization, hook direct-call path) — completed in `test/context-pack-split-guards`.
-2. ✅ **Extract `_TAIL_BLOCK_REGISTRY` + `register_tail_block` + `TailBlockContext` + all builders** into `core/engines/tail_block_registry.py`. Tail-block-specific helpers (`_render_persona_active_skill_block`, `_render_verification_result_block`) are now local to `tail_block_registry.py`; the registry module no longer imports back into `ContextPackEngine`.
-3. ✅ **Extract runtime context path helpers** (`_collect_runtime_context_paths`, `_normalize_runtime_context_path`) into `core/services/context_pack_paths.py`.
-3. ✅ **Move `ContextPackRenderer` + pure helpers** to `core/services/context_pack_renderer.py`.
-4. **Update `PromptContextService`** to import renderer from the new location; keep `ContextPackEngine` in `core/engines/` until its registry-bound method can be decoupled.
-5. ✅ **Run regression pack** after each stage: `python -m compileall …`, `pytest tests/ -q`, `scripts/context_pack_engine_smoke_test.py --json`.
+2. ✅ **Extract `_TAIL_BLOCK_REGISTRY` + `register_tail_block` + `TailBlockContext` + all builders** into `core/engines/tail_block_registry.py`. Tail-block-specific helpers moved into `tail_block_registry.py`.
+3. ✅ **Extract runtime context path helpers** into `core/services/context_pack_paths.py`.
+4. ✅ **Move `ContextPackRenderer` + pure helpers** to `core/services/context_pack_renderer.py`.
+5. ✅ **Extract `ContextPackService`** from `ContextPackEngine` into `core/services/context_pack_service.py`, leaving `ContextPackDirectiveEngine` in `core/engines/context_pack.py`.
+6. ✅ **Run regression pack** after each stage: `python -m compileall …`, `pytest tests/ -q`, `scripts/context_pack_engine_smoke_test.py --json`.
 
-Until that staged work is completed, `core/engines/context_pack.py` remains a **hybrid** module and must not be moved whole.
+`core/engines/context_pack.py` is no longer a hybrid monolith. It is a thin engine module containing only the directive engine and the `on_turn_end` hook.

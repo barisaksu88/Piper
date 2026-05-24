@@ -13,9 +13,10 @@ from pathlib import Path
 import pytest
 
 from core.engines.context_pack import (
-    ContextPackEngine,
+    ContextPackDirectiveEngine,
     _hook_upsert_runtime_context,
 )
+from core.services.context_pack_service import ContextPackService
 from core.services.context_pack_paths import (
     collect_runtime_context_paths,
     normalize_runtime_context_path,
@@ -61,7 +62,7 @@ def _make_engine(**overrides) -> ContextPackEngine:
     instruction_loader = _Stub()
     instruction_loader.load = lambda: overrides.get("instructions", "")
 
-    return ContextPackEngine(
+    return ContextPackService(
         instruction_loader=instruction_loader,
         environment_service=env,
         operational_state_service=ops,
@@ -157,7 +158,7 @@ class TestBuildPersonaDirectivePack:
         active_skill=None,
         persona_runtime=None,
     ) -> PersonaDirectivePack:
-        engine = _make_engine()
+        engine = ContextPackDirectiveEngine()
         return engine.build_persona_directive_pack(
             route_decision=route_decision,
             ingested_document_chat=ingested_document_chat,
@@ -502,7 +503,7 @@ class TestRenderContextArbitrationBlock:
 
 class TestProactiveTailBlocks:
     def _build(self, *, route_decision=None, persona_runtime=None):
-        engine = _make_engine()
+        engine = ContextPackDirectiveEngine()
         return engine.build_persona_directive_pack(
             route_decision=route_decision,
             ingested_document_chat=False,
