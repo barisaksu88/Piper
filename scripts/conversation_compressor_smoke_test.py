@@ -18,7 +18,7 @@ class _StubLLM:
         self.response = response
         self.calls = 0
 
-    def generate(self, messages, temperature: float = 0.1, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.1, max_tokens: int = 500, cancel_token=None):
         self.calls += 1
         return self.response
 
