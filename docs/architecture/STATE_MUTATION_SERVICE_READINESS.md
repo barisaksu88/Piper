@@ -138,27 +138,39 @@ A single comprehensive smoke test (`run_smoke()`) covering approximately 28 asse
 
 ---
 
-## 7. Missing Tests / Smokes
+## 7. Tests Added
 
-The following public methods have **no dedicated test coverage** beyond what the smoke test may incidentally touch:
+`tests/test_state_mutation.py` (56 tests) was added on branch `test/state-mutation-core-behavior`. It covers:
+
+- `classify_knowledge_intent()` — query, store, remove, none, empty, transient
+- `classify_task_event_followup()` — complete task, chat correction, inspect event, none, file work override
+- `memory_remove_listing_confirms_absent()` — absent confirmed, present not confirmed, ambiguous not confirmed, non-memory stage
+- `build_readonly_answer()` — knowledge query, knowledge not found, task/event readonly, profile summary, empty query
+- `build_outcome_pack()` — TASK_EVENT_WORK success/failure, MEMORY_WORK success/failure, proposal-only, empty-list auto-reroute, IMAGE_WORK, FILE_WORK
+- `normalize_route_decision()` — task add, event schedule, knowledge store/remove, reminder, delete followup, completion followup, plural followup, contextual remember, chat stays chat
+- Regression tests for undertested paths:
+  - `_normalize_chat_task_event_followup`
+  - `_bind_completion_target_from_recent_context` (via natural event completion)
+  - `_normalize_schedule_correction_to_chat`
+  - `_normalize_event_followup_inspection`
+  - `_normalize_retry_from_latest_runtime_context`
+  - `_normalize_reminder_task_override_followup`
+  - `_normalize_casual_completion_to_chat`
+  - `_extract_contextual_memory_remove_subject`
+  - `_extract_work_state_remove_subject`
+  - `_looks_like_file_work_request`
+
+## 7A. Remaining Gaps
+
+The following paths still have **no dedicated test coverage**:
 
 | Method | Risk level | Notes |
 |--------|-----------|-------|
-| `_normalize_schedule_correction_to_chat` | Low | Edge-case date correction routing |
-| `_normalize_event_followup_inspection` | Low | Event inspection followup |
-| `_normalize_retry_from_latest_runtime_context` | Low | "try again" retry routing |
-| `_normalize_reminder_task_override_followup` | Low | Reminder → task override |
-| `_normalize_casual_completion_to_chat` | Low | Casual completion downgrade |
-| `_normalize_chat_task_event_followup` | Medium | Chat → task/event completion upgrade |
 | `stage_entries_indicate_terminal_failure` | Low | Wrapper around `build_outcome_pack` |
-| `_extract_contextual_memory_remove_subject` | Low | Contextual memory removal |
-| `_extract_work_state_remove_subject` | Low | Work-state removal parsing |
-| `_bind_completion_target_from_recent_context` | Medium | Completion target binding from history |
-| `_looks_like_file_work_request` | Low | File work detection |
 | `build_task_event_delete_route` | Low | Indirectly covered by followup smoke |
 | `build_task_event_completion_route` | Low | Indirectly covered by followup smoke |
 
-**Critical observation:** The smoke test covers the **main public API surface** well, but edge-case normalizers (particularly `_normalize_chat_task_event_followup` and `_bind_completion_target_from_recent_context`) are undertested. These normalizers affect routing decisions and could cause regressions if accidentally modified.
+All previously undertested private normalizers are now covered by the new unit tests.
 
 However, a pure import relocation **cannot** break these normalizers because no code changes.
 
@@ -178,34 +190,27 @@ core/services/state_mutation.py
 
 ## 9. Recommendation
 
-**B) Safe only after adding tests.**
+**A) Safe to relocate after tests are green.**
 
 **Rationale:**
 
-`StateMutationEngine` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. In principle, it is eligible for relocation to `core/services/` under the established doctrine.
+`StateMutationEngine` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. It is eligible for relocation to `core/services/` under the established doctrine.
 
-However, unlike `RollbackEngine` (262 lines, 3 callers, 12-case smoke test covering all public functions), `StateMutationEngine` is:
+It is **2,279 lines** with **7 production callers** and governs routing for tasks, events, and knowledge. The blast radius is large, but the relocation itself is mechanical (import-only).
 
-- **2,279 lines** — the largest direct-call utility in the codebase
-- **7 production callers** — a wide blast radius for import updates
-- **Governs routing decisions** for tasks, events, and knowledge — a behavioral regression here would be user-visible
-- **Missing unit tests** — only a single smoke test exists; edge-case normalizers are not covered
+**Unit tests have now been added** (`tests/test_state_mutation.py`, 56 tests) covering:
+- All main public API methods (`classify_knowledge_intent`, `classify_task_event_followup`, `memory_remove_listing_confirms_absent`, `build_readonly_answer`, `build_outcome_pack`, `normalize_route_decision`)
+- All previously undertested private normalizers identified in the audit
 
-The smoke test is **good but not comprehensive**. Edge-case routing normalizers (`_normalize_chat_task_event_followup`, `_bind_completion_target_from_recent_context`) that affect task/event completion vs. chat downgrade decisions are undertested. A relocation itself is mechanical, but if any import cycle or initialization-order issue surfaces (e.g., `core/services/followup_resolution.py` already imports from `core/engines/state_mutation.py`), the lack of unit tests makes regression detection harder.
+The remaining gaps (`stage_entries_indicate_terminal_failure`, `build_task_event_delete_route`, `build_task_event_completion_route`) are low-risk wrappers or indirectly covered by followup smoke tests.
 
-**Recommended next steps before relocation:**
+**Recommended next steps for relocation:**
 
-1. Add a `tests/test_state_mutation.py` covering:
-   - `normalize_route_decision()` for all major route types (task add, event schedule, knowledge store/remove, reminder, delete followup, completion followup, plural followup)
-   - `build_outcome_pack()` for all stage types with success/failure/edge cases
-   - `build_readonly_answer()` for knowledge, operational, and profile summary queries
-   - `classify_knowledge_intent()` for all decision branches
-   - `classify_task_event_followup()` for all decision branches
-   - `memory_remove_listing_confirms_absent()` for absent/present/ambiguous cases
-
-2. Once unit tests pass, proceed with relocation on a separate `move/state-mutation-service` branch.
-
-3. After relocation, run the full validation suite: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + `state_mutation_engine_smoke_test.py` + `followup_resolution_engine_smoke_test.py`.
+1. Create `move/state-mutation-service` branch.
+2. Move `core/engines/state_mutation.py` → `core/services/state_mutation.py`.
+3. Update imports in 7 production callers + 2 test/script files.
+4. Update `core/services/__init__.py` and `core/engines/__init__.py` exports.
+5. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + `state_mutation_engine_smoke_test.py` + `followup_resolution_engine_smoke_test.py` + `route_boundary_smoke_test.py`.
 
 ---
 
