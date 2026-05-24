@@ -176,23 +176,32 @@ This is a **test bug**, not a service bug. The service correctly falls back to t
 
 ## 10. Recommended Next Step
 
-### A) Split — move `ConversationCompressor` to `core/services/`, keep hook in `core/engines/` ✅ **Recommended**
+### A) Safe to move whole module
 
-This is the cleanest outcome. The class is a pure functional utility with no engine characteristics. The hook is a thin orchestration wrapper that rightfully belongs in `core/engines/`. The split improves package boundaries without any behavioral change.
+Not applicable. This module registers `@register_hook("on_turn_end")`, so moving the entire file to `core/services/` would break the engine/service boundary.
 
-**Precondition:** Add `tests/test_conversation_compressor.py` (minimum ~20 tests covering `compress_history`, `load_summary`, `save_summary`, edge cases like empty history, over-budget truncation, and LLM fallback).
+### B) Safe only after adding tests
 
-### B) Keep as hybrid — no changes
+Partial fit. Tests are required, but the correct action is a **split**, not a whole-module move.
 
-Low risk, low reward. The module is small (~300 lines) and the two concerns are already well-separated within the file. However, it perpetuates the hybrid-module pattern that the `core/engines/` → `core/services/` migration is explicitly trying to reduce.
+### C) Do not move
 
-### C) Move entire module to `core/services/`
+Not recommended. The `ConversationCompressor` class is a pure direct-call utility with no engine characteristics. Leaving it in `core/engines/` perpetuates the hybrid-module pattern.
 
-Not recommended. The `@register_hook("on_turn_end")` decorator ties this module to the engine lifecycle system. Moving it to `core/services/` would break the architectural boundary (services should not register hooks).
+### D) Split first, then move only pure service pieces ✅ **Recommended**
 
-### D) Extract hook only to `core/feature_hooks.py`, keep class in `core/engines/`
-
-Not recommended. This inverts the correct dependency direction: the class is the pure utility, the hook is the engine concern. Keeping the utility in `core/engines/` and moving the hook out would leave a service in the engine directory.
+**Decision:**
+- **Do not move the whole module.**
+- **Keep `_hook_deferred_conversation_summary`** in `core/engines/conversation_compressor.py` — it is engine lifecycle behavior (hook registration, threading, orchestrator state access).
+- **Move only the pure service pieces** to `core/services/conversation_compressor.py`:
+  - `ConversationCompressor` class
+  - `ConversationCompressionResult` dataclass
+  - Pure helper constants (`_TOKEN_RE`, `_SUMMARY_HEADERS`)
+- **Add `tests/test_conversation_compressor.py` before the split.** There are currently no pytest unit tests, and the smoke test has a known `_StubLLM` bug that silently skips the LLM fallback path. Focused unit tests must cover:
+  - `compress_history` (empty history, under-budget, over-budget with truncation, over-budget with LLM, existing summary injection)
+  - `load_summary` / `save_summary` (round-trip, missing file, malformed JSON)
+  - `_truncate_to_budget`, `_normalize_summary`, `_clean_messages` edge cases
+  - LLM failure fallback (`llm.generate` raises → truncation)
 
 ---
 

@@ -33,7 +33,7 @@ Lifecycle engines:
 - `stats_collector.py`
 
 Direct-call services/utilities to review:
-- `conversation_compressor.py` — **audited**, split candidate (see `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`)
+- `conversation_compressor.py` — audited split candidate; tests required before split
 - `context_pack.py`
 
 Audited — keep in `core/engines/`:
