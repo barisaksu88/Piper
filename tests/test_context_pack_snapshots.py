@@ -16,6 +16,10 @@ from core.engines.context_pack import (
     ContextPackEngine,
     _hook_upsert_runtime_context,
 )
+from core.services.context_pack_paths import (
+    collect_runtime_context_paths,
+    normalize_runtime_context_path,
+)
 from core.services.context_pack_renderer import (
     ContextPackRenderer,
     resolve_persona_turn_type,
@@ -566,24 +570,24 @@ class TestProactiveTailBlocks:
 
 class TestRuntimeContextPaths:
     def test_normalize_empty_and_invalid(self):
-        assert ContextPackEngine._normalize_runtime_context_path("", None) == ""
-        assert ContextPackEngine._normalize_runtime_context_path("   ", Path("/tmp")) == ""
-        assert ContextPackEngine._normalize_runtime_context_path("`", Path("/tmp")) == ""
+        assert normalize_runtime_context_path("", None) == ""
+        assert normalize_runtime_context_path("   ", Path("/tmp")) == ""
+        assert normalize_runtime_context_path("`", Path("/tmp")) == ""
 
     def test_normalize_relative_existing(self, tmp_path: Path):
         (tmp_path / "app.py").write_text("x")
-        result = ContextPackEngine._normalize_runtime_context_path("app.py", tmp_path)
+        result = normalize_runtime_context_path("app.py", tmp_path)
         assert result == "app.py"
 
     def test_normalize_relative_missing(self, tmp_path: Path):
-        assert ContextPackEngine._normalize_runtime_context_path("missing.py", tmp_path) == ""
+        assert normalize_runtime_context_path("missing.py", tmp_path) == ""
 
     @pytest.mark.skipif(os.name != "nt", reason="Windows absolute path conversion")
     def test_normalize_absolute_inside_workspace(self, tmp_path: Path):
         (tmp_path / "src" / "main.py").parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / "src" / "main.py").write_text("x")
         abs_path = str(tmp_path / "src" / "main.py")
-        result = ContextPackEngine._normalize_runtime_context_path(abs_path, tmp_path)
+        result = normalize_runtime_context_path(abs_path, tmp_path)
         assert result == "src/main.py"
 
     @pytest.mark.skipif(os.name != "nt", reason="WSL path conversion only on Windows")
@@ -593,7 +597,7 @@ class TestRuntimeContextPaths:
         posix = tmp_path.as_posix()
         drive = tmp_path.drive[0].lower()
         wsl_path = posix.replace(f"{drive.upper()}:/", f"/mnt/{drive}/") + "/src/main.py"
-        result = ContextPackEngine._normalize_runtime_context_path(wsl_path, tmp_path)
+        result = normalize_runtime_context_path(wsl_path, tmp_path)
         assert result == "src/main.py"
 
     def test_collect_deduplication_and_order(self, tmp_path: Path):
@@ -616,8 +620,7 @@ class TestRuntimeContextPaths:
                 "scratchpad": [],
             },
         )()
-        engine = _make_engine()
-        paths = engine._collect_runtime_context_paths(orc)
+        paths = collect_runtime_context_paths(orc)
         assert paths == ["a.py", "b.py"]
 
     def test_collect_scratchpad_path_extraction(self, tmp_path: Path):
@@ -642,8 +645,7 @@ class TestRuntimeContextPaths:
                 ],
             },
         )()
-        engine = _make_engine()
-        paths = engine._collect_runtime_context_paths(orc)
+        paths = collect_runtime_context_paths(orc)
         assert "src/main.py" in paths
 
     def test_collect_ignores_duplicate_paths(self, tmp_path: Path):
@@ -663,8 +665,7 @@ class TestRuntimeContextPaths:
                 "scratchpad": [],
             },
         )()
-        engine = _make_engine()
-        paths = engine._collect_runtime_context_paths(orc)
+        paths = collect_runtime_context_paths(orc)
         assert paths == ["dup.py"]
 
     def test_collect_user_msg_path_extraction(self, tmp_path: Path):
@@ -684,8 +685,7 @@ class TestRuntimeContextPaths:
                 "scratchpad": [],
             },
         )()
-        engine = _make_engine()
-        paths = engine._collect_runtime_context_paths(orc)
+        paths = collect_runtime_context_paths(orc)
         assert paths == ["user.py"]
 
     def test_collect_context_card_stage_paths(self, tmp_path: Path):
@@ -716,8 +716,7 @@ class TestRuntimeContextPaths:
                 "scratchpad": [],
             },
         )()
-        engine = _make_engine()
-        paths = engine._collect_runtime_context_paths(orc)
+        paths = collect_runtime_context_paths(orc)
         assert "stage.py" in paths
 
 

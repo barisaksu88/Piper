@@ -27,6 +27,10 @@ from core.services.conversation_compressor import (
     ConversationCompressor,
     ConversationCompressionResult,
 )
+from core.services.context_pack_paths import (
+    collect_runtime_context_paths,
+    normalize_runtime_context_path,
+)
 from core.services.context_pack_renderer import (
     ContextPackRenderer,
     resolve_persona_turn_type,
@@ -37,6 +41,7 @@ __all__ = [
     "build_verified_payload",
     "ContextPackRenderer",
     "ConversationCompressionResult",
+    "collect_runtime_context_paths",
     "ConversationCompressor",
     "evaluate_stage",
     "FileWorkEngine",
@@ -45,6 +50,7 @@ __all__ = [
     "is_bulk_action",
     "new_stage_evidence",
     "record_manifest",
+    "normalize_runtime_context_path",
     "render_context_arbitration_block",
     "resolve_persona_turn_type",
     "RouteClarifier",

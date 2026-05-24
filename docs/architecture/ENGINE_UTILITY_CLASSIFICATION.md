@@ -35,7 +35,7 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 
 `context_pack.py` audit completed — see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Recommendation: **split first, then move pure service pieces**; registry and hook behavior must remain in `core/engines/`.
 
-`context_pack.py` tail-block registry has been **extracted** to `core/engines/tail_block_registry.py`. `context_pack.py` remains hybrid because `ContextPackEngine` and the `on_turn_end` hook remain in `core/engines/`. Renderer/helpers were previously extracted to `core/services/context_pack_renderer.py`. See `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`.
+`context_pack.py` tail-block registry has been **extracted** to `core/engines/tail_block_registry.py`. `context_pack.py` remains hybrid because `ContextPackEngine` and the `on_turn_end` hook remain in `core/engines/`. Renderer/helpers were extracted to `core/services/context_pack_renderer.py`; runtime path helpers were extracted to `core/services/context_pack_paths.py`. See `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`.
 
 `conversation_compressor.py` has been **split**. The `ConversationCompressor` class now lives in `core/services/conversation_compressor.py`; only the `_hook_deferred_conversation_summary` hook remains in `core/engines/conversation_compressor.py`. See `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`.
 
