@@ -805,7 +805,7 @@ First-pass persona/search recall now pulls 9 memory candidates and filters low-r
 
 ### 13.5 Typed Schema Validation at LLM Output Boundaries ✓ IMPLEMENTED
 
-**Status:** Live in `core/route_boundary.py`, `core/orchestrator_phases.py`, `core/engines/followup_resolution.py`, and `core/engines/route_clarity.py`.
+**Status:** Live in `core/route_boundary.py`, `core/orchestrator_phases.py`, `core/engines/followup_resolution.py`, and `core/services/route_clarity.py`.
 
 Router, follow-up resolver, and route clarifier outputs now pass through explicit boundary validators before the phase code acts on them. Validation failures raise structured errors with one declared fallback per boundary:
 
@@ -819,7 +819,7 @@ Router, follow-up resolver, and route clarifier outputs now pass through explici
 
 The fallback rule now lives in the validator itself rather than in ad hoc parse glue inside the calling phase.
 
-**Files:** `core/route_boundary.py`; `core/orchestrator_phases.py`; `core/engines/followup_resolution.py`; `core/engines/route_clarity.py`
+**Files:** `core/route_boundary.py`; `core/orchestrator_phases.py`; `core/engines/followup_resolution.py`; `core/services/route_clarity.py`
 
 ---
 
@@ -1472,7 +1472,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | VerificationEngine | `orchestrator_phases.py` | `core/services/verification.py` |
 | FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/services/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
-| RouteClarifier | `route_normalizer.py` | `core/engines/route_clarity.py` |
+| RouteClarifier | `route_normalizer.py` | `core/services/route_clarity.py` |
 | StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
 | ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
