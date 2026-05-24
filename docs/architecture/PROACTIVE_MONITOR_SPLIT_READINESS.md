@@ -1,7 +1,7 @@
 # ProactiveMonitor Split Readiness Audit
 
-**Status:** Audit complete — recommendation issued  
-**Scope:** `core/engines/proactive_monitor.py` + potential `core/services/reminders.py`  
+**Status:** Split complete — Stage 2 extracted  
+**Scope:** `core/engines/proactive_monitor.py` + `core/services/reminders.py`  
 **Date:** 2026-05-24
 
 ---
