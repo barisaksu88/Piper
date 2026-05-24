@@ -131,6 +131,29 @@ export function useEventRouter({
     setMessages((prev) => prev.filter((m) => !isThinkingPlaceholder(m)));
   }, []);
 
+  const settleStreaming = useCallback(() => {
+    flushPendingDeltas();
+    if (deltaFlushTimerRef.current) {
+      clearTimeout(deltaFlushTimerRef.current);
+      deltaFlushTimerRef.current = null;
+    }
+    pendingDeltasRef.current = "";
+    streamingRef.current = false;
+    setIsGenerating(false);
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant" && last.streaming) {
+        if (String(last.content || "").trim()) {
+          next[next.length - 1] = { ...last, streaming: false };
+        } else {
+          next.pop();
+        }
+      }
+      return next;
+    });
+  }, [flushPendingDeltas]);
+
   const ensureAssistantStreamMessage = useCallback(() => {
     setMessages((prev) => {
       const next = [...prev];
@@ -495,6 +518,7 @@ export function useEventRouter({
     appendActivity,
     appendLog,
     flushPendingDeltas,
+    settleStreaming,
     reset,
   };
 }
