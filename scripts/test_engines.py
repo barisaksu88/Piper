@@ -1170,6 +1170,235 @@ class TestFileWorkEngine:
 
 
 # =============================================================================
+# ROUTE CLARIFIER TESTS
+# =============================================================================
+
+class TestRouteClarifier:
+    """Tests for RouteClarifier deterministic heuristic gates."""
+
+    @pytest.fixture
+    def clarifier(self):
+        from core.engines.route_clarity import RouteClarifier
+        return RouteClarifier()
+
+    @pytest.fixture
+    def task_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Do something",
+                "stages": [
+                    {"stage_goal": "Update config", "stage_type": "FILE_WORK"}
+                ],
+            },
+        }
+
+    @pytest.fixture
+    def targeted_read_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Read its exact contents",
+                "stages": [
+                    {
+                        "stage_goal": "Read the exact contents of notes.txt",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": "The exact contents are read and reported",
+                    }
+                ],
+            },
+        }
+
+    @pytest.fixture
+    def targeted_lookup_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Find the matching file",
+                "stages": [
+                    {
+                        "stage_goal": "Find the matching file for the query",
+                        "stage_type": "FILE_WORK",
+                        "success_condition": "The matching file is found",
+                    }
+                ],
+            },
+        }
+
+    @pytest.fixture
+    def computer_use_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Use the computer",
+                "stages": [
+                    {"stage_goal": "Click the button", "stage_type": "COMPUTER_USE"}
+                ],
+            },
+        }
+
+    # ------------------------------------------------------------------ #
+    # should_force_clarification
+    # ------------------------------------------------------------------ #
+
+    def test_force_clarification_true_for_short_non_action(self, clarifier, task_decision):
+        """Short input without action verb forces clarification."""
+        result = clarifier.should_force_clarification(
+            decision=task_decision, user_msg="a temporary tree"
+        )
+        assert result is True
+
+    def test_force_clarification_false_for_action_verb(self, clarifier, task_decision):
+        """Input with action verb does not force clarification."""
+        result = clarifier.should_force_clarification(
+            decision=task_decision, user_msg="create a file"
+        )
+        assert result is False
+
+    def test_force_clarification_false_for_path_like(self, clarifier, task_decision):
+        """Path-like input does not force clarification."""
+        result = clarifier.should_force_clarification(
+            decision=task_decision, user_msg="src/app.py"
+        )
+        assert result is False
+
+    def test_force_clarification_false_mid_thread(self, clarifier, task_decision):
+        """Mid-thread follow-up (history has assistant msg) does not force clarification."""
+        history = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+        result = clarifier.should_force_clarification(
+            decision=task_decision, user_msg="a temporary tree", recent_history=history
+        )
+        assert result is False
+
+    def test_force_clarification_false_for_retry_hint(self, clarifier, task_decision):
+        """Retry hints do not force clarification."""
+        result = clarifier.should_force_clarification(
+            decision=task_decision, user_msg="try again"
+        )
+        assert result is False
+
+    def test_force_clarification_false_for_targeted_read(self, clarifier, targeted_read_decision):
+        """Targeted file read decisions bypass force clarification."""
+        result = clarifier.should_force_clarification(
+            decision=targeted_read_decision, user_msg="a temporary tree"
+        )
+        assert result is False
+
+    def test_force_clarification_false_for_computer_use(self, clarifier, computer_use_decision):
+        """Computer-use decisions bypass force clarification."""
+        result = clarifier.should_force_clarification(
+            decision=computer_use_decision, user_msg="a temporary tree"
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # should_refine_task_route
+    # ------------------------------------------------------------------ #
+
+    def test_refine_route_true_for_short_non_action(self, clarifier, task_decision):
+        """Short non-action input triggers refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=task_decision, user_msg="a temporary tree"
+        )
+        assert result is True
+
+    def test_refine_route_false_for_action_verb(self, clarifier, task_decision):
+        """Input with action verb does not trigger refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=task_decision, user_msg="create a file"
+        )
+        assert result is False
+
+    def test_refine_route_false_for_path_like(self, clarifier, task_decision):
+        """Path-like input does not trigger refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=task_decision, user_msg="C:\\docs\\file.txt"
+        )
+        assert result is False
+
+    def test_refine_route_true_for_correction_fragment(self, clarifier, task_decision):
+        """Correction fragment without action verb triggers refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=task_decision, user_msg="no, wrong"
+        )
+        assert result is True
+
+    def test_refine_route_true_for_actually_tomorrow(self, clarifier, task_decision):
+        """Correction fragment 'actually tomorrow' triggers refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=task_decision, user_msg="actually tomorrow"
+        )
+        assert result is True
+
+    def test_refine_route_false_for_targeted_lookup(self, clarifier, targeted_lookup_decision):
+        """Targeted file lookup decisions bypass refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=targeted_lookup_decision, user_msg="a temporary tree"
+        )
+        assert result is False
+
+    def test_refine_route_false_for_computer_use(self, clarifier, computer_use_decision):
+        """Computer-use decisions bypass refinement."""
+        result = clarifier.should_refine_task_route(
+            decision=computer_use_decision, user_msg="a temporary tree"
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _task_is_targeted_file_lookup
+    # ------------------------------------------------------------------ #
+
+    def test_task_is_targeted_file_lookup_true_for_read(self, clarifier, targeted_read_decision):
+        """Targeted read stage is detected as file lookup."""
+        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        result = _task_is_targeted_file_lookup(targeted_read_decision)
+        assert result is True
+
+    def test_task_is_targeted_file_lookup_true_for_lookup(self, clarifier, targeted_lookup_decision):
+        """Targeted lookup stage is detected as file lookup."""
+        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        result = _task_is_targeted_file_lookup(targeted_lookup_decision)
+        assert result is True
+
+    def test_task_is_targeted_file_lookup_false_for_non_task(self):
+        """Non-TASK decision is not a file lookup."""
+        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        result = _task_is_targeted_file_lookup({"decision": "CHAT"})
+        assert result is False
+
+    def test_task_is_targeted_file_lookup_false_for_non_file_stage(self, clarifier, task_decision):
+        """Non-file stage is not a file lookup."""
+        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        result = _task_is_targeted_file_lookup(task_decision)
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _task_is_computer_use
+    # ------------------------------------------------------------------ #
+
+    def test_task_is_computer_use_true(self, clarifier, computer_use_decision):
+        """COMPUTER_USE stage is detected."""
+        from core.engines.route_clarity import _task_is_computer_use
+        result = _task_is_computer_use(computer_use_decision)
+        assert result is True
+
+    def test_task_is_computer_use_false_for_non_task(self):
+        """Non-TASK decision is not computer use."""
+        from core.engines.route_clarity import _task_is_computer_use
+        result = _task_is_computer_use({"decision": "CHAT"})
+        assert result is False
+
+    def test_task_is_computer_use_false_for_non_computer_stage(self, clarifier, task_decision):
+        """Non-computer-use stage is not computer use."""
+        from core.engines.route_clarity import _task_is_computer_use
+        result = _task_is_computer_use(task_decision)
+        assert result is False
+
+
+# =============================================================================
 # VERIFICATION ENGINE TESTS
 # =============================================================================
 
