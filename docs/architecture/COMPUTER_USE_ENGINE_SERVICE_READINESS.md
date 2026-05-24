@@ -119,7 +119,7 @@ Key engine characteristics:
 
 ### 8.2 Smoke Tests
 
-Six smoke tests in `scripts/` exercise `ComputerUseEngine` against real or fixture browser pages:
+Multiple smoke tests in `scripts/` exercise `ComputerUseEngine` against real or fixture browser pages:
 
 | Smoke test | Coverage |
 |------------|----------|

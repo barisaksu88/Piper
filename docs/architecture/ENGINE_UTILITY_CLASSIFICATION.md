@@ -39,7 +39,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 *All eligible direct-call utilities have been relocated to `core/services/`.*
 
-Remaining modules in `core/engines/` are **lifecycle engines** (see below), not utilities.
+Remaining modules in `core/engines/` are **hybrids or lifecycle/resource-owning engines** (see below), not pure direct-call utilities.
 
 ---
 
