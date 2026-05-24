@@ -152,13 +152,19 @@ After the split, `core/engines/conversation_compressor.py` contains only the hoo
 
 `scripts/conversation_compressor_smoke_test.py` exercises `compress_history`, `load_summary`, and `save_summary`.
 
-**Known pre-existing issue:** The `_StubLLM` class in the smoke test is missing the `max_tokens` parameter that `_summarize_candidate()` passes to `llm.generate()`. This causes a `TypeError` that is silently caught by the `except Exception:` fallback, so the over-budget LLM path is never actually exercised. The test reports `over_budget_used_llm: false` and `over_budget_summary_trimmed: false` on `main`.
-
-This is a **test bug**, not a service bug. The service correctly falls back to truncation when the LLM call fails.
+**Fixed:** The `_StubLLM.generate()` signature now accepts `max_tokens`. The smoke test correctly exercises the over-budget LLM path.
 
 ### 7.2 Pytest Unit Tests
 
-**None.** No `tests/test_conversation_compressor.py` exists. Recommend adding before split.
+`tests/test_conversation_compressor.py` — **58 tests** added, covering:
+- `compress_history` (empty, under-budget, over-budget truncation, over-budget LLM, LLM failure fallback, existing summary merge, max_turns edge cases)
+- `load_summary` / `save_summary` (missing file, malformed JSON, valid JSON, round-trip, parent directory creation, whitespace stripping)
+- `build_summary_message` (empty and non-empty summaries)
+- `_truncate_to_budget` (exact budget, over-budget, empty/whitespace input)
+- `_normalize_summary` (markdown fences, header noise, newline collapsing)
+- `_sanitize_summary_text` (low-value line removal, system/control filtering)
+- `_clean_messages` (system, thinking, UI, runtime context, summary headers, empty, error, copied messages)
+- Edge cases (None history, non-dict items, token_budget falsy values)
 
 ---
 
@@ -169,7 +175,7 @@ This is a **test bug**, not a service bug. The service correctly falls back to t
 | Import path breakage in `orchestrator.py` | Low | Single import line change, well-grepped. |
 | Smoke test import breakage | Low | Single import line change in `scripts/`. |
 | Hook still references `orc.conversation_compressor` | Low | The hook already accesses the compressor through the orchestrator; the field type doesn't change. |
-| No unit test coverage | Medium | The smoke test (`scripts/conversation_compressor_smoke_test.py`) covers all public methods. Recommend adding `tests/test_conversation_compressor.py` before or during the split. |
+| No unit test coverage | Medium | **Resolved.** `tests/test_conversation_compressor.py` (58 tests) now covers all public methods and edge cases. |
 | `core/engines/__init__.py` no longer exports `ConversationCompressor` | Low | No external consumers of `core.engines.ConversationCompressor` outside the orchestrator. |
 
 ---
@@ -188,7 +194,7 @@ Partial fit. Tests are required, but the correct action is a **split**, not a wh
 
 Not recommended. The `ConversationCompressor` class is a pure direct-call utility with no engine characteristics. Leaving it in `core/engines/` perpetuates the hybrid-module pattern.
 
-### D) Split first, then move only pure service pieces ✅ **Recommended**
+### D) Split after tests are green — move only pure service pieces ✅ **Recommended**
 
 **Decision:**
 - **Do not move the whole module.**
@@ -197,11 +203,7 @@ Not recommended. The `ConversationCompressor` class is a pure direct-call utilit
   - `ConversationCompressor` class
   - `ConversationCompressionResult` dataclass
   - Pure helper constants (`_TOKEN_RE`, `_SUMMARY_HEADERS`)
-- **Add `tests/test_conversation_compressor.py` before the split.** There are currently no pytest unit tests, and the smoke test has a known `_StubLLM` bug that silently skips the LLM fallback path. Focused unit tests must cover:
-  - `compress_history` (empty history, under-budget, over-budget with truncation, over-budget with LLM, existing summary injection)
-  - `load_summary` / `save_summary` (round-trip, missing file, malformed JSON)
-  - `_truncate_to_budget`, `_normalize_summary`, `_clean_messages` edge cases
-  - LLM failure fallback (`llm.generate` raises → truncation)
+- **Tests are now green.** `tests/test_conversation_compressor.py` (58 tests) and the fixed smoke test both pass. The split is unblocked.
 
 ---
 
