@@ -29,6 +29,8 @@
 | `conversation_compressor.py` | ~35 | `@register_hook("on_turn_end")` — delegates to `core.services.conversation_compressor.ConversationCompressor` | Registry wrapper |
 | `proactive_monitor.py` | 218 | `ProactiveMonitor` class (daemon thread), `@register_tail_block` (×2), `@register_hook("on_turn_end")`, `@register_route_interceptor` | Hybrid |
 | `stats_collector.py` | 12 | `@register_hook("on_pre_route")` — delegates to `core.services.stats_collector.StatsCollector` | Registry wrapper |
+| `environment_query.py` | ~25 | `@register_route_interceptor` — delegates to `core.routing.environment_queries.looks_like_live_environment_query()` | Registry wrapper |
+| `operational_state_answer.py` | ~30 | `@register_route_interceptor` — delegates to `core.prompt_context.build_readonly_state_answer()` | Registry wrapper |
 | `tail_block_registry.py` | ~200 | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, all `@register_tail_block` builders | Registry infrastructure |
 
 **Finding:** No pure service classes (deterministic, no hooks, no threads, no mutable state) remain in `core/engines/`. ✅
@@ -57,6 +59,8 @@
 | `verification.py` | `VerificationEngine`, `VerificationResult` |
 
 **Finding:** 16 service modules. None import from `core.engines`. ✅
+
+*Note:* `core/engines/` now contains 10 modules (up from 8) after the route-bypass engine split. The two new modules (`environment_query.py`, `operational_state_answer.py`) are registry wrappers with no pure service classes.
 
 ---
 
@@ -176,4 +180,4 @@ Expected: no syntax errors ✅
 | Compile check clean | (run in CI) |
 | Test suite baseline maintained | (run in CI) |
 
-**Conclusion:** The engine/service boundary is clean. No further splits are required. Future work should maintain the rule: *pure services with no hooks, threads, or mutable state go to `core/services/`; lifecycle engines, registry wrappers, and infrastructure stay in `core/engines/`.*
+**Conclusion:** The engine/service boundary is clean. The route-bypass engine split added two registry-wrapper modules to `core/engines/`. Future work should maintain the rule: *pure services with no hooks, threads, or mutable state go to `core/services/`; lifecycle engines, registry wrappers, and infrastructure stay in `core/engines/`.*

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import PurePosixPath
 import re
@@ -338,13 +339,18 @@ def normalize_route_decision(
 def detect_route_interceptor(
     user_msg: str,
     recent_history: Sequence[dict[str, Any]] | None = None,
+    orc=None,
 ) -> dict[str, Any] | None:
     text = str(user_msg or "").strip()
     if not text:
         return None
     history = [dict(item) for item in (recent_history or []) if isinstance(item, dict)]
     for interceptor in _ROUTE_INTERCEPTOR_REGISTRY:
-        result = interceptor(text, history)
+        sig = inspect.signature(interceptor)
+        if len(sig.parameters) >= 3:
+            result = interceptor(text, history, orc)
+        else:
+            result = interceptor(text, history)
         if result is not None:
             return result
     return None

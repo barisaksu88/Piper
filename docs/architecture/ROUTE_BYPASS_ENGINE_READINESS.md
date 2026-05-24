@@ -1,9 +1,9 @@
 # Route Bypass Engine Readiness Audit
 
-**Branch:** `audit/route-bypass-engine-readiness`  
-**Scope:** Evaluate moving environment-query and operational-state bypasses from procedural `_run_route_core()` into registry-driven engines  
+**Branch:** `split/route-bypass-engines-clean`  
+**Scope:** Move environment-query and operational-state bypasses from procedural `_run_route_core()` into registry-driven engines  
 **Date:** 2026-05-24  
-**Status:** ✅ Ready with minor signature extension
+**Status:** ✅ IMPLEMENTED
 
 ---
 
@@ -27,31 +27,11 @@ This means:
 
 ## 2. Route Interceptor Registry Fit
 
-### Current signature
+### Signature extension applied
+
+`detect_route_interceptor()` now accepts an optional `orc` parameter and dispatches to interceptors using `inspect.signature` arity-checking:
 
 ```python
-RouteInterceptorFn = Callable[[str, Sequence[dict[str, Any]]], dict[str, Any] | None]
-```
-
-Called as:
-```python
-detect_route_interceptor(user_msg, router_history)
-```
-
-### Environment query — fits current signature ✅
-
-- Needs only `user_msg` text
-- Calls `looks_like_live_environment_query(text)` — pure function, no external state
-- Returns standard interceptor dict with `kind`, `next_stage`, `stats_decision`, `bypass`, `route_decision`
-
-### Operational state — **needs smallest safe extension**
-
-- Needs `orc.prompt_context` (or `OperationalStateService` + `knowledge_mgr`)
-- Current signature cannot access orchestrator state
-- **Recommendation:** extend `detect_route_interceptor` to pass `orc` as an optional third argument, with backward-compatible fallback:
-
-```python
-# In core/routing/route_normalizer.py
 def detect_route_interceptor(
     user_msg: str,
     recent_history: Sequence[dict[str, Any]] | None = None,
@@ -59,26 +39,21 @@ def detect_route_interceptor(
 ) -> dict[str, Any] | None:
     ...
     for interceptor in _ROUTE_INTERCEPTOR_REGISTRY:
-        try:
+        sig = inspect.signature(interceptor)
+        if len(sig.parameters) >= 3:
             result = interceptor(text, history, orc)
-        except TypeError:
+        else:
             result = interceptor(text, history)
         if result is not None:
             return result
     return None
 ```
 
-**Why this is the smallest safe extension:**
-- Zero changes to existing 10 interceptors (they keep 2-argument signatures)
-- New interceptors can opt-in to the 3-argument signature
-- No `inspect.signature` runtime introspection overhead
-- No global state hacking
-- No breaking type changes for `RouteInterceptorFn` — the type alias can remain as-is (new interceptors simply accept more args, which is valid Python `Callable` behavior)
-
-**Rejected alternatives:**
-- **Hook before route (`on_pre_route`)**: Hooks already receive `orc`, but the bypass decision would still need to be checked procedurally in `_run_route_core()`. This does not move the bypass *out* of the phase function.
-- **Global service singleton**: Would require `state_owner` at module load time; wrong lifecycle.
-- **Stay procedural**: Defeats the architectural goal of registry-driven engines.
+**Why `inspect.signature` instead of `TypeError` fallback:**
+- Avoids catching arbitrary `TypeError` raised inside interceptor bodies
+- Evaluated once per interceptor per call — negligible overhead
+- Existing 2-arg interceptors require zero changes
+- New 3-arg interceptors opt-in explicitly
 
 ---
 
@@ -357,19 +332,12 @@ Create a follow-up branch `fix/engine-hook-import-wiring` to:
 - No behavior drift if the normalizer safety net and persona cache are preserved.
 - The dead-code finding (§7) is pre-existing and does not block this work, but new engines must be imported explicitly to avoid repeating the same wiring gap.
 
-**Implementation order:**
-1. Extend `detect_route_interceptor` signature in `route_normalizer.py`
-2. Create `core/engines/environment_query.py`
-3. Create `core/engines/operational_state_answer.py`
-4. Wire imports in `core/orchestrator.py`
-5. Remove procedural bypasses from `orchestrator_phases.py`
-6. Add cache check in `phase_persona()`
-7. Add guard tests in `tests/test_route_bypass_interceptors.py`
-8. Run full regression pack:
-   - `python -m compileall app.py config.py core ui memory tools llm`
-   - `pytest tests/ -q`
-   - `scripts/live_environment_chat_smoke_test.py --json`
-   - `scripts/operational_state_readonly_smoke_test.py --json`
-   - `scripts/route_boundary_smoke_test.py --json`
-   - `scripts/turn_explanation_smoke_test.py --json`
-   - `scripts/proactive_monitor_smoke_test.py --json`
+**Implementation completed:**
+1. ✅ Extended `detect_route_interceptor` signature in `route_normalizer.py`
+2. ✅ Created `core/engines/environment_query.py`
+3. ✅ Created `core/engines/operational_state_answer.py`
+4. ✅ Wired imports in `core/orchestrator.py`
+5. ✅ Removed procedural bypasses from `orchestrator_phases.py`
+6. ✅ Added cache check in `phase_persona()`
+7. ✅ Added guard tests in `tests/test_route_bypass_interceptors.py`
+8. ✅ Ran full regression pack
