@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.contracts import StageOutcomePack  # noqa: E402
-from core.engines.verification import VerificationResult  # noqa: E402
+from core.services.verification import VerificationResult  # noqa: E402
 from core.orchestrator_graph import (  # noqa: E402
     OrchestratorGraphContext,
     build_orchestrator_graph,

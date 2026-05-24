@@ -39,7 +39,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
-| `verification.py` | `VerificationEngine` — `evaluate()`, `evaluate_mutation()`, `evaluate_with_constraints()`. No hooks. |
 | `file_work.py` | `FileWorkEngine` — file operation planning and execution. No hooks. |
 | `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. |
 | `route_clarity.py` | `RouteClarifier` — route clarification logic. No hooks. |
@@ -54,7 +53,9 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 `SearchWorkflowEngine` was relocated from `core/engines/search_workflow.py` to `core/services/search_workflow.py` because it is a pure direct-call service with no hooks, registries, or lifecycle participation.
 
-`SummaryEngine` was relocated from `core/engines/summary.py` to `core/services/summary.py` for the same reason.  Both are imported by orchestrator and UI layers exactly like utilities, but live in `core/services/` to keep `core/engines/` reserved for modules that own runtime engine behavior.
+`SummaryEngine` was relocated from `core/engines/summary.py` to `core/services/summary.py` for the same reason.
+
+`VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.  All are imported by orchestrator and UI layers exactly like utilities, but live in `core/services/` to keep `core/engines/` reserved for modules that own runtime engine behavior.
 
 ---
 

@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 
 from config import CFG
 from core.contracts import StageOutcomePack
-from core.engines.verification import VerificationResult
+from core.services.verification import VerificationResult
 from core.orchestrator import Orchestrator, OrchestratorConfig
 from core.runtime_control import OperationCancelled
 from memory.storage import append_jsonl, ensure_parent

@@ -974,7 +974,7 @@ class TestVerificationEngine:
     @pytest.fixture
     def verification_engine(self, mock_file_checker):
         """Create a verification engine with mock checker."""
-        from core.engines.verification import VerificationEngine
+        from core.services.verification import VerificationEngine
         return VerificationEngine(file_checker=mock_file_checker)
 
     def test_should_verify_for_file_work_stage(self, verification_engine, sample_file_stage):
@@ -1163,7 +1163,7 @@ class TestVerificationEngine:
 
     def test_not_required_returns_verified(self, verification_engine):
         """Should return not_required for non-verification stages."""
-        from core.engines.verification import VerificationResult
+        from core.services.verification import VerificationResult
 
         stage = {"stage_type": "CHAT"}
         result = verification_engine.should_verify(stage, "CHAT", None)
@@ -1355,7 +1355,7 @@ class TestContextPackEngine:
 
     def test_build_persona_runtime_pack_surfaces_typed_verification_fields(self, context_pack_engine):
         """Should carry the full typed verification contract into persona runtime."""
-        from core.engines.verification import VerificationResult
+        from core.services.verification import VerificationResult
 
         result = context_pack_engine.build_persona_runtime_pack(
             [],

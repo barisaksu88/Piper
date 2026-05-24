@@ -711,7 +711,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change what context persona sees | `ContextPackEngine` / `PromptContextService` |
 | Change how persona narrates an outcome | `build_persona_runtime_pack()` in `core/prompt_context.py` + `core/engines/context_pack.py` |
 | Add a new engine | `core/engines/` + `core/engines/__init__.py` + update `AGENTS.md` |
-| Change verification logic | `VerificationEngine` in `core/engines/verification.py` |
+| Change verification logic | `VerificationEngine` in `core/services/verification.py` |
 | Change file operation behavior | `FileWorkEngine` in `core/engines/file_work.py` |
 | Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
 | Change follow-up resolution patterns | `FollowupResolutionEngine` in `core/engines/followup_resolution.py` |
@@ -1173,7 +1173,7 @@ The planner prompt (`manager.txt`) instructs FILE_WORK stage completions to incl
 
 Prose `success_condition` is kept as fallback during migration. Once all plan types emit explicit constraints the prose-heuristic path will be removed.
 
-**Files:** `core/contracts.py` (`PlanConstraintType`, `PlanConstraint`, `StageCard.constraints`); `core/engines/file_work.py` (`FileWorkEngine.derive_constraints`); `core/engines/verification.py` (`evaluate_with_constraints`, six `_check_*` methods, constraint-first path in `evaluate`); `data/prompts/manager.txt` (completion JSON + constraint-type reference)
+**Files:** `core/contracts.py` (`PlanConstraintType`, `PlanConstraint`, `StageCard.constraints`); `core/engines/file_work.py` (`FileWorkEngine.derive_constraints`); `core/services/verification.py` (`evaluate_with_constraints`, six `_check_*` methods, constraint-first path in `evaluate`); `data/prompts/manager.txt` (completion JSON + constraint-type reference)
 
 ---
 
@@ -1469,7 +1469,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | Utility | Called From | File |
 |---------|-------------|------|
 | SummaryEngine | `orchestrator_phases.py` | `core/services/summary.py` |
-| VerificationEngine | `orchestrator_phases.py` | `core/engines/verification.py` |
+| VerificationEngine | `orchestrator_phases.py` | `core/services/verification.py` |
 | FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/engines/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
 | RouteClarifier | `route_normalizer.py` | `core/engines/route_clarity.py` |

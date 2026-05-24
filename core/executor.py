@@ -29,7 +29,7 @@ from core.engines.computer_use_verifier import (
 )
 from core.engines.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
-from core.engines.verification import VerificationEngine, VerificationResult
+from core.services.verification import VerificationEngine, VerificationResult
 from core.executor_support import (
     decision_signature,
     extract_installable_packages,
