@@ -13,7 +13,7 @@ from core.engines.route_clarity import RouteClarifier  # noqa: E402
 
 
 class _DummyLLM:
-    def generate(self, messages, temperature: float = 0.0, cancel_token=None):
+    def generate(self, messages, temperature: float = 0.0, cancel_token=None, **kwargs):
         payload = json.loads(messages[-1]["content"])
         latest = str(payload.get("latest_user_input") or "").strip().lower()
         if latest == "a temporary tree.":
