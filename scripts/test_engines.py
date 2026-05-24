@@ -1399,6 +1399,474 @@ class TestRouteClarifier:
 
 
 # =============================================================================
+# FOLLOWUP RESOLUTION ENGINE TESTS
+# =============================================================================
+
+class TestFollowupResolutionEngine:
+    """Tests for FollowupResolutionEngine deterministic heuristic gates."""
+
+    @pytest.fixture
+    def followup_engine(self):
+        from core.engines.followup_resolution import FollowupResolutionEngine
+        return FollowupResolutionEngine()
+
+    @pytest.fixture
+    def task_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Do something",
+                "stages": [
+                    {"stage_goal": "Update config", "stage_type": "TASK_EVENT_WORK"}
+                ],
+            },
+        }
+
+    @pytest.fixture
+    def file_work_decision(self):
+        return {
+            "decision": "TASK",
+            "card": {
+                "goal": "Edit file",
+                "stages": [
+                    {"stage_goal": "Edit app.py", "stage_type": "FILE_WORK"}
+                ],
+            },
+        }
+
+    # ------------------------------------------------------------------ #
+    # should_resolve
+    # ------------------------------------------------------------------ #
+
+    def test_should_resolve_true_contextual_remember(self, followup_engine, task_decision):
+        """Contextual remember follow-up triggers resolution."""
+        history = [
+            {"role": "user", "content": "My favorite color is blue."},
+            {"role": "assistant", "content": "Noted."},
+            {"role": "user", "content": "Just remember that."},
+        ]
+        result = followup_engine.should_resolve(
+            decision=task_decision, user_msg="Just remember that.", recent_history=history
+        )
+        assert result is True
+
+    def test_should_resolve_true_ambiguous_memory(self, followup_engine, task_decision):
+        """Ambiguous memory follow-up triggers resolution."""
+        history = [
+            {"role": "assistant", "content": "[WORLD STATE]\n- works on: Catch the Stars"},
+            {"role": "user", "content": "Remove it from your memory."},
+        ]
+        result = followup_engine.should_resolve(
+            decision=task_decision, user_msg="Remove it from your memory.", recent_history=history
+        )
+        assert result is True
+
+    def test_should_resolve_true_affirmative_to_offer(self, followup_engine, task_decision):
+        """Affirmative confirmation to an assistant offer triggers resolution."""
+        history = [
+            {"role": "assistant", "content": "Should I save that for you?"},
+            {"role": "user", "content": "Yes please."},
+        ]
+        result = followup_engine.should_resolve(
+            decision=task_decision, user_msg="Yes please.", recent_history=history
+        )
+        assert result is True
+
+    def test_should_resolve_true_readonly_task_query(self, followup_engine):
+        """Readonly short task query triggers resolution."""
+        result = followup_engine.should_resolve(
+            decision={"decision": "CHAT"},
+            user_msg="Any tasks left?",
+        )
+        assert result is True
+
+    def test_should_resolve_false_file_work_route(self, followup_engine, file_work_decision):
+        """FILE_WORK routes are blocked unless explicit follow-up type."""
+        result = followup_engine.should_resolve(
+            decision=file_work_decision, user_msg="a temporary tree"
+        )
+        assert result is False
+
+    def test_should_resolve_false_slash_prefix(self, followup_engine, task_decision):
+        """Slash-prefixed messages do not trigger resolution."""
+        result = followup_engine.should_resolve(
+            decision=task_decision, user_msg="/ingest notes.md"
+        )
+        assert result is False
+
+    def test_should_resolve_false_empty(self, followup_engine, task_decision):
+        """Empty messages do not trigger resolution."""
+        result = followup_engine.should_resolve(
+            decision=task_decision, user_msg=""
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _looks_like_dependency_override_followup
+    # ------------------------------------------------------------------ #
+
+    def test_dependency_override_true_override_it(self, followup_engine):
+        """'override it' with active dependency context triggers override."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Runtime note: ACTIVE_TASK_DEPENDENCY: Cannot delete 'data.txt': "
+                    "referenced by active task 'backup'."
+                ),
+            },
+            {"role": "user", "content": "Override it."},
+        ]
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="Override it.", recent_history=history
+        )
+        assert result is True
+
+    def test_dependency_override_true_proceed(self, followup_engine):
+        """'proceed' with active dependency context triggers override."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Runtime note: ACTIVE_EVENT_DEPENDENCY: Cannot move 'old.log': "
+                    "referenced by active event 'review'."
+                ),
+            },
+            {"role": "user", "content": "Proceed."},
+        ]
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="Proceed.", recent_history=history
+        )
+        assert result is True
+
+    def test_dependency_override_true_force_it(self, followup_engine):
+        """'force it' with active dependency context triggers override."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Runtime note: ACTIVE_TASK_DEPENDENCY: Cannot delete 'test.py': "
+                    "referenced by active task 'lint'."
+                ),
+            },
+            {"role": "user", "content": "Force it."},
+        ]
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="Force it.", recent_history=history
+        )
+        assert result is True
+
+    def test_dependency_override_false_no_context(self, followup_engine):
+        """Override text without active dependency context does not trigger."""
+        history = [
+            {"role": "assistant", "content": "Task updated."},
+            {"role": "user", "content": "Override it."},
+        ]
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="Override it.", recent_history=history
+        )
+        assert result is False
+
+    def test_dependency_override_true_ignore_dependency(self, followup_engine):
+        """'ignore the dependency' with active dependency context triggers override."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Runtime note: ACTIVE_EVENT_DEPENDENCY: Cannot move 'old.log': "
+                    "referenced by active event 'review'."
+                ),
+            },
+            {"role": "user", "content": "Ignore the dependency."},
+        ]
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="Ignore the dependency.", recent_history=history
+        )
+        assert result is True
+
+    def test_dependency_override_false_unrelated(self, followup_engine):
+        """Unrelated text does not trigger dependency override."""
+        result = followup_engine._looks_like_dependency_override_followup(
+            user_msg="What's the weather?", recent_history=[]
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _looks_like_file_readback_followup
+    # ------------------------------------------------------------------ #
+
+    def test_file_readback_true_read_it_back(self, followup_engine):
+        """'read it back' with single relevant path triggers readback."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Relevant paths: notes.txt"
+                ),
+            },
+            {"role": "user", "content": "Read it back."},
+        ]
+        result = followup_engine._looks_like_file_readback_followup(
+            user_msg="Read it back.", recent_history=history
+        )
+        assert result is True
+
+    def test_file_readback_true_show_exactly(self, followup_engine):
+        """'show that exactly' with single relevant path triggers readback."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Relevant paths: config.json"
+                ),
+            },
+            {"role": "user", "content": "Show that exactly."},
+        ]
+        result = followup_engine._looks_like_file_readback_followup(
+            user_msg="Show that exactly.", recent_history=history
+        )
+        assert result is True
+
+    def test_file_readback_false_no_path(self, followup_engine):
+        """Readback text without relevant path does not trigger."""
+        history = [
+            {
+                "role": "system",
+                "content": "[LATEST_RUNTIME_CONTEXT]\nPrevious route: TASK",
+            },
+            {"role": "user", "content": "Read it back."},
+        ]
+        result = followup_engine._looks_like_file_readback_followup(
+            user_msg="Read it back.", recent_history=history
+        )
+        assert result is False
+
+    def test_file_readback_false_unrelated(self, followup_engine):
+        """Unrelated text does not trigger file readback."""
+        result = followup_engine._looks_like_file_readback_followup(
+            user_msg="What's for lunch?", recent_history=[]
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _should_resolve_event_detail_followup
+    # ------------------------------------------------------------------ #
+
+    def test_event_detail_true_after_event_context(self, followup_engine):
+        """Event detail query after event context triggers resolution."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous user request: What appointments do I have?\n"
+                    "Task goal: List upcoming appointments\n"
+                    "Runtime note: dentist appointment on 2027-06-15"
+                ),
+            },
+            {"role": "user", "content": "What time is the appointment?"},
+        ]
+        result = followup_engine._should_resolve_event_detail_followup(
+            user_msg="What time is the appointment?", recent_history=history
+        )
+        assert result is True
+
+    def test_event_detail_false_no_event_context(self, followup_engine):
+        """Event detail query without event context does not trigger."""
+        history = [
+            {"role": "assistant", "content": "File updated."},
+            {"role": "user", "content": "What time is the appointment?"},
+        ]
+        result = followup_engine._should_resolve_event_detail_followup(
+            user_msg="What time is the appointment?", recent_history=history
+        )
+        assert result is False
+
+    def test_event_detail_false_unrelated(self, followup_engine):
+        """Unrelated text does not trigger event detail resolution."""
+        result = followup_engine._should_resolve_event_detail_followup(
+            user_msg="Create a file.", recent_history=[]
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # _should_resolve_memory_recall_followup
+    # ------------------------------------------------------------------ #
+
+    def test_memory_recall_true_after_memory_context(self, followup_engine):
+        """Memory recall query after memory context triggers resolution."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous user request: What do I work on?\n"
+                    "Task goal: Recall memory about current project\n"
+                    "Runtime note: Memory recalled: works on: Catch the Stars"
+                ),
+            },
+            {"role": "user", "content": "Any other details?"},
+        ]
+        result = followup_engine._should_resolve_memory_recall_followup(
+            user_msg="Any other details?", recent_history=history
+        )
+        assert result is True
+
+    def test_memory_recall_false_no_memory_context(self, followup_engine):
+        """Memory recall query without memory context does not trigger."""
+        history = [
+            {"role": "assistant", "content": "Task complete."},
+            {"role": "user", "content": "Any other details?"},
+        ]
+        result = followup_engine._should_resolve_memory_recall_followup(
+            user_msg="Any other details?", recent_history=history
+        )
+        assert result is False
+
+    def test_memory_recall_false_unrelated(self, followup_engine):
+        """Unrelated text does not trigger memory recall resolution."""
+        result = followup_engine._should_resolve_memory_recall_followup(
+            user_msg="Delete the file.", recent_history=[]
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # Optional: _looks_like_dependency_file_clarification_followup
+    # ------------------------------------------------------------------ #
+
+    def test_dependency_file_clarification_true(self, followup_engine):
+        """Dependency file clarification with active dependency context triggers."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Runtime note: ACTIVE_TASK_DEPENDENCY: Cannot delete 'data.txt': "
+                    "referenced by active task 'backup'."
+                ),
+            },
+            {"role": "user", "content": "The file."},
+        ]
+        result = followup_engine._looks_like_dependency_file_clarification_followup(
+            user_msg="The file.", recent_history=history
+        )
+        assert result is True
+
+    def test_dependency_file_clarification_false_no_context(self, followup_engine):
+        """File clarification text without dependency context does not trigger."""
+        history = [
+            {"role": "assistant", "content": "Task updated."},
+            {"role": "user", "content": "The file."},
+        ]
+        result = followup_engine._looks_like_dependency_file_clarification_followup(
+            user_msg="The file.", recent_history=history
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # Optional: _should_resolve_runtime_context_followup
+    # ------------------------------------------------------------------ #
+
+    def test_runtime_context_followup_true(self, followup_engine):
+        """Short lookup clarification after TASK route with lookup source stage triggers."""
+        decision = {
+            "decision": "TASK",
+            "card": {
+                "goal": "Clarify lookup source",
+                "stages": [
+                    {
+                        "stage_goal": "Search the web and workspace for matches",
+                        "stage_type": "CHAT",
+                    }
+                ],
+            },
+        }
+        history = [
+            {
+                "role": "system",
+                "content": "[LATEST_RUNTIME_CONTEXT]\nPrevious route: TASK",
+            },
+            {"role": "user", "content": "Docs."},
+        ]
+        result = followup_engine._should_resolve_runtime_context_followup(
+            decision=decision, user_msg="Docs.", recent_history=history
+        )
+        assert result is True
+
+    def test_runtime_context_followup_false_non_task_route(self, followup_engine):
+        """Non-TASK previous route does not trigger runtime context followup."""
+        decision = {
+            "decision": "TASK",
+            "card": {
+                "goal": "Clarify lookup source",
+                "stages": [
+                    {
+                        "stage_goal": "Search the web and workspace for matches",
+                        "stage_type": "CHAT",
+                    }
+                ],
+            },
+        }
+        history = [
+            {
+                "role": "system",
+                "content": "[LATEST_RUNTIME_CONTEXT]\nPrevious route: CHAT",
+            },
+            {"role": "user", "content": "The web."},
+        ]
+        result = followup_engine._should_resolve_runtime_context_followup(
+            decision=decision, user_msg="The web.", recent_history=history
+        )
+        assert result is False
+
+    # ------------------------------------------------------------------ #
+    # Optional: _looks_like_browser_context_followup
+    # ------------------------------------------------------------------ #
+
+    def test_browser_context_followup_true(self, followup_engine):
+        """Browser context follow-up with URL in history triggers."""
+        history = [
+            {
+                "role": "system",
+                "content": (
+                    "[LATEST_RUNTIME_CONTEXT]\n"
+                    "Previous route: TASK\n"
+                    "Previous user request: Open https://example.com in the browser and tell me the main heading.\n"
+                    "Task goal: Use the browser to complete the requested interaction at 'https://example.com'.\n"
+                    "Execution status: SUCCESS\n"
+                    "Runtime note: The main heading at https://example.com is 'Example Domain'."
+                ),
+            },
+            {"role": "assistant", "content": "The main heading at https://example.com is 'Example Domain'."},
+            {"role": "user", "content": "What is the title?"},
+        ]
+        result = followup_engine._looks_like_browser_context_followup(
+            user_msg="What is the title?", recent_history=history
+        )
+        assert result is True
+
+    def test_browser_context_followup_false(self, followup_engine):
+        """Unrelated text without browser context does not trigger."""
+        result = followup_engine._looks_like_browser_context_followup(
+            user_msg="What is the title?", recent_history=[]
+        )
+        assert result is False
+
+
+# =============================================================================
 # VERIFICATION ENGINE TESTS
 # =============================================================================
 

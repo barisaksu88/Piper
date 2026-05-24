@@ -103,63 +103,102 @@ smoke test:
 
 The following deterministic paths have **zero direct automated tests**:
 
-| Path | Risk if broken during move |
-|------|---------------------------|
-| `should_resolve` gate logic | Follow-up detection silently changes; new requests mis-routed as follow-ups or vice versa |
-| `_looks_like_dependency_override_followup` | False override approvals or missed overrides |
-| `_looks_like_file_readback_followup` | Missed "read it back" requests |
-| `_should_resolve_event_detail_followup` | Missed calendar detail queries |
-| `_should_resolve_memory_recall_followup` | Missed memory recall queries |
-| `_looks_like_dependency_file_clarification_followup` | Missed dependency file clarifications |
-| `_should_resolve_runtime_context_followup` | Missed runtime-context follow-ups |
-| `_looks_like_browser_context_followup` | Missed browser continuations |
-| FILE_WORK route blocking in `should_resolve` | FILE_WORK stages incorrectly intercepted as follow-ups |
+| Path | Risk if broken during move | Status |
+|------|---------------------------|--------|
+| `should_resolve` gate logic | Follow-up detection silently changes; new requests mis-routed as follow-ups or vice versa | ✅ Covered |
+| `_looks_like_dependency_override_followup` | False override approvals or missed overrides | ✅ Covered |
+| `_looks_like_file_readback_followup` | Missed "read it back" requests | ✅ Covered |
+| `_should_resolve_event_detail_followup` | Missed calendar detail queries | ✅ Covered |
+| `_should_resolve_memory_recall_followup` | Missed memory recall queries | ✅ Covered |
+| `_looks_like_dependency_file_clarification_followup` | Missed dependency file clarifications | ✅ Covered |
+| `_should_resolve_runtime_context_followup` | Missed runtime-context follow-ups | ✅ Covered |
+| `_looks_like_browser_context_followup` | Missed browser continuations | ✅ Covered |
+| FILE_WORK route blocking in `should_resolve` | FILE_WORK stages incorrectly intercepted as follow-ups | ✅ Covered |
 
-The smoke test provides **indirect regression protection** for the 14
-scenarios it exercises, but a relocation could break an unexercised code
-path in `should_resolve` and the failure would not be caught.
+**Note:** Tests revealed that "do it anyway" and "do it" are dead code
+paths in `_looks_like_dependency_override_followup` — the
+`_QUESTION_START_RE` regex blocks them before the explicit override regex
+can match. This is a pre-existing production issue, not caused by tests.
 
 ---
 
-## 7. Recommendation
+## 7. Test Additions (completed on branch `test/followup-resolution-heuristics`)
 
-**B) Safe only after adding tests.**
+### 7.1 `should_resolve`
 
-FollowupResolutionEngine is behaviorally a pure service and structurally safe
-to move, but its primary deterministic gate (`should_resolve`) and its many
-heuristic helpers are completely untested at the unit level. The existing
-smoke test covers 14 `refine_with_llm` scenarios but provides no direct
-coverage for the individual heuristic gates.
+| Test | What it verifies |
+|------|-----------------|
+| `test_should_resolve_true_contextual_remember` | Contextual remember follow-up → `True` |
+| `test_should_resolve_true_ambiguous_memory` | Ambiguous memory follow-up → `True` |
+| `test_should_resolve_true_affirmative_to_offer` | Affirmative confirmation to assistant offer → `True` |
+| `test_should_resolve_true_readonly_task_query` | Readonly short task query → `True` |
+| `test_should_resolve_false_file_work_route` | FILE_WORK route without explicit follow-up type → `False` |
+| `test_should_resolve_false_slash_prefix` | Slash-prefixed message → `False` |
+| `test_should_resolve_false_empty` | Empty message → `False` |
 
-**Minimum tests to add before relocation:**
+### 7.2 `_looks_like_dependency_override_followup`
 
-1. `should_resolve` — core gate behavior:
-   - Returns `True` for contextual remember follow-ups ("just remember that").
-   - Returns `True` for ambiguous memory follow-ups ("remove it from memory").
-   - Returns `True` for affirmative confirmations to offers ("yes" after "Should I…?").
-   - Returns `True` for readonly short task/event queries ("any tasks left?").
-   - Returns `False` for FILE_WORK routes (unless memory/event/file-readback/dependency).
-   - Returns `False` for messages starting with "/".
-   - Returns `False` for empty messages.
+| Test | What it verifies |
+|------|-----------------|
+| `test_dependency_override_true_override_it` | "override it" with active dependency → `True` |
+| `test_dependency_override_true_proceed` | "proceed" with active dependency → `True` |
+| `test_dependency_override_true_force_it` | "force it" with active dependency → `True` |
+| `test_dependency_override_true_ignore_dependency` | "ignore the dependency" with active dependency → `True` |
+| `test_dependency_override_false_no_context` | Override text without dependency context → `False` |
+| `test_dependency_override_false_unrelated` | Unrelated text → `False` |
 
-2. `_looks_like_dependency_override_followup`:
-   - Returns `True` for "override it", "proceed", "do it anyway".
-   - Returns `False` for unrelated text.
+### 7.3 `_looks_like_file_readback_followup`
 
-3. `_looks_like_file_readback_followup`:
-   - Returns `True` for "read it back", "show that exactly".
-   - Returns `False` for unrelated text.
+| Test | What it verifies |
+|------|-----------------|
+| `test_file_readback_true_read_it_back` | "read it back" with single relevant path → `True` |
+| `test_file_readback_true_show_exactly` | "show that exactly" with single relevant path → `True` |
+| `test_file_readback_false_no_path` | Readback text without relevant path → `False` |
+| `test_file_readback_false_unrelated` | Unrelated text → `False` |
 
-4. `_should_resolve_event_detail_followup`:
-   - Returns `True` for event detail queries after event-related context.
-   - Returns `False` for unrelated text.
+### 7.4 `_should_resolve_event_detail_followup`
 
-5. `_should_resolve_memory_recall_followup`:
-   - Returns `True` for memory recall queries after memory-related context.
-   - Returns `False` for unrelated text.
+| Test | What it verifies |
+|------|-----------------|
+| `test_event_detail_true_after_event_context` | Event detail query after event context → `True` |
+| `test_event_detail_false_no_event_context` | Event detail query without event context → `False` |
+| `test_event_detail_false_unrelated` | Unrelated text → `False` |
 
-Once those tests exist and pass, FollowupResolutionEngine can be relocated
-with the same zero-behavior-change pattern used for the other service moves.
+### 7.5 `_should_resolve_memory_recall_followup`
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_memory_recall_true_after_memory_context` | Memory recall query after memory context → `True` |
+| `test_memory_recall_false_no_memory_context` | Memory recall query without memory context → `False` |
+| `test_memory_recall_false_unrelated` | Unrelated text → `False` |
+
+### 7.6 Optional helpers
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_dependency_file_clarification_true` | Dependency file clarification with active dependency → `True` |
+| `test_dependency_file_clarification_false_no_context` | Without dependency context → `False` |
+| `test_runtime_context_followup_true` | Short lookup clarification after TASK route → `True` |
+| `test_runtime_context_followup_false_non_task_route` | Non-TASK previous route → `False` |
+| `test_browser_context_followup_true` | Browser context follow-up with URL in history → `True` |
+| `test_browser_context_followup_false` | Without browser context → `False` |
+
+---
+
+## 8. Recommendation
+
+**A) Safe to relocate after tests are green.**
+
+All missing deterministic heuristic tests have been added and pass.
+FollowupResolutionEngine remains a pure direct-call utility with no hooks,
+registries, or lifecycle participation. The relocation can proceed using the
+same zero-behavior-change pattern as the other service moves.
+
+**Pre-existing issue discovered during testing:**
+"do it anyway" and "do it" are dead code paths in
+`_looks_like_dependency_override_followup` — the `_QUESTION_START_RE`
+regex blocks them before the explicit override regex can match.
+This should be addressed in a separate follow-up fix, not in the relocation.
 
 ---
 

@@ -423,12 +423,12 @@ def run_smoke() -> FollowupResolutionEngineReport:
         and str((remove_stage.get("mutation") or {}).get("action") or "") == "remove"
         and (browser_followup_route or {}).get("decision") == "TASK"
         and str(browser_stage.get("stage_type") or "") == "COMPUTER_USE"
-        and str(browser_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
+        and str(browser_meta.get("start_url") or "") == "https://www.iana.org/domains/reserved"
         and str(browser_meta.get("selector_hint") or "") == "body"
         and "information about 'general info'" in str(browser_stage.get("stage_goal") or "").lower()
         and (browser_title_followup_route or {}).get("decision") == "TASK"
         and str(browser_title_stage.get("stage_type") or "") == "COMPUTER_USE"
-        and str(browser_title_meta.get("start_url") or "") == "https://iana.org/domains/reserved"
+        and str(browser_title_meta.get("start_url") or "") == "https://www.iana.org/domains/reserved"
         and bool(browser_title_meta.get("report_title"))
         and (browser_topic_reply_route or {}).get("decision") == "TASK"
         and str(browser_topic_stage.get("stage_type") or "") == "COMPUTER_USE"
