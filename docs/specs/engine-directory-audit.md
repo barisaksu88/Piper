@@ -33,17 +33,20 @@ Lifecycle engines:
 - `stats_collector.py`
 
 Direct-call services/utilities to review:
-- `summary.py`
 - `conversation_compressor.py`
 - `context_pack.py`
-- `verification.py`
+- `computer_use_engine.py`
+
+Already relocated to `core/services/`:
 - `file_work.py`
 - `followup_resolution.py`
 - `route_clarity.py`
-- `state_mutation.py`
-- `computer_use_engine.py`
-- `computer_use_verifier.py`
 - `rollback_engine.py`
+- `search_workflow.py`
+- `state_mutation.py`
+- `summary.py`
+- `verification.py`
+- `computer_use_verifier.py`
 
 ## Likely File Surfaces
 

@@ -17,17 +17,27 @@ from core.services.rollback_engine import (
 )
 from core.services.state_mutation import StateMutationEngine
 from core.services.verification import VerificationEngine, VerificationResult
+from core.services.computer_use_verifier import (
+    build_verified_payload,
+    evaluate_stage,
+    new_stage_evidence,
+    update_stage_evidence,
+)
 
 __all__ = [
+    "build_verified_payload",
+    "evaluate_stage",
     "FileWorkEngine",
     "FollowupResolutionEngine",
     "invert_manifest",
     "is_bulk_action",
+    "new_stage_evidence",
     "record_manifest",
     "RouteClarifier",
     "SearchWorkflowEngine",
     "StateMutationEngine",
     "SummaryEngine",
+    "update_stage_evidence",
     "VerificationEngine",
     "VerificationResult",
 ]

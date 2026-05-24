@@ -33,7 +33,7 @@ The repo already has a real browser-first `COMPUTER_USE` path and harness surfac
 
 Primary runtime surfaces:
 - [`core/engines/computer_use_engine.py`](../../core/engines/computer_use_engine.py)
-- [`core/engines/computer_use_verifier.py`](../../core/engines/computer_use_verifier.py)
+- [`core/services/computer_use_verifier.py`](../../core/services/computer_use_verifier.py)
 - [`core/executor.py`](../../core/executor.py)
 - [`core/planner_boundary.py`](../../core/planner_boundary.py)
 - [`core/prompt_builder.py`](../../core/prompt_builder.py)

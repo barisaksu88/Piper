@@ -1,4 +1,4 @@
-"""Unit tests for core.engines.computer_use_verifier.
+"""Unit tests for core.services.computer_use_verifier.
 
 These tests require no browser, no filesystem, no LLM, no web calls,
 and no threading. They validate deterministic pure functions.
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from core.engines.computer_use_verifier import (
+from core.services.computer_use_verifier import (
     build_verified_payload,
     evaluate_stage,
     new_stage_evidence,
