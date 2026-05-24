@@ -285,18 +285,6 @@ def _build_search_in_flight_reply(notice: dict) -> str:
     )
 
 
-def _build_search_first_pass_rule(query: str) -> str:
-    return _SEARCH_WORKFLOW_ENGINE.build_search_first_pass_rule(query)
-
-
-def _build_search_first_pass_fallback(query: str) -> str:
-    return _SEARCH_WORKFLOW_ENGINE.build_search_first_pass_fallback(query)
-
-
-def _build_search_preview_history(user_msg: str, query: str) -> list[dict[str, str]]:
-    return _SEARCH_WORKFLOW_ENGINE.build_search_preview_history(user_msg, query)
-
-
 def _build_search_report_history(
     history: list[dict] | tuple[dict, ...] | None,
     *,
