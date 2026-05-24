@@ -210,6 +210,9 @@ export function useEventRouter({
       if (frame.frame === "error") {
         appendActivity(`[Error] ${frame.message}`);
         addRawEvent(frame);
+        setStatusText("Idle");
+        setModeText("");
+        settleStreaming();
         return;
       }
 
