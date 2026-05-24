@@ -37,11 +37,19 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 
 Modules that expose a direct-call service API and **do not** register hooks, tail-blocks, interceptors, or any other lifecycle mechanism. These are pure utilities imported and invoked by orchestrator or controller code.
 
-| Module | Direct-Call Service Behavior |
-|--------|------------------------------|
-| `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
+*All eligible direct-call utilities have been relocated to `core/services/`.*
+
+Remaining modules in `core/engines/` are **lifecycle engines** (see below), not utilities.
 
 ---
+
+### 3A. Engines That Stay in `core/engines/`
+
+Modules that own mutable state, manage external resources, use threading, or participate in lifecycle management. These are **not** candidates for `core/services/`.
+
+| Module | Why it stays in `core/engines/` |
+|--------|--------------------------------|
+| `computer_use_engine.py` | `ComputerUseEngine` owns a live Playwright browser session (`_BrowserSessionState`), uses `_playwright_lock` (RLock), has `shutdown()`/`suspend()` lifecycle methods, and is lazily initialized by `core/agent.py`. See `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`.
 
 ## Services outside `core/engines/`
 
