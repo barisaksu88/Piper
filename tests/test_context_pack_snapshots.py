@@ -7,14 +7,19 @@ no threading, and no external services.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from core.engines.context_pack import (
     ContextPackEngine,
     ContextPackRenderer,
+    _hook_upsert_runtime_context,
     resolve_persona_turn_type,
     render_context_arbitration_block,
 )
+import core.engines.proactive_monitor  # noqa: F401 — registers proactive tail blocks
 from core.contracts import (
     PersonaContextPack,
     PersonaDirectivePack,
@@ -484,3 +489,483 @@ class TestRenderContextArbitrationBlock:
     def test_search_first_pass_has_search_text(self) -> None:
         block = render_context_arbitration_block("SEARCH_FIRST_PASS")
         assert "web search is still running" in block
+
+
+# ── F. Proactive tail blocks ─────────────────────────────────────────
+
+
+class TestProactiveTailBlocks:
+    def _build(self, *, route_decision=None, persona_runtime=None):
+        engine = _make_engine()
+        return engine.build_persona_directive_pack(
+            route_decision=route_decision,
+            ingested_document_chat=False,
+            document_focus_active=False,
+            reporter_just_ran=False,
+            active_skill={},
+            persona_runtime=persona_runtime or PersonaRuntimePack(),
+        )
+
+    def test_proactive_trigger_block_present(self):
+        pack = self._build(
+            route_decision={
+                "decision": "CHAT",
+                "system_notice": {
+                    "kind": "proactive_trigger",
+                    "message": "test",
+                    "fire_at_local": "now",
+                },
+            },
+        )
+        blocks = pack.tail_system_blocks
+        block = next(b for b in blocks if b.startswith("[PROACTIVE_TRIGGER]"))
+        assert "test" in block
+        assert "now" in block
+        # Ordering: proactive block comes after arbitration
+        arb_idx = next(i for i, b in enumerate(blocks) if "[CONTEXT_ARBITRATION_RULE]" in b)
+        pro_idx = next(i for i, b in enumerate(blocks) if b.startswith("[PROACTIVE_TRIGGER]"))
+        assert arb_idx < pro_idx
+
+    def test_reminder_set_result_scheduled_block_present(self):
+        pack = self._build(
+            route_decision={
+                "decision": "CHAT",
+                "system_notice": {
+                    "kind": "reminder_set_result",
+                    "status": "scheduled",
+                    "message": "reminder",
+                    "fire_at_local": "later",
+                },
+            },
+        )
+        blocks = pack.tail_system_blocks
+        block = next(b for b in blocks if b.startswith("[REMINDER_SET_RESULT]"))
+        assert "reminder" in block
+        assert "later" in block
+
+    def test_reminder_set_result_error_block_present(self):
+        pack = self._build(
+            route_decision={
+                "decision": "CHAT",
+                "system_notice": {
+                    "kind": "reminder_set_result",
+                    "status": "error",
+                    "error": "bad time",
+                },
+            },
+        )
+        blocks = pack.tail_system_blocks
+        block = next(b for b in blocks if b.startswith("[REMINDER_SET_RESULT]"))
+        assert "bad time" in block
+
+
+# ── G. Runtime context path helpers ──────────────────────────────────
+
+
+class TestRuntimeContextPaths:
+    def test_normalize_empty_and_invalid(self):
+        assert ContextPackEngine._normalize_runtime_context_path("", None) == ""
+        assert ContextPackEngine._normalize_runtime_context_path("   ", Path("/tmp")) == ""
+        assert ContextPackEngine._normalize_runtime_context_path("`", Path("/tmp")) == ""
+
+    def test_normalize_relative_existing(self, tmp_path: Path):
+        (tmp_path / "app.py").write_text("x")
+        result = ContextPackEngine._normalize_runtime_context_path("app.py", tmp_path)
+        assert result == "app.py"
+
+    def test_normalize_relative_missing(self, tmp_path: Path):
+        assert ContextPackEngine._normalize_runtime_context_path("missing.py", tmp_path) == ""
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows absolute path conversion")
+    def test_normalize_absolute_inside_workspace(self, tmp_path: Path):
+        (tmp_path / "src" / "main.py").parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "src" / "main.py").write_text("x")
+        abs_path = str(tmp_path / "src" / "main.py")
+        result = ContextPackEngine._normalize_runtime_context_path(abs_path, tmp_path)
+        assert result == "src/main.py"
+
+    @pytest.mark.skipif(os.name != "nt", reason="WSL path conversion only on Windows")
+    def test_normalize_wsl_inside_workspace(self, tmp_path: Path):
+        (tmp_path / "src" / "main.py").parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "src" / "main.py").write_text("x")
+        posix = tmp_path.as_posix()
+        drive = tmp_path.drive[0].lower()
+        wsl_path = posix.replace(f"{drive.upper()}:/", f"/mnt/{drive}/") + "/src/main.py"
+        result = ContextPackEngine._normalize_runtime_context_path(wsl_path, tmp_path)
+        assert result == "src/main.py"
+
+    def test_collect_deduplication_and_order(self, tmp_path: Path):
+        (tmp_path / "a.py").write_text("x")
+        (tmp_path / "b.py").write_text("x")
+
+        class _FakeBrain:
+            workspace = tmp_path
+
+        orc = type(
+            "O",
+            (),
+            {
+                "brain": _FakeBrain(),
+                "user_msg": "look at a.py and b.py",
+                "context_card": {},
+                "route_decision": {
+                    "card": {"goal": "check a.py", "context": ["see b.py"], "stages": []}
+                },
+                "scratchpad": [],
+            },
+        )()
+        engine = _make_engine()
+        paths = engine._collect_runtime_context_paths(orc)
+        assert paths == ["a.py", "b.py"]
+
+    def test_collect_scratchpad_path_extraction(self, tmp_path: Path):
+        (tmp_path / "src" / "main.py").parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "src" / "main.py").write_text("x")
+
+        class _FakeBrain:
+            workspace = tmp_path
+
+        orc = type(
+            "O",
+            (),
+            {
+                "brain": _FakeBrain(),
+                "user_msg": "",
+                "context_card": {},
+                "route_decision": {},
+                "scratchpad": [
+                    "=== STAGE 1 START ===",
+                    "OBSERVATION_TEXT: Read text file: src/main.py",
+                    "=== STAGE 1 OUTCOME ===\nRESULT: SUCCESS",
+                ],
+            },
+        )()
+        engine = _make_engine()
+        paths = engine._collect_runtime_context_paths(orc)
+        assert "src/main.py" in paths
+
+    def test_collect_ignores_duplicate_paths(self, tmp_path: Path):
+        (tmp_path / "dup.py").write_text("x")
+
+        class _FakeBrain:
+            workspace = tmp_path
+
+        orc = type(
+            "O",
+            (),
+            {
+                "brain": _FakeBrain(),
+                "user_msg": "dup.py and DUP.py",
+                "context_card": {},
+                "route_decision": {},
+                "scratchpad": [],
+            },
+        )()
+        engine = _make_engine()
+        paths = engine._collect_runtime_context_paths(orc)
+        assert paths == ["dup.py"]
+
+    def test_collect_user_msg_path_extraction(self, tmp_path: Path):
+        (tmp_path / "user.py").write_text("x")
+
+        class _FakeBrain:
+            workspace = tmp_path
+
+        orc = type(
+            "O",
+            (),
+            {
+                "brain": _FakeBrain(),
+                "user_msg": "check user.py please",
+                "context_card": {},
+                "route_decision": {},
+                "scratchpad": [],
+            },
+        )()
+        engine = _make_engine()
+        paths = engine._collect_runtime_context_paths(orc)
+        assert paths == ["user.py"]
+
+    def test_collect_context_card_stage_paths(self, tmp_path: Path):
+        (tmp_path / "stage.py").write_text("x")
+
+        class _FakeBrain:
+            workspace = tmp_path
+
+        orc = type(
+            "O",
+            (),
+            {
+                "brain": _FakeBrain(),
+                "user_msg": "",
+                "context_card": {},
+                "route_decision": {
+                    "card": {
+                        "goal": "",
+                        "context": [],
+                        "stages": [
+                            {
+                                "stage_goal": "edit stage.py",
+                                "success_condition": "stage.py is correct",
+                            }
+                        ],
+                    }
+                },
+                "scratchpad": [],
+            },
+        )()
+        engine = _make_engine()
+        paths = engine._collect_runtime_context_paths(orc)
+        assert "stage.py" in paths
+
+
+# ── H. _hook_upsert_runtime_context direct-call path ─────────────────
+
+
+class TestHookUpsertRuntimeContext:
+    def _make_orc(self, payload="", route_decision=None):
+        class _FakeChat:
+            def __init__(self):
+                self.messages: list[dict] = []
+
+            def upsert_hidden_system_message(self, prefix, content):
+                self.messages = [
+                    m
+                    for m in self.messages
+                    if not (
+                        m.get("role") == "system"
+                        and str(m.get("content", "")).startswith(prefix)
+                    )
+                ]
+                self.messages.append({"role": "system", "content": content, "hidden": True})
+
+            def append_message(self, msg):
+                self.messages.append(msg)
+
+            def remove_hidden_system_message(self, prefix):
+                self.messages = [
+                    m
+                    for m in self.messages
+                    if not (
+                        m.get("role") == "system"
+                        and str(m.get("content", "")).startswith(prefix)
+                    )
+                ]
+
+        class _FakePromptContext:
+            def __init__(self, p):
+                self._p = p
+
+            def build_runtime_context_message(self, orc, *, reporter_just_ran=False):
+                return self._p
+
+        orc = type("O", (), {})()
+        orc.prompt_context = _FakePromptContext(payload)
+        orc.chat = _FakeChat()
+        orc.route_decision = route_decision or {}
+        return orc
+
+    def test_inserts_hidden_message(self):
+        orc = self._make_orc(payload="[LATEST_RUNTIME_CONTEXT]\nPrevious route: TASK")
+        _hook_upsert_runtime_context(orc, reporter_just_ran=False)
+        assert len(orc.chat.messages) == 1
+        assert orc.chat.messages[0]["content"].startswith("[LATEST_RUNTIME_CONTEXT]")
+        assert orc.chat.messages[0]["hidden"] is True
+
+    def test_upsert_replaces_on_repeat(self):
+        orc = self._make_orc(payload="[LATEST_RUNTIME_CONTEXT]\nPrevious route: TASK")
+        _hook_upsert_runtime_context(orc, reporter_just_ran=False)
+        orc.prompt_context._p = "[LATEST_RUNTIME_CONTEXT]\nPrevious route: SEARCH"
+        _hook_upsert_runtime_context(orc, reporter_just_ran=False)
+        assert len(orc.chat.messages) == 1
+        assert "SEARCH" in orc.chat.messages[0]["content"]
+
+    def test_reporter_just_ran_passed_through(self):
+        class _FakePromptContext:
+            def __init__(self):
+                self.calls = []
+
+            def build_runtime_context_message(self, orc, *, reporter_just_ran=False):
+                self.calls.append(reporter_just_ran)
+                return ""
+
+        orc = type("O", (), {})()
+        orc.prompt_context = _FakePromptContext()
+        orc.chat = type(
+            "C",
+            (),
+            {
+                "upsert_hidden_system_message": lambda *a, **k: None,
+                "append_message": lambda *a, **k: None,
+                "remove_hidden_system_message": lambda *a, **k: None,
+            },
+        )()
+        orc.route_decision = {}
+        _hook_upsert_runtime_context(orc, reporter_just_ran=True)
+        assert orc.prompt_context.calls == [True]
+
+    def test_file_target_confirmation_cancelled_removes_message(self):
+        orc = self._make_orc(payload="[LATEST_RUNTIME_CONTEXT]\nPrevious route: TASK")
+        _hook_upsert_runtime_context(orc, reporter_just_ran=False)
+        assert len(orc.chat.messages) == 1
+        orc.route_decision = {"system_notice": {"kind": "file_target_confirmation_cancelled"}}
+        _hook_upsert_runtime_context(orc, reporter_just_ran=False)
+        assert len(orc.chat.messages) == 0
+
+
+# ── I. build_runtime_context_pack reporter branches ──────────────────
+
+
+class TestBuildRuntimeContextPack:
+    def _make_engine(self):
+        return _make_engine()
+
+    def _make_orc(self, **kwargs):
+        class _FakeBrain:
+            workspace = Path(kwargs.get("workspace", "."))
+
+        defaults = {
+            "route_decision": {"decision": "SEARCH", "card": {"query": "weather"}},
+            "context_card": {},
+            "user_msg": "hello",
+            "latest_search_query": "",
+            "latest_search_failed": False,
+            "latest_search_error": "",
+            "scratchpad": [],
+            "brain": _FakeBrain(),
+        }
+        defaults.update(kwargs)
+        return type("O", (), defaults)()
+
+    def test_reporter_just_ran_search_completed(self):
+        engine = self._make_engine()
+        orc = self._make_orc()
+        pack = engine.build_runtime_context_pack(orc, reporter_just_ran=True)
+        assert pack.previous_route == "SEARCH"
+        assert pack.reporter_just_ran is True
+        assert pack.search_failed is False
+        assert pack.search_error == ""
+        assert pack.task_goal == ""
+        assert pack.execution_status == ""
+        assert pack.runtime_note == ""
+
+    def test_reporter_just_ran_search_failed_with_error(self):
+        engine = self._make_engine()
+        orc = self._make_orc(latest_search_failed=True, latest_search_error="Timeout")
+        pack = engine.build_runtime_context_pack(orc, reporter_just_ran=True)
+        assert pack.search_failed is True
+        assert "Timeout" in pack.search_error
+
+    def test_reporter_uses_latest_search_query(self):
+        engine = self._make_engine()
+        orc = self._make_orc(
+            latest_search_query="custom query",
+            route_decision={"decision": "SEARCH", "card": {}},
+        )
+        pack = engine.build_runtime_context_pack(orc, reporter_just_ran=True)
+        assert pack.search_query == "custom query"
+
+    def test_non_reporter_task_includes_goal_and_status(self):
+        engine = self._make_engine()
+        orc = self._make_orc(
+            route_decision={"decision": "TASK", "card": {"goal": "fix bug"}},
+            scratchpad=[
+                "=== STAGE 1 START ===",
+                "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: Done",
+            ],
+        )
+        pack = engine.build_runtime_context_pack(orc, reporter_just_ran=False)
+        assert pack.previous_route == "TASK"
+        assert pack.task_goal == "fix bug"
+        assert "FILE OPERATION SUCCESS" in pack.execution_status
+        assert pack.runtime_note != ""
+
+
+# ── J. apply_context_arbitration turn types ──────────────────────────
+
+
+class TestApplyContextArbitrationTurnTypes:
+    def _base_pack(self):
+        return PersonaContextPack(
+            world_state="ws",
+            situational_state="ss",
+            intent_state="is",
+            operational_state="os",
+            env_block="env",
+            brain_hits=[{"t": 1}],
+            document_hits=[{"d": 1}],
+            document_focus="df",
+            document_references=["r1"],
+            document_sources=["s1"],
+        )
+
+    def test_task(self):
+        engine = _make_engine()
+        pack = engine.apply_context_arbitration(self._base_pack(), route_decision={"decision": "TASK"})
+        assert pack.operational_state == "os"
+        assert pack.world_state == "ws"
+        assert pack.brain_hits == [{"t": 1}]
+        assert pack.env_block == ""
+        assert pack.situational_state == ""
+        assert pack.intent_state == ""
+        assert pack.document_hits == []
+        assert pack.document_focus == ""
+
+    def test_search_first_pass(self):
+        engine = _make_engine()
+        pack = engine.apply_context_arbitration(self._base_pack(), route_decision={"decision": "SEARCH"})
+        assert pack.env_block == "env"
+        assert pack.world_state == "ws"
+        assert pack.brain_hits == [{"t": 1}]
+        assert pack.operational_state == ""
+        assert pack.situational_state == ""
+        assert pack.intent_state == ""
+        assert pack.document_hits == []
+
+    def test_doc_focus(self):
+        engine = _make_engine()
+        pack = engine.apply_context_arbitration(
+            self._base_pack(),
+            route_decision={"decision": "CHAT"},
+            ingested_document_chat=True,
+            document_focus_active=True,
+        )
+        assert pack.document_focus == "df"
+        assert pack.document_references == ["r1"]
+        assert pack.document_sources == ["s1"]
+        assert pack.intent_state == "is"
+        assert pack.brain_hits == [{"t": 1}]
+        assert pack.env_block == ""
+        assert pack.world_state == ""
+        assert pack.situational_state == ""
+        assert pack.operational_state == ""
+        assert pack.document_hits == []
+
+    def test_proactive_trigger(self):
+        engine = _make_engine()
+        pack = engine.apply_context_arbitration(
+            self._base_pack(),
+            route_decision={"decision": "CHAT", "system_notice": {"kind": "proactive_trigger"}},
+        )
+        assert pack.operational_state == "os"
+        assert pack.env_block == ""
+        assert pack.world_state == ""
+        assert pack.situational_state == ""
+        assert pack.intent_state == ""
+        assert pack.brain_hits == []
+        assert pack.document_hits == []
+
+    def test_explain(self):
+        engine = _make_engine()
+        pack = engine.apply_context_arbitration(
+            self._base_pack(),
+            route_decision={"decision": "CHAT", "system_notice": {"kind": "explain_last_turn"}},
+        )
+        assert pack.env_block == ""
+        assert pack.world_state == ""
+        assert pack.situational_state == ""
+        assert pack.intent_state == ""
+        assert pack.operational_state == ""
+        assert pack.brain_hits == []
+        assert pack.document_hits == []
+        assert pack.document_focus == ""

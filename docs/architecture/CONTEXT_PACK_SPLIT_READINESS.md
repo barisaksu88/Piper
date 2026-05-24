@@ -228,21 +228,21 @@ These are all read-only in the direct-call paths (no mutations on dependencies).
 | `scripts/context_pack_engine_smoke_test.py` | Full `PromptContextService` integration: persona pack, document focus, context arbitration (search first pass, reporter, doc focus, explain, proactive, file work), runtime pack (file work, targeted read, paused, partial, failed), directive packs, runtime messages |
 | `scripts/search_error_contract_smoke_test.py` | `ContextPackRenderer.render_runtime_context_message` for failed search reporter |
 
-### Missing coverage
+### Missing coverage (now added in `test/context-pack-split-guards`)
 
-1. **`_hook_upsert_runtime_context` direct-call path** — the generic `fire_hooks` path is exercised in integration, but the direct call at `orchestrator_phases.py:1824` (auto-reroute after failed stage) has no dedicated test.
-2. **`_collect_runtime_context_paths` / `_normalize_runtime_context_path`** — path extraction and normalization logic is only hit through integration smokes; no unit tests for Windows ↔ WSL path translation, relative path resolution, or deduplication.
-3. **Proactive tail blocks in directive pack** — `_tail_block_proactive_trigger` and `_tail_block_reminder_set_result` are not asserted in snapshot tests or unit tests (they depend on `system_notice` in `route_decision`).
-4. **`build_runtime_context_pack` reporter-just-ran branches** — snapshot tests cover the renderer, but not the pack builder's extraction of `latest_search_failed`, `latest_search_error`, etc.
-5. **`apply_context_arbitration` for all turn types** — only REPORTER and CHAT are deeply asserted; PROACTIVE_TRIGGER, EXPLAIN, DOC_FOCUS, TASK, SEARCH_FIRST_PASS have shallow or no coverage.
+1. **`_hook_upsert_runtime_context` direct-call path** — ✅ covered by `TestHookUpsertRuntimeContext` (insert, upsert/replace, `reporter_just_ran` passthrough, cancellation removal).
+2. **`_collect_runtime_context_paths` / `_normalize_runtime_context_path`** — ✅ covered by `TestRuntimeContextPaths` (empty/invalid, relative existing/missing, absolute inside workspace, WSL inside workspace, deduplication, scratchpad extraction, user-msg extraction, context-card stage extraction).
+3. **Proactive tail blocks in directive pack** — ✅ covered by `TestProactiveTailBlocks` (`proactive_trigger` presence and ordering, `reminder_set_result` scheduled and error cases).
+4. **`build_runtime_context_pack` reporter-just-ran branches** — ✅ covered by `TestBuildRuntimeContextPack` (`reporter_just_ran=True` with search completed, search failed with error, latest search query override, non-reporter task goal and status extraction).
+5. **`apply_context_arbitration` for all turn types** — ✅ covered by `TestApplyContextArbitrationTurnTypes` (TASK, SEARCH_FIRST_PASS, DOC_FOCUS, PROACTIVE_TRIGGER, EXPLAIN).
 
 ### Minimum tests needed before any split
 
 - **Snapshot tests for `ContextPackRenderer`** — ✅ already exist.
-- **Snapshot tests for `build_persona_directive_pack` with proactive / reminder tail blocks** — add at least 2 cases (proactive trigger, reminder set result).
-- **Unit tests for `_normalize_runtime_context_path`** — Windows drive letter, `/mnt/` conversion, relative path inside workspace, deduplication.
-- **Unit or smoke test for `_hook_upsert_runtime_context` direct-call path** — verify hidden system message is upserted after a failed stage auto-reroute.
-- **Compile + full pytest green** — must remain green after each incremental move.
+- **Snapshot tests for `build_persona_directive_pack` with proactive / reminder tail blocks** — ✅ added.
+- **Unit tests for `_normalize_runtime_context_path`** — ✅ added.
+- **Unit or smoke test for `_hook_upsert_runtime_context` direct-call path** — ✅ added.
+- **Compile + full pytest green** — ✅ must remain green after each incremental move.
 
 ---
 
