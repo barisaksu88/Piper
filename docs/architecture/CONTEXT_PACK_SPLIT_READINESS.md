@@ -1,8 +1,8 @@
 # Context Pack Split Readiness Audit
 
-**Status:** Renderer/helper extraction completed — staged split in progress  
+**Status:** Tail-block registry extracted — staged split in progress  
 **Scope:** `core/engines/context_pack.py`  
-**Branch:** `split/context-pack-renderer-service`  
+**Branch:** `split/context-pack-tail-block-registry`  
 **Date:** 2026-05-24  
 
 ---
@@ -13,9 +13,10 @@
 
 | Behavior category | Owner in this file | Verdict |
 |---|---|---|
-| Registry / tail-block behavior | `_TAIL_BLOCK_REGISTRY`, `register_tail_block()`, 11 `@register_tail_block` builders, `@register_hook("on_turn_end")` | Must stay in `core/engines/` |
+| Registry / tail-block behavior | `_TAIL_BLOCK_REGISTRY`, `register_tail_block()`, 11 `@register_tail_block` builders (now in `core/engines/tail_block_registry.py`), `@register_hook("on_turn_end")` | Must stay in `core/engines/` |
 | Direct-call service behavior | `ContextPackEngine.build_persona_pack()`, `.build_runtime_context_pack()`, `.build_persona_runtime_pack()`, etc. | Could move to `core/services/` **after** registry is separated |
 | Pure helper/value behavior | `resolve_persona_turn_type()`, `render_context_arbitration_block()`, `_clear_pack_field_value()` | **Extracted** to `core/services/context_pack_renderer.py` |
+| Registry / tail-block surface | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, all `@register_tail_block` builders | **Extracted** to `core/engines/tail_block_registry.py` |
 
 The module is **not** a pure lifecycle engine (it exposes a wide direct-call API) and **not** a pure service (it owns global mutable registry state and a lifecycle hook). Because `build_persona_directive_pack()` iterates `_TAIL_BLOCK_REGISTRY` and because `orchestrator_phases.py` imports `_hook_upsert_runtime_context` directly, the engine class and the registry/hook are tightly bound. Moving the entire module would pull registry behavior into `core/services/`, violating the engine/service boundary.
 
@@ -260,7 +261,7 @@ Rationale:
 ### Proposed staging (future work, not this branch)
 
 1. ✅ **Add missing tests** (proactive tail blocks, path normalization, hook direct-call path) — completed in `test/context-pack-split-guards`.
-2. **Extract `_TAIL_BLOCK_REGISTRY` + `register_tail_block` + `TailBlockContext` + all builders** into `core/engines/tail_block_registry.py` (or keep in `context_pack.py` but expose a stable import).
+2. ✅ **Extract `_TAIL_BLOCK_REGISTRY` + `register_tail_block` + `TailBlockContext` + all builders** into `core/engines/tail_block_registry.py`.
 3. ✅ **Move `ContextPackRenderer` + pure helpers** to `core/services/context_pack_renderer.py`.
 4. **Update `PromptContextService`** to import renderer from the new location; keep `ContextPackEngine` in `core/engines/` until its registry-bound method can be decoupled.
 5. ✅ **Run regression pack** after each stage: `python -m compileall …`, `pytest tests/ -q`, `scripts/context_pack_engine_smoke_test.py --json`.
