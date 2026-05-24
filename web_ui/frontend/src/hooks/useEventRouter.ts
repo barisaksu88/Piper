@@ -110,6 +110,18 @@ export function useEventRouter({
     ]);
   }, []);
 
+  const getEventPayload = (frame: BackendFrame) => frame.payload;
+
+  const getErrorMessage = (frame: BackendFrame, payload: Record<string, unknown>) => {
+    if (frame.frame === "error") {
+      return String(frame.message || "Unknown error");
+    }
+    return String((payload as { message?: string }).message || "Unknown error");
+  };
+
+  const getDeltaText = (payload: Record<string, unknown>) =>
+    String((payload as { text?: string }).text || "");
+
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
     pendingDeltasRef.current = "";
@@ -256,7 +268,7 @@ export function useEventRouter({
     (frame: BackendFrame) => {
       if (frame.frame === "error") {
         addRawEvent(frame);
-        const message = String(frame.message || "Unknown error");
+        const message = getErrorMessage(frame, getEventPayload(frame));
         appendActivity(`[Error] ${message}`);
         addError(message, "", frame.kind);
         setStatusText("Idle");
@@ -265,7 +277,8 @@ export function useEventRouter({
         return;
       }
 
-      const { kind, payload } = frame;
+      const payload = getEventPayload(frame);
+      const { kind } = frame;
       addRawEvent(frame);
 
       if ((payload as Record<string, unknown>)._suppressed) {
@@ -319,7 +332,7 @@ export function useEventRouter({
         }
 
         case "stream.delta": {
-          const text = String((payload as { text?: string }).text || "");
+          const text = getDeltaText(payload);
           if (!text) break;
           if (!streamingRef.current) {
             streamingRef.current = true;
@@ -401,7 +414,7 @@ export function useEventRouter({
         }
 
         case "error": {
-          const message = String((payload as { message?: string }).message || "Unknown error");
+          const message = getErrorMessage(frame, payload);
           streamingRef.current = false;
           setIsGenerating(false);
           appendActivity(`[Error] ${message}`);
