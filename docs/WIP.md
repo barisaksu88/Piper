@@ -57,7 +57,7 @@ Keep entries short and high-signal:
 - Browser computer use v0
   - goal: ship the browser-first `COMPUTER_USE` path with deterministic verification and harness coverage
   - current state: partially implemented; follow-up work and stabilization are still active
-  - main files: `core/engines/computer_use_engine.py`, `core/engines/computer_use_verifier.py`, `core/executor.py`, `core/planner_boundary.py`, `core/prompt_builder.py`, `core/routing/route_normalizer.py`, `tools/registry.py`
+  - main files: `core/engines/computer_use_engine.py`, `core/services/computer_use_verifier.py`, `core/executor.py`, `core/planner_boundary.py`, `core/prompt_builder.py`, `core/routing/route_normalizer.py`, `tools/registry.py`
   - next proof: stable browser-use regression coverage and confirmation that the shipped path matches `docs/architecture/TRIGGER_FLOW.md`
   - roadmap source: `docs/ROADMAP.md` under `Computer use v0 (browser-first)`
   - primary spec: `docs/specs/computer-use.md`

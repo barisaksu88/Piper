@@ -1475,7 +1475,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | RouteClarifier | `route_normalizer.py` | `core/services/route_clarity.py` |
 | StateMutationEngine | `orchestrator_phases.py` | `core/services/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
-| ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
+| ComputerUseVerifier | `executor.py` | `core/services/computer_use_verifier.py` |
 | RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/services/rollback_engine.py` |
 
 **Note:** Some of these live in `core/engines/` for historical reasons but function as utilities. Cleanup target: Phase 8+.
