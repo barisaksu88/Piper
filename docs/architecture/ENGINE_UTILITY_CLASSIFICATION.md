@@ -19,27 +19,22 @@ A module is classified by what it actually does at runtime, not by which folder 
 
 Modules that participate exclusively in the lifecycle hook/registry system. They do not expose a direct-call service API that orchestrator code imports and invokes imperatively.
 
-*None currently in `core/engines/`.* All modules that register hooks also expose direct-call behavior.
+| Module | Registry Behavior | What it delegates to |
+|--------|-------------------|----------------------|
+| `change_journal.py` | `@register_hook("on_task_verified")` — `_hook_record_change_journal` | `ChangeJournal` in `core/services/change_journal.py` |
+| `conversation_compressor.py` | `@register_hook("on_turn_end")` — `_hook_deferred_conversation_summary` | `ConversationCompressor` in `core/services/conversation_compressor.py` |
+| `stats_collector.py` | `@register_hook("on_pre_route")` — `_hook_note_pre_route_user_msg` | `StatsCollector` in `core/services/stats_collector.py` |
+
+These modules are **thin wrappers**: they register a hook and immediately delegate to a service class. They do not re-export the service class.
 
 ### 2. Hybrid Modules
 
-Modules that **both** register hooks / tail-blocks / interceptors **and** expose direct-call service behavior. These are the most common pattern in `core/engines/`.
+Modules that **both** register hooks / tail-blocks / interceptors **and** retain engine-level behavior (lifecycle management, mutable state, or registry-bound builder classes).
 
-| Module | Registry Behavior | Direct-Call Service Behavior |
-|--------|-------------------|------------------------------|
-| `conversation_compressor.py` | `@register_hook("on_turn_end")` for deferred conversation summarization | `ConversationCompressor` class split to `core/services/conversation_compressor.py`; hook remains in `core/engines/conversation_compressor.py` |
-| `context_pack.py` | `@register_hook("on_turn_end")`; `ContextPackDirectiveEngine` (registry-bound `build_persona_directive_pack`) remains here. Tail-block registry lives in `core/engines/tail_block_registry.py`. | `ContextPackService` moved to `core/services/context_pack_service.py`; renderer/helpers extracted to `core/services/context_pack_renderer.py`; runtime path helpers extracted to `core/services/context_pack_paths.py`. |
-| `change_journal.py` | `@register_hook("on_task_verified")` to record change journal after task verification | `ChangeJournal` class moved to `core/services/change_journal.py`; only `_hook_record_change_journal` remains in `core/engines/change_journal.py` |
-| `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector` and `TurnStatsState` moved to `core/services/stats_collector.py`; only `_hook_note_pre_route_user_msg` remains in `core/engines/stats_collector.py` |
-| `proactive_monitor.py` | `@register_tail_block`, `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle (start/stop/loop) remains in `core/engines/proactive_monitor.py`. `ReminderStore`, `ReminderParseResult`, parser/message helpers moved to `core/services/reminders.py`. See `docs/architecture/PROACTIVE_MONITOR_SPLIT_READINESS.md`.
-
-`context_pack.py` split completed — see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. `ContextPackService` moved to `core/services/context_pack_service.py`; `ContextPackDirectiveEngine` and the `on_turn_end` hook remain in `core/engines/context_pack.py`; tail-block registry lives in `core/engines/tail_block_registry.py`. Renderer/helpers extracted to `core/services/context_pack_renderer.py`; runtime path helpers extracted to `core/services/context_pack_paths.py`.
-
-`conversation_compressor.py` has been **split**. The `ConversationCompressor` class now lives in `core/services/conversation_compressor.py`; only the `_hook_deferred_conversation_summary` hook remains in `core/engines/conversation_compressor.py`. See `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`.
-
-`change_journal.py` has been **split**. The `ChangeJournal` class now lives in `core/services/change_journal.py`; only the `_hook_record_change_journal` hook remains in `core/engines/change_journal.py`. See `docs/architecture/CHANGE_JOURNAL_SPLIT_READINESS.md`.
-
-`stats_collector.py` has been **split**. The `StatsCollector` class and `TurnStatsState` dataclass now live in `core/services/stats_collector.py`; only the `_hook_note_pre_route_user_msg` hook remains in `core/engines/stats_collector.py`. See `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md`.
+| Module | Registry Behavior | Engine Behavior |
+|--------|-------------------|-----------------|
+| `context_pack.py` | `@register_hook("on_turn_end")`; `ContextPackDirectiveEngine` (registry-bound `build_persona_directive_pack`) remains here. Tail-block registry lives in `core/engines/tail_block_registry.py`. | `ContextPackDirectiveEngine` is a registry-bound builder class with no direct-call public API. |
+| `proactive_monitor.py` | `@register_tail_block` (×2), `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle class (start/stop/loop, daemon thread) remains here. |
 
 ### 3. Direct-Call Utilities
 
@@ -47,7 +42,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 *All eligible direct-call utilities have been relocated to `core/services/`.*
 
-Remaining modules in `core/engines/` are **hybrids or lifecycle/resource-owning engines** (see below), not pure direct-call utilities.
+Remaining modules in `core/engines/` are **hybrids, registry wrappers, or lifecycle/resource-owning engines** (see below), not pure direct-call utilities.
 
 ---
 
@@ -57,33 +52,29 @@ Modules that own mutable state, manage external resources, use threading, or par
 
 | Module | Why it stays in `core/engines/` |
 |--------|--------------------------------|
-| `computer_use_engine.py` | `ComputerUseEngine` owns a live Playwright browser session (`_BrowserSessionState`), uses `_playwright_lock` (RLock), has `shutdown()`/`suspend()` lifecycle methods, and is lazily initialized by `core/agent.py`. See `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`.
+| `computer_use_engine.py` | `ComputerUseEngine` owns a live Playwright browser session (`_BrowserSessionState`), uses `_playwright_lock` (RLock), has `shutdown()`/`suspend()` lifecycle methods, and is lazily initialized by `core/agent.py`. See `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`. |
+| `tail_block_registry.py` | Registry infrastructure (`TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, and all `@register_tail_block` builders). This is a core lifecycle mechanism, not a service. |
 
 ### 3B. Split Completed
 
-`context_pack.py` — `ContextPackService` (all pure direct-call methods) has been moved to `core/services/context_pack_service.py`. `ContextPackDirectiveEngine` (registry-bound `build_persona_directive_pack`) and the `on_turn_end` hook remain in `core/engines/context_pack.py`. Tail-block registry (`TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, and all `@register_tail_block` builders) lives in `core/engines/tail_block_registry.py`. `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block`, and related pure helpers live in `core/services/context_pack_renderer.py`. Runtime path helpers live in `core/services/context_pack_paths.py`.
+All splits are complete. No pure service classes remain in `core/engines/`.
 
-`conversation_compressor.py` — the `ConversationCompressor` class and `ConversationCompressionResult` dataclass have been moved to `core/services/conversation_compressor.py`. The `@register_hook("on_turn_end")` hook (`_hook_deferred_conversation_summary`) remains in `core/engines/conversation_compressor.py`.
-
-## Services outside `core/engines/`
-
-`SearchWorkflowEngine` was relocated from `core/engines/search_workflow.py` to `core/services/search_workflow.py` because it is a pure direct-call service with no hooks, registries, or lifecycle participation.
-
-`SummaryEngine` was relocated from `core/engines/summary.py` to `core/services/summary.py` for the same reason.
-
-`VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.
-
-`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It was the last high-risk file-operation service move in this pass.
-
-`RouteClarifier` was relocated from `core/engines/route_clarity.py` to `core/services/route_clarity.py` for the same reason.
-
-`FollowupResolutionEngine` was relocated from `core/engines/followup_resolution.py` to `core/services/followup_resolution.py` for the same reason.
-
-`RollbackEngine` / `rollback_engine.py` was relocated from `core/engines/rollback_engine.py` to `core/services/rollback_engine.py` because it is a pure direct-call utility with no hooks, registries, or lifecycle participation.
-
-`StateMutationEngine` / `state_mutation.py` was relocated from `core/engines/state_mutation.py` to `core/services/state_mutation.py` because it is a pure direct-call utility with no hooks, registries, or lifecycle participation.
-
-`computer_use_verifier` module (`new_stage_evidence`, `update_stage_evidence`, `evaluate_stage`, `build_verified_payload`) was relocated from `core/engines/computer_use_verifier.py` to `core/services/computer_use_verifier.py` because it is a pure direct-call utility module with no hooks, registries, or lifecycle participation.
+| Module | What moved to `core/services/` | What remains in `core/engines/` |
+|--------|-------------------------------|--------------------------------|
+| `context_pack.py` | `ContextPackService` → `core/services/context_pack_service.py`; renderer/helpers → `core/services/context_pack_renderer.py`; runtime path helpers → `core/services/context_pack_paths.py` | `ContextPackDirectiveEngine` (registry-bound builder); `@register_hook("on_turn_end")` |
+| `conversation_compressor.py` | `ConversationCompressor`, `ConversationCompressionResult` → `core/services/conversation_compressor.py` | `@register_hook("on_turn_end")` — `_hook_deferred_conversation_summary` |
+| `change_journal.py` | `ChangeJournal` → `core/services/change_journal.py` | `@register_hook("on_task_verified")` — `_hook_record_change_journal` |
+| `stats_collector.py` | `StatsCollector`, `TurnStatsState` → `core/services/stats_collector.py` | `@register_hook("on_pre_route")` — `_hook_note_pre_route_user_msg` |
+| `proactive_monitor.py` | `ReminderStore`, `ReminderParseResult`, parser/message helpers → `core/services/reminders.py` | `ProactiveMonitor` lifecycle class; `@register_tail_block` (×2); `@register_hook("on_turn_end")`; `@register_route_interceptor` |
+| `search_workflow.py` | `SearchWorkflowEngine` → `core/services/search_workflow.py` | *(module removed)* |
+| `summary.py` | `SummaryEngine` → `core/services/summary.py` | *(module removed)* |
+| `verification.py` | `VerificationEngine`, `VerificationResult` → `core/services/verification.py` | *(module removed)* |
+| `file_work.py` | `FileWorkEngine` → `core/services/file_work.py` | *(module removed)* |
+| `route_clarity.py` | `RouteClarifier` → `core/services/route_clarity.py` | *(module removed)* |
+| `followup_resolution.py` | `FollowupResolutionEngine` → `core/services/followup_resolution.py` | *(module removed)* |
+| `rollback_engine.py` | `RollbackEngine` → `core/services/rollback_engine.py` | *(module removed)* |
+| `state_mutation.py` | `StateMutationEngine` → `core/services/state_mutation.py` | *(module removed)* |
+| `computer_use_verifier.py` | `new_stage_evidence`, `update_stage_evidence`, `evaluate_stage`, `build_verified_payload` → `core/services/computer_use_verifier.py` | *(module removed)* |
 
 ---
 
