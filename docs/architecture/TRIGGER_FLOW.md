@@ -1248,7 +1248,7 @@ The manifest path is stored on the change-journal entry for that turn (`rollback
 
 **Limitations (v1):** Only the most recent bulk operation is reversible via manifest. `delete_many` deletions are recorded but cannot be restored (no content snapshot); `invert_manifest` reports them as non-recoverable. `RUN_CODE` operations are excluded entirely.
 
-**Files:** `core/engines/rollback_engine.py` (new — `record_manifest`, `invert_manifest`, `is_bulk_action`, `_prune_old_manifests`); `core/executor.py` (post-bulk-op manifest write, `completed_rollback_manifests` list, `_current_turn_id` propagated from phase); `core/engines/change_journal.py` (`rollback_manifests` field on entry, `mark_entry_undone` method); `core/orchestrator_phases.py` (manifest collection, hook args, `phase_undo` manifest-first path); `data/rollback/` (manifest store); `scripts/bulk_rollback_manifest_smoke_test.py` (11-case smoke test)
+**Files:** `core/services/rollback_engine.py` (new — `record_manifest`, `invert_manifest`, `is_bulk_action`, `_prune_old_manifests`); `core/executor.py` (post-bulk-op manifest write, `completed_rollback_manifests` list, `_current_turn_id` propagated from phase); `core/engines/change_journal.py` (`rollback_manifests` field on entry, `mark_entry_undone` method); `core/orchestrator_phases.py` (manifest collection, hook args, `phase_undo` manifest-first path); `data/rollback/` (manifest store); `scripts/bulk_rollback_manifest_smoke_test.py` (11-case smoke test)
 
 ### 13.19 Execution Budget — Wall-Clock and Action-Count Stage Limits ✓ IMPLEMENTED
 
@@ -1476,7 +1476,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
 | ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
-| RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/engines/rollback_engine.py` |
+| RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/services/rollback_engine.py` |
 
 **Note:** Some of these live in `core/engines/` for historical reasons but function as utilities. Cleanup target: Phase 8+.
 
