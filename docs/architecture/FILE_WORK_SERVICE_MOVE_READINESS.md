@@ -213,9 +213,10 @@ docs/foundation/BLUEPRINT.md                          — path updates
 
 ## 9. Notes
 
-- `FileWorkEngine` is the **last remaining** Direct-Call Utility in `core/engines/`.
-  All others (`search_workflow.py`, `summary.py`, `verification.py`) have already
-  been relocated to `core/services/`.
+- `FileWorkEngine` is the **last service moved in this pass** from `core/engines/`
+  to `core/services/`.  Other direct-call utilities (`followup_resolution.py`,
+  `route_clarity.py`, `state_mutation.py`, `computer_use_engine.py`, etc.)
+  remain in `core/engines/` and should be audited individually before relocation.
 - `file_work.py` has **no registry behavior** and is therefore the cleanest
   remaining candidate for relocation.
 - The only blocker is test coverage for the safety guards, not architecture.

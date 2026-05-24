@@ -56,7 +56,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 `VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.
 
-`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It is the last Direct-Call Utility to move; `core/engines/` now contains only Hybrid modules and registry-participating engines.
+`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It was the last high-risk file-operation service move in this pass.  Other direct-call utilities remain in `core/engines/` and should be audited individually before relocation.
 
 ---
 
