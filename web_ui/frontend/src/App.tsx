@@ -324,6 +324,7 @@ export default function App() {
         connState={connState}
         statusText={primaryStatusText}
         modeText={detailModeText}
+        canStop={isGenerating}
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}

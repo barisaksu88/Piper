@@ -9,16 +9,13 @@ const bridgeMock = vi.hoisted(() => {
     static lastInstance: FakeBridge | null = null;
     onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
     onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-    onError?: (message: string) => void;
 
     constructor(callbacks: {
       onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
       onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-      onError?: (message: string) => void;
     }) {
       this.onStateChange = callbacks.onStateChange;
       this.onFrame = callbacks.onFrame;
-      this.onError = callbacks.onError;
       bridgeMock.FakeBridge.lastInstance = this;
     }
 
@@ -59,7 +56,7 @@ vi.mock("./hooks/useMic", () => ({
   }),
 }));
 
-describe("App smoke wiring", () => {
+describe("App stop control gating", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -78,46 +75,53 @@ describe("App smoke wiring", () => {
     container.remove();
   });
 
-  it("opens chat after boot.ready, shows backend mic status, and sends stop", async () => {
+  it("keeps stop disabled while idle and does not send stop", async () => {
     await act(async () => {
       root.render(<App />);
     });
 
-    expect(bridgeMock.FakeBridge.lastInstance).toBeTruthy();
-    expect(container.textContent).toContain("Booting");
-    expect(container.querySelector(".chat-input")).toBeNull();
-
     await act(async () => {
       bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
-
-    const chatInput = container.querySelector(".chat-input") as HTMLInputElement | null;
-    expect(chatInput).toBeTruthy();
-    expect(chatInput!.placeholder).toBe("Type a message...");
-
-    await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("mic.status", {
-        state: "listening",
-        message: "Listening...",
-      });
-    });
-
-    expect(container.textContent).toContain("Listening...");
 
     const stopButton = container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
     expect(stopButton).toBeTruthy();
     expect(stopButton!.disabled).toBe(true);
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("stream.start");
+      stopButton!.click();
     });
 
+    expect(bridgeMock.sendAction).not.toHaveBeenCalledWith("stop");
+  });
+
+  it("sends stop once during active generation and stays gated after settle", async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("stream.start");
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("stream.delta", { text: "Hello" });
+    });
+
+    const stopButton = container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
+    expect(stopButton).toBeTruthy();
     expect(stopButton!.disabled).toBe(false);
 
     await act(async () => {
       stopButton!.click();
     });
 
+    expect(bridgeMock.sendAction).toHaveBeenCalledTimes(1);
     expect(bridgeMock.sendAction).toHaveBeenCalledWith("stop");
+    expect(stopButton!.disabled).toBe(true);
+
+    await act(async () => {
+      stopButton!.click();
+    });
+
+    expect(bridgeMock.sendAction).toHaveBeenCalledTimes(1);
   });
 });
