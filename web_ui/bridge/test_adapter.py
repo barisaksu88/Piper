@@ -260,6 +260,41 @@ class TestDocumentEvents:
         assert frame["payload"]["active"] is True
 
 
+class TestWorkspaceEvents:
+    def test_workspace_files(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame(
+                "workspace_files",
+                {"files": [{"name": "main.py", "path": "workspace/main.py", "size": 123}], "path": "workspace"},
+            )
+        )
+        assert frame["kind"] == "workspace.files"
+        assert frame["payload"]["path"] == "workspace"
+        assert frame["payload"]["files"][0]["name"] == "main.py"
+
+    def test_workspace_files_empty(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("workspace_files", ""))
+        assert frame["kind"] == "workspace.files"
+        assert frame["payload"] == {"files": [], "path": ""}
+
+    def test_file_contents(self):
+        frame = _decode_frame(
+            adapter.ui_tuple_to_ws_frame(
+                "file_contents",
+                {"path": "workspace/main.py", "name": "main.py", "content": "print('hi')"},
+            )
+        )
+        assert frame["kind"] == "file.contents"
+        assert frame["payload"]["path"] == "workspace/main.py"
+        assert frame["payload"]["name"] == "main.py"
+        assert frame["payload"]["content"] == "print('hi')"
+
+    def test_file_contents_empty(self):
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("file_contents", None))
+        assert frame["kind"] == "file.contents"
+        assert frame["payload"] == {"path": "", "name": "", "content": "", "error": ""}
+
+
 class TestUserIdentityEvents:
     def test_active_user_changed(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("active_user_changed", {"preserve_transcript": True}))
@@ -510,6 +545,32 @@ class TestActionParsing:
         raw = json.dumps({"frame": "action", "requestId": "r8", "action": "code_clear", "payload": {}})
         name, payload = adapter.parse_action_frame(raw)
         assert name == "code_clear"
+
+    def test_list_workspace_files(self):
+        raw = json.dumps({"frame": "action", "requestId": "rw1", "action": "list_workspace_files", "payload": {}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "list_workspace_files"
+        assert payload == {}
+
+    def test_read_workspace_file(self):
+        raw = json.dumps({"frame": "action", "requestId": "rw2", "action": "read_workspace_file", "payload": {"path": "workspace/main.py"}})
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "read_workspace_file"
+        assert payload["path"] == "workspace/main.py"
+
+    def test_save_workspace_file(self):
+        raw = json.dumps(
+            {
+                "frame": "action",
+                "requestId": "rw3",
+                "action": "save_workspace_file",
+                "payload": {"path": "workspace/main.py", "content": "print('hi')"},
+            }
+        )
+        name, payload = adapter.parse_action_frame(raw)
+        assert name == "save_workspace_file"
+        assert payload["path"] == "workspace/main.py"
+        assert payload["content"] == "print('hi')"
 
     def test_mic_audio_submit(self):
         raw = json.dumps({"frame": "action", "requestId": "r9", "action": "mic_audio_submit", "payload": {"audio": "abc", "format": "webm"}})
