@@ -106,20 +106,48 @@ def _tail_block_explain_last_turn(ctx: TailBlockContext) -> str:
     )
 
 
+def _render_persona_active_skill_block(skill: Dict[str, Any]) -> str:
+    name = str(skill.get("name") or "").strip()
+    persona_hint = str(skill.get("persona_hint") or "").strip()
+    procedure = [str(item).strip() for item in (skill.get("procedure") or []) if str(item).strip()]
+    if not name and not persona_hint and not procedure:
+        return ""
+    lines = ["[ACTIVE_SKILL]"]
+    if name:
+        lines.append(f"Skill: {name}")
+    if procedure:
+        lines.append("Procedure: " + " -> ".join(procedure))
+    if persona_hint:
+        lines.append(persona_hint)
+    return "\n".join(lines)
+
+
+def _render_verification_result_block(runtime: PersonaRuntimePack) -> str:
+    verdict = str(runtime.verification_verdict or "").strip().upper()
+    if not verdict:
+        return ""
+    lines = ["[VERIFICATION_RESULT]"]
+    lines.append(f"Verdict: {verdict}")
+    if runtime.verification_checker_path:
+        lines.append(f"Checker path: {runtime.verification_checker_path}")
+    if runtime.verification_recommendation:
+        lines.append(f"Recommendation: {runtime.verification_recommendation}")
+    if runtime.verification_evidence:
+        lines.append(f"Evidence: {runtime.verification_evidence}")
+    lines.append("Treat this block as the authoritative verification outcome for the latest stage.")
+    if verdict != "VERIFIED":
+        lines.append("Do not narrate full success unless this block says VERIFIED.")
+    return "\n".join(lines)
+
+
 @register_tail_block
 def _tail_block_active_skill(ctx: TailBlockContext) -> str:
-    # Local import avoids a circular dependency: context_pack imports
-    # _TAIL_BLOCK_REGISTRY from this module, and this builder calls a
-    # staticmethod on ContextPackEngine.
-    from core.engines.context_pack import ContextPackEngine
-    return ContextPackEngine._render_persona_active_skill_block(ctx.skill)
+    return _render_persona_active_skill_block(ctx.skill)
 
 
 @register_tail_block
 def _tail_block_verification_result(ctx: TailBlockContext) -> str:
-    # Local import avoids a circular dependency (same reason as above).
-    from core.engines.context_pack import ContextPackEngine
-    return ContextPackEngine._render_verification_result_block(ctx.runtime)
+    return _render_verification_result_block(ctx.runtime)
 
 
 @register_tail_block
