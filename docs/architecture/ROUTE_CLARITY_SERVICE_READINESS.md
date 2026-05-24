@@ -93,58 +93,77 @@ The smoke test covers the **orchestration path** (`refine_with_llm`) but does **
 
 The following deterministic public APIs have **zero automated tests**:
 
-| Path | Risk if broken during move |
-|------|---------------------------|
-| `should_force_clarification` | Clarification logic silently changes; ambiguous inputs route to task execution |
-| `should_refine_task_route` | Refinement gate changes; clear inputs waste LLM calls or ambiguous inputs bypass refinement |
-| `_task_is_targeted_file_lookup` | File lookups incorrectly trigger clarification |
-| `_task_is_computer_use` | Computer-use tasks incorrectly trigger clarification |
-| `_build_route_from_proposal_confirmation` | Proposal confirmations missed; user gets clarification instead of action |
-| `_extract_date_from_schedule_proposal` | Wrong date extracted from assistant proposal |
-| `_extract_subject_from_schedule_proposal` | Wrong subject extracted from assistant proposal |
-| `_extract_subject_from_user_correction` | Wrong subject extracted from user correction |
+| Path | Risk if broken during move | Status |
+|------|---------------------------|--------|
+| `should_force_clarification` | Clarification logic silently changes; ambiguous inputs route to task execution | ✅ Covered |
+| `should_refine_task_route` | Refinement gate changes; clear inputs waste LLM calls or ambiguous inputs bypass refinement | ✅ Covered |
+| `_task_is_targeted_file_lookup` | File lookups incorrectly trigger clarification | ✅ Covered |
+| `_task_is_computer_use` | Computer-use tasks incorrectly trigger clarification | ✅ Covered |
+| `_build_route_from_proposal_confirmation` | Proposal confirmations missed; user gets clarification instead of action | Smoke only |
+| `_extract_date_from_schedule_proposal` | Wrong date extracted from assistant proposal | Untested |
+| `_extract_subject_from_schedule_proposal` | Wrong subject extracted from assistant proposal | Untested |
+| `_extract_subject_from_user_correction` | Wrong subject extracted from user correction | Untested |
 
-The smoke test's `_DummyLLM` provides **no regression protection** for the heuristic paths because it short-circuits before `should_force_clarification` and `should_refine_task_route` are evaluated.
+The four primary deterministic gates are now covered by unit tests.
+The extraction helpers and proposal-confirmation edge cases remain
+untested but are lower-risk for a pure file move.
 
 ---
 
-## 7. Recommendation
+## 7. Test Additions (completed on branch `test/route-clarifier-heuristics`)
 
-**B) Safe only after adding tests.**
+### 7.1 `should_force_clarification`
 
-RouteClarifier is behaviorally a pure service and structurally safe to move,
-but its two primary deterministic public methods (`should_force_clarification`,
-`should_refine_task_route`) are completely untested. The existing smoke test
-only exercises the LLM-dependent orchestration path and provides no coverage
-for the heuristic gates that actually decide whether clarification happens.
+| Test | What it verifies |
+|------|-----------------|
+| `test_force_clarification_true_for_short_non_action` | ≤4 token non-action input → `True` |
+| `test_force_clarification_false_for_action_verb` | Input with action verb → `False` |
+| `test_force_clarification_false_for_path_like` | Path-like input → `False` |
+| `test_force_clarification_false_mid_thread` | History contains assistant message → `False` |
+| `test_force_clarification_false_for_retry_hint` | Retry hint ("try again") → `False` |
+| `test_force_clarification_false_for_targeted_read` | Targeted file read decision → `False` |
+| `test_force_clarification_false_for_computer_use` | Computer-use decision → `False` |
 
-**Minimum tests to add before relocation:**
+### 7.2 `should_refine_task_route`
 
-1. `should_force_clarification`:
-   - Returns `True` for ≤4 token non-action inputs (e.g., "a temporary tree").
-   - Returns `False` for inputs with action verbs (e.g., "create a file").
-   - Returns `False` for path-like inputs (e.g., "C:\\docs\\file.txt").
-   - Returns `False` when history contains assistant messages (mid-thread follow-up).
-   - Returns `False` for retry hints ("try again", "redo").
-   - Returns `False` for targeted file lookups and computer-use decisions.
+| Test | What it verifies |
+|------|-----------------|
+| `test_refine_route_true_for_short_non_action` | ≤6 token non-action input → `True` |
+| `test_refine_route_false_for_action_verb` | Input with action verb → `False` |
+| `test_refine_route_false_for_path_like` | Path-like input → `False` |
+| `test_refine_route_true_for_correction_fragment` | Correction fragment ("no, wrong") → `True` |
+| `test_refine_route_true_for_actually_tomorrow` | Correction fragment ("actually tomorrow") → `True` |
+| `test_refine_route_false_for_targeted_lookup` | Targeted file lookup decision → `False` |
+| `test_refine_route_false_for_computer_use` | Computer-use decision → `False` |
 
-2. `should_refine_task_route`:
-   - Returns `True` for ≤6 token non-action inputs.
-   - Returns `False` for inputs with action verbs.
-   - Returns `False` for path-like inputs.
-   - Returns `True` for correction fragments ("no, wrong", "actually…") without action verbs.
-   - Returns `False` for targeted file lookups and computer-use decisions.
+### 7.3 `_task_is_targeted_file_lookup`
 
-3. `_task_is_targeted_file_lookup`:
-   - Returns `True` for FILE_WORK stages with `stage_requires_targeted_read` or `stage_requires_targeted_lookup`.
-   - Returns `False` for non-TASK decisions and non-file stages.
+| Test | What it verifies |
+|------|-----------------|
+| `test_task_is_targeted_file_lookup_true_for_read` | Targeted read stage → `True` |
+| `test_task_is_targeted_file_lookup_true_for_lookup` | Targeted lookup stage → `True` |
+| `test_task_is_targeted_file_lookup_false_for_non_task` | Non-TASK decision → `False` |
+| `test_task_is_targeted_file_lookup_false_for_non_file_stage` | Non-file stage → `False` |
 
-4. `_task_is_computer_use`:
-   - Returns `True` for stages with `stage_type == "COMPUTER_USE"`.
-   - Returns `False` for non-TASK decisions and non-computer-use stages.
+### 7.4 `_task_is_computer_use`
 
-Once those tests exist and pass, RouteClarifier can be relocated with the
-same zero-behavior-change pattern used for the other service moves.
+| Test | What it verifies |
+|------|-----------------|
+| `test_task_is_computer_use_true` | COMPUTER_USE stage → `True` |
+| `test_task_is_computer_use_false_for_non_task` | Non-TASK decision → `False` |
+| `test_task_is_computer_use_false_for_non_computer_stage` | Non-computer-use stage → `False` |
+
+---
+
+## 8. Recommendation
+
+**A) Safe to relocate after tests are green.**
+
+All missing deterministic heuristic tests have been added and pass.
+RouteClarifier remains a pure direct-call utility with no hooks, registries,
+or lifecycle participation. The relocation can proceed using the same
+zero-behavior-change pattern as `SearchWorkflowEngine`, `SummaryEngine`,
+`VerificationEngine`, and `FileWorkEngine`.
 
 ---
 
