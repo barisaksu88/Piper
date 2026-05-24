@@ -39,7 +39,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
-| `file_work.py` | `FileWorkEngine` — file operation planning and execution. No hooks. |
+| `file_work.py` | `FileWorkEngine` — file operation planning and execution. No hooks. *See `FILE_WORK_SERVICE_MOVE_READINESS.md`: behaviorally ready, but safety guards lack tests.* |
 | `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. |
 | `route_clarity.py` | `RouteClarifier` — route clarification logic. No hooks. |
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
