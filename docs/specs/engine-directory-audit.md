@@ -33,7 +33,7 @@ Lifecycle engines:
 - `stats_collector.py`
 
 Direct-call services/utilities to review:
-- `context_pack.py` — audited, see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Hybrid; recommendation is staged split (move pure service pieces only after registry/hook are separated).
+- `context_pack.py` — audited, see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Still hybrid; renderer/helper layer extracted to `core/services/context_pack_renderer.py`. Registry, hook, tail-block builders, and `ContextPackEngine` remain in `core/engines/context_pack.py`.
 
 Audited — keep in `core/engines/`:
 - `computer_use_engine.py` — lifecycle engine with mutable browser session state, see `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`

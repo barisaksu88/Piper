@@ -28,12 +28,14 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 | Module | Registry Behavior | Direct-Call Service Behavior |
 |--------|-------------------|------------------------------|
 | `conversation_compressor.py` | `@register_hook("on_turn_end")` for deferred conversation summarization | `ConversationCompressor` class split to `core/services/conversation_compressor.py`; hook remains in `core/engines/conversation_compressor.py` |
-| `context_pack.py` | Owns `_TAIL_BLOCK_REGISTRY` + `register_tail_block()`; 11 tail-block builders in this file + 2 in `proactive_monitor.py`; `@register_hook("on_turn_end")` | `ContextPackEngine.build_persona_pack()`, `.build_runtime_context_pack()`, `ContextPackRenderer.render_runtime_context_message()` |
+| `context_pack.py` | Owns `_TAIL_BLOCK_REGISTRY` + `register_tail_block()`; 11 tail-block builders in this file + 2 in `proactive_monitor.py`; `@register_hook("on_turn_end")` | `ContextPackEngine` (registry-bound). Renderer/helpers extracted to `core/services/context_pack_renderer.py`. |
 | `change_journal.py` | `@register_hook("on_task_verified")` to record change journal after task verification | `ChangeJournal.record_turn()`, `.prepare_file_op_capture()`, `.finalize_file_op_capture()`, `.undo_latest()` |
 | `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector.resume_or_start_turn()`, `.note_route()`, `.record_turn()`, `.build_dashboard_snapshot()` |
 | `proactive_monitor.py` | `@register_tail_block`, `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle (start/stop/loop), `ReminderStore` (add/due_entries/mark_fired), `parse_reminder_request()` |
 
 `context_pack.py` audit completed — see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Recommendation: **split first, then move pure service pieces**; registry and hook behavior must remain in `core/engines/`.
+
+`context_pack.py` renderer/helper layer has been **extracted** to `core/services/context_pack_renderer.py`. `context_pack.py` remains hybrid because registry/hook/tail-block behavior and `ContextPackEngine` remain in `core/engines/`. See `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`.
 
 `conversation_compressor.py` has been **split**. The `ConversationCompressor` class now lives in `core/services/conversation_compressor.py`; only the `_hook_deferred_conversation_summary` hook remains in `core/engines/conversation_compressor.py`. See `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`.
 
@@ -56,6 +58,8 @@ Modules that own mutable state, manage external resources, use threading, or par
 | `computer_use_engine.py` | `ComputerUseEngine` owns a live Playwright browser session (`_BrowserSessionState`), uses `_playwright_lock` (RLock), has `shutdown()`/`suspend()` lifecycle methods, and is lazily initialized by `core/agent.py`. See `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`.
 
 ### 3B. Split Completed
+
+`context_pack.py` — `ContextPackRenderer`, `resolve_persona_turn_type`, `render_context_arbitration_block`, and related pure helpers have been moved to `core/services/context_pack_renderer.py`. Registry, hook, tail-block builders, and `ContextPackEngine` remain in `core/engines/context_pack.py`.
 
 `conversation_compressor.py` — the `ConversationCompressor` class and `ConversationCompressionResult` dataclass have been moved to `core/services/conversation_compressor.py`. The `@register_hook("on_turn_end")` hook (`_hook_deferred_conversation_summary`) remains in `core/engines/conversation_compressor.py`.
 
