@@ -27,9 +27,15 @@ from core.services.conversation_compressor import (
     ConversationCompressor,
     ConversationCompressionResult,
 )
+from core.services.context_pack_renderer import (
+    ContextPackRenderer,
+    resolve_persona_turn_type,
+    render_context_arbitration_block,
+)
 
 __all__ = [
     "build_verified_payload",
+    "ContextPackRenderer",
     "ConversationCompressionResult",
     "ConversationCompressor",
     "evaluate_stage",
@@ -39,6 +45,8 @@ __all__ = [
     "is_bulk_action",
     "new_stage_evidence",
     "record_manifest",
+    "render_context_arbitration_block",
+    "resolve_persona_turn_type",
     "RouteClarifier",
     "SearchWorkflowEngine",
     "StateMutationEngine",

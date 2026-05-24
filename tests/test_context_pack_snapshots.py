@@ -14,8 +14,10 @@ import pytest
 
 from core.engines.context_pack import (
     ContextPackEngine,
-    ContextPackRenderer,
     _hook_upsert_runtime_context,
+)
+from core.services.context_pack_renderer import (
+    ContextPackRenderer,
     resolve_persona_turn_type,
     render_context_arbitration_block,
 )
