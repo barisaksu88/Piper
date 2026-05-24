@@ -42,7 +42,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `ComputerUseVerifier` — computer-use verification. No hooks. |
-| `rollback_engine.py` | `invert_manifest()` and rollback utilities. No hooks. |
 
 ---
 
@@ -58,7 +57,9 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 `RouteClarifier` was relocated from `core/engines/route_clarity.py` to `core/services/route_clarity.py` for the same reason.
 
-`FollowupResolutionEngine` was relocated from `core/engines/followup_resolution.py` to `core/services/followup_resolution.py` for the same reason.  Other direct-call utilities remain in `core/engines/` and should be audited individually before relocation.
+`FollowupResolutionEngine` was relocated from `core/engines/followup_resolution.py` to `core/services/followup_resolution.py` for the same reason.
+
+`RollbackEngine` / `rollback_engine.py` was relocated from `core/engines/rollback_engine.py` to `core/services/rollback_engine.py` because it is a pure direct-call utility with no hooks, registries, or lifecycle participation.
 
 ---
 
