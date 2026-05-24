@@ -28,6 +28,7 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 | Module | Registry Behavior | Direct-Call Service Behavior |
 |--------|-------------------|------------------------------|
 | `conversation_compressor.py` | `@register_hook("on_turn_end")` for deferred conversation summarization | `ConversationCompressor.compress_history()`, `.load_summary()`, `.save_summary()` |
+| *(audited — split candidate)* | `_hook_deferred_conversation_summary` only | `ConversationCompressor` class should move to `core/services/` |
 | `context_pack.py` | Owns `_TAIL_BLOCK_REGISTRY` + `register_tail_block()`; 11 tail-block builders in this file + 2 in `proactive_monitor.py`; `@register_hook("on_turn_end")` | `ContextPackEngine.build_persona_pack()`, `.build_runtime_context_pack()`, `ContextPackRenderer.render_runtime_context_message()` |
 | `change_journal.py` | `@register_hook("on_task_verified")` to record change journal after task verification | `ChangeJournal.record_turn()`, `.prepare_file_op_capture()`, `.finalize_file_op_capture()`, `.undo_latest()` |
 | `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector.resume_or_start_turn()`, `.note_route()`, `.record_turn()`, `.build_dashboard_snapshot()` |
@@ -50,6 +51,10 @@ Modules that own mutable state, manage external resources, use threading, or par
 | Module | Why it stays in `core/engines/` |
 |--------|--------------------------------|
 | `computer_use_engine.py` | `ComputerUseEngine` owns a live Playwright browser session (`_BrowserSessionState`), uses `_playwright_lock` (RLock), has `shutdown()`/`suspend()` lifecycle methods, and is lazily initialized by `core/agent.py`. See `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`.
+
+### 3B. Audited Split Candidates
+
+`conversation_compressor.py` has been audited (`docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`). The `ConversationCompressor` class is a pure direct-call utility; only the `_hook_deferred_conversation_summary` function is engine lifecycle code. Recommended: **split** — move class to `core/services/conversation_compressor.py`, keep hook in `core/engines/conversation_compressor.py`.
 
 ## Services outside `core/engines/`
 
