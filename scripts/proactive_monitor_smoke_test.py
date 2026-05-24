@@ -15,8 +15,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from AGENTS.harness.session import PiperHarness
-from core.engines.proactive_monitor import (
-    ProactiveMonitor,
+from core.engines.proactive_monitor import ProactiveMonitor
+from core.services.reminders import (
     ReminderStore,
     build_proactive_trigger_message,
     parse_reminder_request,

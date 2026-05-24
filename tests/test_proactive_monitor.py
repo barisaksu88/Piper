@@ -18,6 +18,7 @@ import pytest
 
 from core.engines import proactive_monitor as pm
 from core.engines.tail_block_registry import TailBlockContext
+from core.services import reminders as rem
 from core.contracts import PersonaRuntimePack
 
 
@@ -25,32 +26,32 @@ from core.contracts import PersonaRuntimePack
 
 class TestReminderStoreLoad:
     def test_missing_file_returns_empty_list(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "missing.json")
+        store = rem.ReminderStore(tmp_path / "missing.json")
         assert store.load() == []
 
     def test_corrupt_json_returns_empty_list(self, tmp_path: Path) -> None:
         path = tmp_path / "corrupt.json"
         path.write_text("not json", encoding="utf-8")
-        store = pm.ReminderStore(path)
+        store = rem.ReminderStore(path)
         assert store.load() == []
 
     def test_non_list_json_returns_empty_list(self, tmp_path: Path) -> None:
         path = tmp_path / "dict.json"
         path.write_text('{"key": "value"}', encoding="utf-8")
-        store = pm.ReminderStore(path)
+        store = rem.ReminderStore(path)
         assert store.load() == []
 
     def test_non_dict_items_filtered(self, tmp_path: Path) -> None:
         path = tmp_path / "mixed.json"
         path.write_text(json.dumps([{"ok": True}, "string", 123, None]), encoding="utf-8")
-        store = pm.ReminderStore(path)
+        store = rem.ReminderStore(path)
         loaded = store.load()
         assert loaded == [{"ok": True}]
 
 
 class TestReminderStoreAdd:
     def test_add_writes_entry_with_expected_fields(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         entry = store.add(message="test msg", fire_at_utc="2026-05-24T12:00:00Z")
         assert "id" in entry
         assert len(str(entry["id"])) > 0
@@ -59,7 +60,7 @@ class TestReminderStoreAdd:
         assert entry["fired"] is False
 
     def test_save_load_roundtrip(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="a", fire_at_utc="2026-01-01T00:00:00Z")
         store.add(message="b", fire_at_utc="2026-01-02T00:00:00Z")
         loaded = store.load()
@@ -70,7 +71,7 @@ class TestReminderStoreAdd:
 
 class TestReminderStoreDueEntries:
     def test_excludes_already_fired(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="fired", fire_at_utc="2000-01-01T00:00:00Z")
         store.add(message="not fired", fire_at_utc="2000-01-01T00:00:00Z")
         loaded = store.load()
@@ -82,14 +83,14 @@ class TestReminderStoreDueEntries:
         assert due[0]["message"] == "not fired"
 
     def test_excludes_unparseable_fire_at(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="bad", fire_at_utc="not-a-date")
         now = dt.datetime(2025, 1, 1, tzinfo=dt.timezone.utc)
         due = store.due_entries(now_utc=now)
         assert due == []
 
     def test_returns_due_reminders_sorted_by_fire_at(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="second", fire_at_utc="2026-05-24T14:00:00Z")
         store.add(message="first", fire_at_utc="2026-05-24T12:00:00Z")
         store.add(message="third", fire_at_utc="2026-05-24T16:00:00Z")
@@ -100,20 +101,20 @@ class TestReminderStoreDueEntries:
 
 class TestReminderStoreMarkFired:
     def test_returns_true_on_first_mark(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         entry = store.add(message="x", fire_at_utc="2026-01-01T00:00:00Z")
         assert store.mark_fired(str(entry["id"])) is True
         loaded = store.load()
         assert loaded[0]["fired"] is True
 
     def test_returns_false_on_already_fired(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         entry = store.add(message="x", fire_at_utc="2026-01-01T00:00:00Z")
         store.mark_fired(str(entry["id"]))
         assert store.mark_fired(str(entry["id"])) is False
 
     def test_returns_false_for_unknown_id(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         assert store.mark_fired("does-not-exist") is False
 
 
@@ -124,7 +125,7 @@ NOW_LOCAL = dt.datetime(2026, 5, 26, 12, 0, tzinfo=dt.timezone.utc)
 
 class TestParseReminderRequest:
     def test_relative_time_success(self) -> None:
-        parsed = pm.parse_reminder_request(
+        parsed = rem.parse_reminder_request(
             "remind me to check the oven in 10 minutes",
             now_local=NOW_LOCAL,
         )
@@ -135,17 +136,17 @@ class TestParseReminderRequest:
         assert parsed.error == ""
 
     def test_non_reminder_text_returns_error(self) -> None:
-        parsed = pm.parse_reminder_request("what is the weather", now_local=NOW_LOCAL)
+        parsed = rem.parse_reminder_request("what is the weather", now_local=NOW_LOCAL)
         assert parsed.ok is False
         assert parsed.error != ""
 
     def test_no_subject_returns_error(self) -> None:
-        parsed = pm.parse_reminder_request("remind me to in 10 minutes", now_local=NOW_LOCAL)
+        parsed = rem.parse_reminder_request("remind me to in 10 minutes", now_local=NOW_LOCAL)
         assert parsed.ok is False
         assert parsed.error != ""
 
     def test_date_without_time_returns_error(self) -> None:
-        parsed = pm.parse_reminder_request(
+        parsed = rem.parse_reminder_request(
             "remind me to call mom tomorrow",
             now_local=NOW_LOCAL,
         )
@@ -153,7 +154,7 @@ class TestParseReminderRequest:
         assert "time" in parsed.error.lower()
 
     def test_past_time_returns_error(self) -> None:
-        parsed = pm.parse_reminder_request(
+        parsed = rem.parse_reminder_request(
             "remind me to check the oven today at 9:00 am",
             now_local=NOW_LOCAL,
         )
@@ -161,7 +162,7 @@ class TestParseReminderRequest:
         assert "past" in parsed.error.lower()
 
     def test_no_time_info_returns_error(self) -> None:
-        parsed = pm.parse_reminder_request(
+        parsed = rem.parse_reminder_request(
             "remind me to check the oven",
             now_local=NOW_LOCAL,
         )
@@ -173,41 +174,41 @@ class TestParseReminderRequest:
 
 class TestDisplayFireAtLocal:
     def test_valid_iso_returns_readable_string(self) -> None:
-        result = pm.display_fire_at_local("2026-05-24T14:30:00Z")
+        result = rem.display_fire_at_local("2026-05-24T14:30:00Z")
         assert result != ""
         assert "2026" in result or "May" in result or "24" in result
 
     def test_invalid_input_returns_raw_fallback(self) -> None:
-        result = pm.display_fire_at_local("not-a-date")
+        result = rem.display_fire_at_local("not-a-date")
         assert result == "not-a-date"
 
 
 class TestProactiveTriggerMessageRoundtrip:
     def test_build_then_parse(self) -> None:
         entry = {"id": "abc-123", "fire_at": "2026-05-24T12:00:00Z", "message": "stretch"}
-        built = pm.build_proactive_trigger_message(entry)
-        parsed = pm.parse_proactive_trigger_message(built)
+        built = rem.build_proactive_trigger_message(entry)
+        parsed = rem.parse_proactive_trigger_message(built)
         assert parsed is not None
         assert parsed["id"] == "abc-123"
         assert parsed["fire_at"] == "2026-05-24T12:00:00Z"
         assert parsed["message"] == "stretch"
 
     def test_parse_malformed_returns_none(self) -> None:
-        assert pm.parse_proactive_trigger_message("not a trigger") is None
-        assert pm.parse_proactive_trigger_message("[PROACTIVE_TRIGGER]") is None
-        assert pm.parse_proactive_trigger_message("[PROACTIVE_TRIGGER] not json") is None
-        assert pm.parse_proactive_trigger_message("[PROACTIVE_TRIGGER] []") is None
+        assert rem.parse_proactive_trigger_message("not a trigger") is None
+        assert rem.parse_proactive_trigger_message("[PROACTIVE_TRIGGER]") is None
+        assert rem.parse_proactive_trigger_message("[PROACTIVE_TRIGGER] not json") is None
+        assert rem.parse_proactive_trigger_message("[PROACTIVE_TRIGGER] []") is None
 
 
 class TestBuildProactiveConsumedMessage:
     def test_includes_prefix_and_id(self) -> None:
         entry = {"id": "abc-123"}
-        msg = pm.build_proactive_consumed_message(entry)
+        msg = rem.build_proactive_consumed_message(entry)
         assert msg.startswith("[PROACTIVE_TRIGGER CONSUMED]")
         assert "abc-123" in msg
 
     def test_unknown_when_no_id(self) -> None:
-        msg = pm.build_proactive_consumed_message({})
+        msg = rem.build_proactive_consumed_message({})
         assert "unknown" in msg
 
 
@@ -366,7 +367,7 @@ class _FakeOrc:
 class TestHookFinalizeProactiveTrigger:
     def test_marks_fired_and_replaces_message_when_finished(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(pm.CFG, "REMINDERS_PATH", tmp_path / "reminders.json")
-        store = pm.ReminderStore(pm.CFG.REMINDERS_PATH)
+        store = rem.ReminderStore(pm.CFG.REMINDERS_PATH)
         entry = store.add(message="stretch", fire_at_utc="2026-01-01T00:00:00Z")
 
         orc = _FakeOrc(
@@ -494,7 +495,7 @@ class TestProactiveMonitorLifecycle:
         assert monitor._stop_event.wait_calls == 1
 
     def test_run_loop_respects_is_inflight_true(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="x", fire_at_utc="2000-01-01T00:00:00Z")
 
         dispatched: list[dict[str, Any]] = []
@@ -510,7 +511,7 @@ class TestProactiveMonitorLifecycle:
         assert dispatched == []
 
     def test_run_loop_breaks_after_first_successful_dispatch(self, tmp_path: Path) -> None:
-        store = pm.ReminderStore(tmp_path / "reminders.json")
+        store = rem.ReminderStore(tmp_path / "reminders.json")
         store.add(message="first", fire_at_utc="2000-01-01T00:00:00Z")
         store.add(message="second", fire_at_utc="2000-01-01T00:00:00Z")
 
