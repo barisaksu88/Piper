@@ -2,7 +2,7 @@
 VerificationEngine
 
 Status: Active — logic migrated from executor.py, file_checker.py, file_stage_policy.py.
-See docs/v1/VERIFICATION_ENGINE.md for the full contract.
+See docs/foundation/VERIFICATION_ENGINE.md for the full contract.
 
 Migration completed 2026-03-15.
 """

@@ -1543,7 +1543,6 @@ class TestEngineIntegration:
 
     def test_verification_engine_uses_file_work_engine_for_paths(self):
         """VerificationEngine should use FileWorkEngine for path extraction."""
-        from core.engines.verification import VerificationEngine
         from core.engines.file_work import FileWorkEngine
 
         # FileWorkEngine.candidate_paths should be used by verification
