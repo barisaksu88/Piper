@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.engines.search_workflow import SearchWorkflowEngine  # noqa: E402
+from core.services.search_workflow import SearchWorkflowEngine  # noqa: E402
 from core.orchestrator_phases import (  # noqa: E402
     _build_search_report_history,
     _strip_persona_control_tags,

@@ -39,7 +39,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
-| `search_workflow.py` | `SearchWorkflowEngine` — pure helper/service methods for search lifecycle. No LLM calls, no threading, no I/O, no registry. |
 | `summary.py` | `SummaryEngine` — scratchpad extraction, outcome building, text utilities. No hooks. |
 | `verification.py` | `VerificationEngine` — `evaluate()`, `evaluate_mutation()`, `evaluate_with_constraints()`. No hooks. |
 | `file_work.py` | `FileWorkEngine` — file operation planning and execution. No hooks. |
@@ -54,6 +53,15 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 ## Migration Rules
 
+## Services outside `core/engines/`
+
+`SearchWorkflowEngine` was relocated from `core/engines/search_workflow.py` to `core/services/search_workflow.py` because it is a pure direct-call service with no hooks, registries, or lifecycle participation.  It is imported by orchestrator and UI layers exactly like a utility, but lives in `core/services/` to keep `core/engines/` reserved for modules that own runtime engine behavior.
+
+---
+
+## Migration Rules
+
 - A **Utility** can become **Hybrid** if it later acquires registry hooks.
 - A **Hybrid** can become **Utility** only by removing all registry participation.
+- Pure services with no engine behavior may move from `core/engines/` to `core/services/`.
 - `AGENTS.md` remains the architectural authority; this doc is a lookup reference.

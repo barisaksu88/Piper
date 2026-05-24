@@ -1,4 +1,4 @@
-"""Unit tests for core.engines.search_workflow.SearchWorkflowEngine.
+"""Unit tests for core.services.search_workflow.SearchWorkflowEngine.
 
 These tests require no web search, no LLM, no threading, and no UI.
 They validate the extracted pure helpers that back phase_search and phase_reporter.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.engines.search_workflow import SearchWorkflowEngine
+from core.services.search_workflow import SearchWorkflowEngine
 
 
 @pytest.fixture
