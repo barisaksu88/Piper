@@ -1,8 +1,8 @@
 # StateMutationEngine Service Readiness Audit
 
 **Status:** Active audit  
-**Source:** `core/engines/state_mutation.py`  
-**Possible target:** `core/services/state_mutation.py`  
+**Source:** `core/services/state_mutation.py`  
+**Relocated to:** `core/services/state_mutation.py`  
 **Date:** 2026-05-23
 
 ---
@@ -20,15 +20,15 @@
 
 | Caller | Import line | Usage |
 |--------|-------------|-------|
-| `core/executor.py` | `from core.engines.state_mutation import StateMutationEngine` | `self.state_mutation_engine = StateMutationEngine()`; calls `memory_remove_listing_confirms_absent()` |
-| `core/orchestrator_phases.py` | `from core.engines.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; injected into `FollowupResolutionEngine` |
-| `core/prompt_context.py` | `from core.engines.state_mutation import StateMutationEngine` | `state_mutation_engine: StateMutationEngine` field; calls `build_readonly_answer()` |
-| `core/routing/route_normalizer.py` | `from core.engines.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; calls `_registered_state_mutation_normalization()` |
-| `core/scratchpad_formatter.py` | `from core.engines.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; calls `build_outcome_pack()` |
+| `core/executor.py` | `from core.services.state_mutation import StateMutationEngine` | `self.state_mutation_engine = StateMutationEngine()`; calls `memory_remove_listing_confirms_absent()` |
+| `core/orchestrator_phases.py` | `from core.services.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; injected into `FollowupResolutionEngine` |
+| `core/prompt_context.py` | `from core.services.state_mutation import StateMutationEngine` | `state_mutation_engine: StateMutationEngine` field; calls `build_readonly_answer()` |
+| `core/routing/route_normalizer.py` | `from core.services.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; calls `_registered_state_mutation_normalization()` |
+| `core/scratchpad_formatter.py` | `from core.services.state_mutation import StateMutationEngine` | `_STATE_MUTATION_ENGINE = StateMutationEngine()`; calls `build_outcome_pack()` |
 | `core/services/followup_resolution.py` | accepts `state_mutation_engine` param | Injected dependency; calls `build_task_event_delete_route()`, `build_task_event_completion_route()`, `build_memory_store_route()`, `build_memory_remove_route()` |
-| `core/engines/__init__.py` | `from core.engines.state_mutation import StateMutationEngine` | Re-exports `StateMutationEngine` |
-| `scripts/state_mutation_engine_smoke_test.py` | `from core.engines.state_mutation import StateMutationEngine` | Comprehensive smoke test |
-| `scripts/followup_resolution_engine_smoke_test.py` | `from core.engines.state_mutation import StateMutationEngine` | Injects into `FollowupResolutionEngine` |
+| `core/engines/__init__.py` | `from core.services.state_mutation import StateMutationEngine` | Re-exports `StateMutationEngine` |
+| `scripts/state_mutation_engine_smoke_test.py` | `from core.services.state_mutation import StateMutationEngine` | Comprehensive smoke test |
+| `scripts/followup_resolution_engine_smoke_test.py` | `from core.services.state_mutation import StateMutationEngine` | Injects into `FollowupResolutionEngine` |
 
 **Total production callers:** 7 files (plus package init).  
 **Total test/script callers:** 2 files.
@@ -207,7 +207,7 @@ The remaining gaps (`stage_entries_indicate_terminal_failure`, `build_task_event
 **Recommended next steps for relocation:**
 
 1. Create `move/state-mutation-service` branch.
-2. Move `core/engines/state_mutation.py` → `core/services/state_mutation.py`.
+2. Move `core/services/state_mutation.py` → `core/services/state_mutation.py`.
 3. Update imports in 7 production callers + 2 test/script files.
 4. Update `core/services/__init__.py` and `core/engines/__init__.py` exports.
 5. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + `state_mutation_engine_smoke_test.py` + `followup_resolution_engine_smoke_test.py` + `route_boundary_smoke_test.py`.
@@ -216,7 +216,7 @@ The remaining gaps (`stage_entries_indicate_terminal_failure`, `build_task_event
 
 ## 10. Stale Doc References Found
 
-The following doc files reference `core/engines/state_mutation.py` and will need updating **after** relocation (not in this audit branch):
+The following doc files reference `core/services/state_mutation.py` and will need updating **after** relocation (not in this audit branch):
 
 - `docs/architecture/TRIGGER_FLOW.md` — lines 716, 1476
 - `docs/checkpoints/CODE_CLEANUP_AUDIT.md` — line 21

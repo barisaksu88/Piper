@@ -11,7 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.services.followup_resolution import FollowupResolutionEngine  # noqa: E402
-from core.engines.state_mutation import StateMutationEngine  # noqa: E402
+from core.services.state_mutation import StateMutationEngine  # noqa: E402
 from core.operational_state_service import OperationalStateService  # noqa: E402
 from memory.state_owner import SharedStateOwner  # noqa: E402
 

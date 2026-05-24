@@ -15,6 +15,7 @@ from core.services.rollback_engine import (
     is_bulk_action,
     record_manifest,
 )
+from core.services.state_mutation import StateMutationEngine
 from core.services.verification import VerificationEngine, VerificationResult
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "record_manifest",
     "RouteClarifier",
     "SearchWorkflowEngine",
+    "StateMutationEngine",
     "SummaryEngine",
     "VerificationEngine",
     "VerificationResult",

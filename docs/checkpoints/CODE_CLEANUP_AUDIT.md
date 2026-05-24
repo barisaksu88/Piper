@@ -18,7 +18,7 @@ Goal: Remove only code that is proven unused. Clean unused imports and obvious d
 | File | Removed | Proof of Unused Status |
 |------|---------|------------------------|
 | `core/graph_nodes.py` | `Dict`, `List` from `typing` import | Repo-wide grep found zero uses outside the import line. Python 3.10+ native `dict`/`list` used throughout. |
-| `core/routing/route_normalizer.py` | `looks_like_task_creation` import + empty `route_subjects` import block | Grep found only the import line in this file; actual usage is in `core/engines/state_mutation.py` which imports directly from `route_subjects`. |
+| `core/routing/route_normalizer.py` | `looks_like_task_creation` import + empty `route_subjects` import block | Grep found only the import line in this file; actual usage is in `core/services/state_mutation.py` which imports directly from `route_subjects`. |
 | `tools/search.py` | `import json`, `from datetime import datetime` | Grep found zero uses outside import lines. Module uses no JSON or datetime directly. |
 
 ---

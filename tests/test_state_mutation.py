@@ -1,4 +1,4 @@
-"""Unit tests for core.engines.state_mutation.StateMutationEngine.
+"""Unit tests for core.services.state_mutation.StateMutationEngine.
 
 These tests require no LLM, no web search, no threading, and no external services.
 They validate the deterministic public API and selected private helpers.
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from core.engines.state_mutation import StateMutationEngine
+from core.services.state_mutation import StateMutationEngine
 from core.contracts import (
     KnowledgeMutationIntent,
     StateMutationIntent,

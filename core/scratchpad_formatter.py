@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-from core.engines.state_mutation import StateMutationEngine
+from core.services.state_mutation import StateMutationEngine
 from core.services.summary import SummaryEngine
 from core.file_stage_policy import FileStagePolicy
 

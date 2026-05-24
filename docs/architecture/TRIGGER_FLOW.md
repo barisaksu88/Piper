@@ -713,7 +713,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Add a new engine | `core/engines/` + `core/engines/__init__.py` + update `AGENTS.md` |
 | Change verification logic | `VerificationEngine` in `core/services/verification.py` |
 | Change file operation behavior | `FileWorkEngine` in `core/services/file_work.py` |
-| Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
+| Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/services/state_mutation.py` |
 | Change follow-up resolution patterns | `FollowupResolutionEngine` in `core/services/followup_resolution.py` |
 | Change memory read/write policy | `memory/stores.py` + `memory/transient_state.py` |
 | Change prompt structure / rendering | `core/prompt_builder.py` + `data/prompts/` |
@@ -1473,7 +1473,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 | FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/services/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/services/followup_resolution.py` |
 | RouteClarifier | `route_normalizer.py` | `core/services/route_clarity.py` |
-| StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |
+| StateMutationEngine | `orchestrator_phases.py` | `core/services/state_mutation.py` |
 | ComputerUseEngine | `executor.py`, `tools/` | `core/engines/computer_use_engine.py` |
 | ComputerUseVerifier | `executor.py` | `core/engines/computer_use_verifier.py` |
 | RollbackEngine | `executor.py`, `orchestrator_phases.py` | `core/services/rollback_engine.py` |
