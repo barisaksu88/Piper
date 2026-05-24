@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, List
 from core.engines.context_pack import ContextPackEngine
 from core.feature_hooks import register_hook
 from core.engines.state_mutation import StateMutationEngine
-from core.engines.verification import VerificationResult
+from core.services.verification import VerificationResult
 from core.contracts import (
     PersonaContextPack,
     PersonaDirectivePack,

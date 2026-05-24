@@ -18,7 +18,7 @@ from core.contracts import (
     RuntimeContextPack,
 )
 from core.services.summary import SummaryEngine
-from core.engines.verification import VerificationResult
+from core.services.verification import VerificationResult
 from core.feature_hooks import register_hook
 from core.file_stage_policy import FileStagePolicy
 from core.turn_explanation import render_explain_last_turn_block

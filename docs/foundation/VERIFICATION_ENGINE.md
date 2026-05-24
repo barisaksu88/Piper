@@ -175,7 +175,7 @@ The engine is a new owner, not a replacement for its helpers.
 Follow the standard v1 phase workflow:
 
 1. Add `VerificationResult` to `contracts.py`
-2. Implement `VerificationEngine` shell in `core/engines/verification.py`
+2. Implement `VerificationEngine` shell in `core/services/verification.py`
 3. Route executor verification calls through the engine
 4. Prove parity with existing smoke tests (file_edit, file_crud, file_chaos, file_lookup, state_mutation_engine)
 5. Remove the scattered inline verdict logic from `executor.py`

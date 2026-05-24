@@ -11,7 +11,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from core.prompt_context import PromptContextService  # noqa: E402
 from core.instructions_loader import InstructionLoader  # noqa: E402
-from core.engines.verification import VerificationResult  # noqa: E402
+from core.services.verification import VerificationResult  # noqa: E402
 
 
 class _DummyEnv:

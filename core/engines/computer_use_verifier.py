@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from core.engines.verification import VerificationResult
+from core.services.verification import VerificationResult
 
 
 _GENERIC_BROWSER_SELECTORS = {"", "body", "html"}

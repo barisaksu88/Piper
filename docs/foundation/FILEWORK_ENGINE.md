@@ -176,7 +176,7 @@ No logic changes — just a single definition site.
 - `core/file_checker.py` — LLM checker coordination stays here
 - `core/file_stage_policy.py` — stage classification methods stay here; become the sole
   classification authority once `_stage_*` duplication is removed from file_checker_rules
-- `core/engines/verification.py` — already extracted; no changes
+- `core/services/verification.py` — already extracted; no changes
 - `core/executor.py` — step loop, planner calls, scratchpad management
 - `tools/workspace_*` — runtime mutation/query handlers
 
