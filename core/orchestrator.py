@@ -28,6 +28,9 @@ from core.orchestrator_phases import (
 )
 from core.runtime_control import OperationCancelled
 from core.engines import proactive_monitor as _proactive_monitor_registration  # noqa: F401
+from core.engines import change_journal as _change_journal_registration  # noqa: F401
+from core.engines import conversation_compressor as _conversation_compressor_registration  # noqa: F401
+from core.engines import stats_collector as _stats_collector_registration  # noqa: F401
 
 
 _LOG = logging.getLogger(__name__)
