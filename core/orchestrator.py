@@ -14,7 +14,7 @@ from config import CFG
 from core.contracts import RuntimeSignal
 from core.services.change_journal import ChangeJournal
 from core.services.conversation_compressor import ConversationCompressor
-from core.engines.stats_collector import StatsCollector
+from core.services.stats_collector import StatsCollector
 from core.orchestrator_phases import (
     phase_document_focus,
     phase_explain,

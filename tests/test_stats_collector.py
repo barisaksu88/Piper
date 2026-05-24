@@ -1,6 +1,6 @@
 """Guard tests for StatsCollector and TurnStatsState.
 
-These tests lock behavior before any refactor of `core/engines/stats_collector.py`.
+These tests lock behavior for `StatsCollector` and `TurnStatsState`.
 They require no LLM, no web search, no threading, and no external services.
 """
 
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.engines.stats_collector import StatsCollector, TurnStatsState
+from core.services.stats_collector import StatsCollector, TurnStatsState
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ class TestRouteOutcome:
 
 class TestStartup:
     def test_startup_check_once_deduplicates_by_path(self, tmp_path: Path) -> None:
-        from core.engines import stats_collector as sc_module
+        from core.services import stats_collector as sc_module
 
         stats_path = tmp_path / "stats.jsonl"
         alerts_path = tmp_path / "alerts.log"

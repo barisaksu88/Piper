@@ -30,7 +30,7 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 | `conversation_compressor.py` | `@register_hook("on_turn_end")` for deferred conversation summarization | `ConversationCompressor` class split to `core/services/conversation_compressor.py`; hook remains in `core/engines/conversation_compressor.py` |
 | `context_pack.py` | `@register_hook("on_turn_end")`; `ContextPackDirectiveEngine` (registry-bound `build_persona_directive_pack`) remains here. Tail-block registry lives in `core/engines/tail_block_registry.py`. | `ContextPackService` moved to `core/services/context_pack_service.py`; renderer/helpers extracted to `core/services/context_pack_renderer.py`; runtime path helpers extracted to `core/services/context_pack_paths.py`. |
 | `change_journal.py` | `@register_hook("on_task_verified")` to record change journal after task verification | `ChangeJournal` class moved to `core/services/change_journal.py`; only `_hook_record_change_journal` remains in `core/engines/change_journal.py` |
-| `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector.resume_or_start_turn()`, `.note_route()`, `.record_turn()`, `.build_dashboard_snapshot()` — under split-readiness audit; see `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md` |
+| `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector` and `TurnStatsState` moved to `core/services/stats_collector.py`; only `_hook_note_pre_route_user_msg` remains in `core/engines/stats_collector.py` |
 | `proactive_monitor.py` | `@register_tail_block`, `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle (start/stop/loop), `ReminderStore` (add/due_entries/mark_fired), `parse_reminder_request()` |
 
 `context_pack.py` split completed — see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. `ContextPackService` moved to `core/services/context_pack_service.py`; `ContextPackDirectiveEngine` and the `on_turn_end` hook remain in `core/engines/context_pack.py`; tail-block registry lives in `core/engines/tail_block_registry.py`. Renderer/helpers extracted to `core/services/context_pack_renderer.py`; runtime path helpers extracted to `core/services/context_pack_paths.py`.
@@ -38,6 +38,8 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 `conversation_compressor.py` has been **split**. The `ConversationCompressor` class now lives in `core/services/conversation_compressor.py`; only the `_hook_deferred_conversation_summary` hook remains in `core/engines/conversation_compressor.py`. See `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`.
 
 `change_journal.py` has been **split**. The `ChangeJournal` class now lives in `core/services/change_journal.py`; only the `_hook_record_change_journal` hook remains in `core/engines/change_journal.py`. See `docs/architecture/CHANGE_JOURNAL_SPLIT_READINESS.md`.
+
+`stats_collector.py` has been **split**. The `StatsCollector` class and `TurnStatsState` dataclass now live in `core/services/stats_collector.py`; only the `_hook_note_pre_route_user_msg` hook remains in `core/engines/stats_collector.py`. See `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md`.
 
 ### 3. Direct-Call Utilities
 
