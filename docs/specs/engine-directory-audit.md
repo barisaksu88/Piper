@@ -33,7 +33,7 @@ Lifecycle engines:
 - `stats_collector.py`
 
 Direct-call services/utilities to review:
-- `context_pack.py` — audited, see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Still hybrid; tail-block registry extracted to `core/engines/tail_block_registry.py`; renderer/helper layer extracted to `core/services/context_pack_renderer.py`; runtime path helpers extracted to `core/services/context_pack_paths.py`. The `on_turn_end` hook and `ContextPackEngine` remain in `core/engines/context_pack.py`.
+- `context_pack.py` — audited, see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Split complete. `ContextPackService` moved to `core/services/context_pack_service.py`; `ContextPackDirectiveEngine` and the `on_turn_end` hook remain in `core/engines/context_pack.py`. Tail-block registry lives in `core/engines/tail_block_registry.py`; renderer/helpers in `core/services/context_pack_renderer.py`; runtime path helpers in `core/services/context_pack_paths.py`.
 
 Audited — keep in `core/engines/`:
 - `computer_use_engine.py` — lifecycle engine with mutable browser session state, see `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`
