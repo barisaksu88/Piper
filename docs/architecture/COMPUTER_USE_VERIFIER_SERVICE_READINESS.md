@@ -133,33 +133,30 @@ The module already imports from `core.services.verification` (a relocated servic
 
 ## 10. Recommendation
 
-**A) Safe to move now.**
+**B) Safe only after adding tests.**
 
 **Rationale:**
 
-`core/engines/computer_use_verifier.py` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. It has:
+`core/engines/computer_use_verifier.py` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. In principle, it is eligible for relocation to `core/services/` under the established doctrine.
 
-- **Only 1 production caller** (`core/executor.py`) — minimal blast radius
-- **No cross-engine dependencies** — it already imports from `core.services.verification`
-- **Deterministic pure functions** — no side effects, no state, no threading
-- **No registry participation** — no hooks, no tail-blocks, no interceptors
+However, `evaluate_stage()` is **safety-critical** — it controls whether a `COMPUTER_USE` stage is classified as `VERIFIED`, `PARTIAL`, or `FAILED`, which directly affects retry budgets and user-facing success claims. The function contains complex threshold scoring (download hint matching ≥ 28, form fill alias resolution, navigation back/forward detection, extraction topic matching) and **has zero test coverage**.
 
-The relocation is purely mechanical: move file, update 1 import line in `core/executor.py`, update doc references. `compileall` + pytest + executor smoke tests would catch any import issue.
-
-**However, the lack of tests is a real pre-existing risk.** `evaluate_stage()` is safety-critical browser-automation verification logic with complex threshold scoring and zero coverage. Tests should be added as a follow-up task, but the absence of tests does not block relocation because:
-
-1. The relocation itself cannot break the logic (no code changes)
-2. The blast radius is minimal (1 caller)
-3. No import cycle risk (already depends on services, not engines)
+Under Piper's architecture cleanup workflow, safety-critical untested verifier logic must get deterministic tests before relocation. A relocation itself is mechanical and low-risk (1 caller, no import cycles), but moving an untested safety-critical module would leave the codebase without a regression baseline.
 
 **Recommended next steps:**
 
-1. Create `move/computer-use-verifier-service` branch.
-2. Move `core/engines/computer_use_verifier.py` → `core/services/computer_use_verifier.py`.
-3. Update import in `core/executor.py`.
-4. Update doc references.
-5. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + relevant smoke tests.
-6. **Follow-up:** Add `tests/test_computer_use_verifier.py` covering `evaluate_stage()` for download/form-fill/navigation/extraction scenarios, and `build_verified_payload()` output shapes.
+1. Add `tests/test_computer_use_verifier.py` covering:
+   - `evaluate_stage()` — download verification (success, missing, hint mismatch)
+   - `evaluate_stage()` — form fill verification (success, missing, alias match)
+   - `evaluate_stage()` — navigation verification (forward click, back navigation, missing)
+   - `evaluate_stage()` — extraction verification (topic match, selector match, title report, status text)
+   - `evaluate_stage()` — fallback (page opened vs. nothing done)
+   - `evaluate_stage()` — partial vs. failed boundary
+   - `build_verified_payload()` — output shape for all major evidence types
+
+2. Once tests pass, create `move/computer-use-verifier-service` branch and relocate.
+
+3. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + relevant smoke tests.
 
 ---
 

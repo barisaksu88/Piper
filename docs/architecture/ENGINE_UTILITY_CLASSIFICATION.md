@@ -42,7 +42,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `computer_use_verifier` module — browser-automation verification functions (`evaluate_stage`, `build_verified_payload`, etc.). No hooks. |
 
-> **Note:** `computer_use_verifier.py` is under audit for relocation to `core/services/`. See `docs/architecture/COMPUTER_USE_VERIFIER_SERVICE_READINESS.md`. It remains in `core/engines/` pending decision.
+> **Note:** `computer_use_verifier.py` is under audit for relocation to `core/services/`. See `docs/architecture/COMPUTER_USE_VERIFIER_SERVICE_READINESS.md`. It remains in `core/engines/` pending test coverage.
 
 ---
 
