@@ -951,6 +951,223 @@ class TestFileWorkEngine:
         # artifact_view may be empty if not code file
         # exact_read_note should have content
 
+    # ------------------------------------------------------------------ #
+    # Safety guards — _check_active_dependency (cross-domain DELETE/MOVE)
+    # ------------------------------------------------------------------ #
+
+    def test_should_block_fatal_active_dependency_on_delete(self):
+        """Guard 1: DELETE targeting an active-referenced file is fatal."""
+        from core.engines.file_work import FileWorkEngine
+        from core.contracts import FileWorkBlock
+
+        stage = {"stage_goal": "Clean up", "stage_type": "FILE_WORK"}
+        tool_tag = '[FILE_OP] {"action":"delete_path","path":"active_file.txt"} [/FILE_OP]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_task", "kind": "task"}]
+        )
+
+        result = FileWorkEngine.should_block(
+            stage, tool_tag, exact_read_paths=[], operational_state_service=mock_service
+        )
+
+        assert result.blocked is True
+        assert result.fatal is True
+        assert "ACTIVE_TASK_DEPENDENCY" in result.reason
+        assert "active_file.txt" in result.reason
+        mock_service.find_references.assert_called_once_with("active_file.txt")
+
+    def test_should_block_fatal_active_dependency_on_move(self):
+        """Guard 1: MOVE targeting an active-referenced file is fatal."""
+        from core.engines.file_work import FileWorkEngine
+
+        stage = {"stage_goal": "Reorganize", "stage_type": "FILE_WORK"}
+        tool_tag = (
+            '[FILE_OP] {"action":"move_path",'
+            '"src":"active_file.txt","dst":"archive/active_file.txt"} [/FILE_OP]'
+        )
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_event", "kind": "event"}]
+        )
+
+        result = FileWorkEngine.should_block(
+            stage, tool_tag, exact_read_paths=[], operational_state_service=mock_service
+        )
+
+        assert result.blocked is True
+        assert result.fatal is True
+        assert "ACTIVE_TASK_DEPENDENCY" in result.reason
+        assert "move" in result.reason.lower()
+
+    def test_should_block_allows_delete_when_no_active_reference(self):
+        """Guard 1: DELETE with no active reference proceeds."""
+        from core.engines.file_work import FileWorkEngine
+
+        stage = {"stage_goal": "Clean up", "stage_type": "FILE_WORK"}
+        tool_tag = '[FILE_OP] {"action":"delete_path","path":"orphan.txt"} [/FILE_OP]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(return_value=[])
+
+        result = FileWorkEngine.should_block(
+            stage, tool_tag, exact_read_paths=[], operational_state_service=mock_service
+        )
+
+        assert result.blocked is False
+        assert result.fatal is False
+
+    def test_should_block_dependency_override_bypasses_fatal_block(self):
+        """Guard 1: dependency_override_authorized=True bypasses the fatal block."""
+        from core.engines.file_work import FileWorkEngine
+
+        stage = {
+            "stage_goal": "Clean up",
+            "stage_type": "FILE_WORK",
+            "dependency_override_authorized": True,
+        }
+        tool_tag = '[FILE_OP] {"action":"delete_path","path":"active_file.txt"} [/FILE_OP]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_task", "kind": "task"}]
+        )
+
+        result = FileWorkEngine.should_block(
+            stage, tool_tag, exact_read_paths=[], operational_state_service=mock_service
+        )
+
+        assert result.blocked is False
+        assert result.fatal is False
+        # find_references should NOT be called when override is set
+        mock_service.find_references.assert_not_called()
+
+    # ------------------------------------------------------------------ #
+    # Safety guards — _check_run_code_dependency
+    # ------------------------------------------------------------------ #
+
+    def test_check_run_code_dependency_blocks_os_remove_on_active_file(self):
+        """RUN_CODE os.remove on active-referenced file is fatal."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] import os\nos.remove("active_file.txt") [/RUN_CODE]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_task", "kind": "task"}]
+        )
+
+        result = FileWorkEngine._check_run_code_dependency(
+            tool_tag, mock_service, dependency_override_authorized=False
+        )
+
+        assert result.blocked is True
+        assert result.fatal is True
+        assert "ACTIVE_TASK_DEPENDENCY" in result.reason
+        assert "delete" in result.reason.lower()
+        assert "active_file.txt" in result.reason
+
+    def test_check_run_code_dependency_blocks_shutil_move_on_active_file(self):
+        """RUN_CODE shutil.move on active-referenced file is fatal."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = (
+            '[RUN_CODE] import shutil\n'
+            'shutil.move("active_file.txt", "archive/active_file.txt") [/RUN_CODE]'
+        )
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_event", "kind": "event"}]
+        )
+
+        result = FileWorkEngine._check_run_code_dependency(
+            tool_tag, mock_service, dependency_override_authorized=False
+        )
+
+        assert result.blocked is True
+        assert result.fatal is True
+        assert "ACTIVE_TASK_DEPENDENCY" in result.reason
+        assert "move" in result.reason.lower()
+
+    def test_check_run_code_dependency_ignores_dynamic_paths(self):
+        """RUN_CODE with variable paths passes through silently."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] import os\nfor f in files: os.remove(f) [/RUN_CODE]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_task", "kind": "task"}]
+        )
+
+        result = FileWorkEngine._check_run_code_dependency(
+            tool_tag, mock_service, dependency_override_authorized=False
+        )
+
+        assert result.blocked is False
+        assert result.fatal is False
+        mock_service.find_references.assert_not_called()
+
+    def test_check_run_code_dependency_override_bypasses_block(self):
+        """dependency_override_authorized=True bypasses RUN_CODE dependency block."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] import os\nos.remove("active_file.txt") [/RUN_CODE]'
+        mock_service = Mock()
+        mock_service.find_references = Mock(
+            return_value=[{"name": "test_task", "kind": "task"}]
+        )
+
+        result = FileWorkEngine._check_run_code_dependency(
+            tool_tag, mock_service, dependency_override_authorized=True
+        )
+
+        assert result.blocked is False
+        assert result.fatal is False
+        mock_service.find_references.assert_not_called()
+
+    # ------------------------------------------------------------------ #
+    # Safety guards — _check_run_code_task_event_escape
+    # ------------------------------------------------------------------ #
+
+    def test_check_run_code_task_event_escape_blocks_workspace_import(self):
+        """Blocks FILE_WORK RUN_CODE that imports workspace helpers."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] from workspace import add_event\nadd_event("x") [/RUN_CODE]'
+        result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
+
+        assert result.blocked is True
+        assert "add_event" in result.reason
+
+    def test_check_run_code_task_event_escape_blocks_direct_helper_call(self):
+        """Blocks FILE_WORK RUN_CODE that calls task/event helpers directly."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] list_tasks() [/RUN_CODE]'
+        result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
+
+        assert result.blocked is True
+        assert "list_tasks" in result.reason
+
+    def test_check_run_code_task_event_escape_blocks_event_store_attribute(self):
+        """Blocks FILE_WORK RUN_CODE that accesses .event_store attribute."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = '[RUN_CODE] x = workspace.event_store [/RUN_CODE]'
+        result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
+
+        assert result.blocked is True
+        assert "event_store" in result.reason
+
+    def test_check_run_code_task_event_escape_allows_plain_file_io(self):
+        """Allows FILE_WORK RUN_CODE that only does plain file I/O."""
+        from core.engines.file_work import FileWorkEngine
+
+        tool_tag = (
+            '[RUN_CODE] with open("data.txt", "w") as f:\n    f.write("hello") [/RUN_CODE]'
+        )
+        result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
+
+        assert result.blocked is False
+        assert result.reason == ""
+
 
 # =============================================================================
 # VERIFICATION ENGINE TESTS

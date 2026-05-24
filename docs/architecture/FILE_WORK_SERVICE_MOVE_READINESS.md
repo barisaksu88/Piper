@@ -136,44 +136,49 @@ The following safety-critical paths have **zero automated tests**:
 | `dependency_override_authorized=True` path | Override flag is ignored → false fatal blocks or bypassed blocks |
 | `operational_state_service.find_references()` integration | Cross-domain dependency guard is a no-op at runtime |
 
-**These are the three most safety-critical guards in FileWorkEngine.**
-Their absence means a relocation could break an import or parameter-passing
-path and the failure would not be caught by any existing test.
+**Status:** ✅ Tests added in `scripts/test_engines.py::TestFileWorkEngine` (see below).
 
 ---
 
-## 7. Recommendation
+## 7. Test Additions (completed on branch `test/file-work-safety-guards`)
 
-**B) Safe only after adding tests.**
+### 7.1 `_check_active_dependency` / `should_block` cross-domain guard
 
-FileWorkEngine is behaviorally a pure service and structurally safe to move,
-but the three safety guards (`_check_active_dependency`,
-`_check_run_code_dependency`, `_check_run_code_task_event_escape`) are
-completely untested. Moving now would carry unquantified risk.
+| Test | What it verifies |
+|------|-----------------|
+| `test_should_block_fatal_active_dependency_on_delete` | DELETE of active-referenced file → `blocked=True`, `fatal=True`, reason contains `ACTIVE_TASK_DEPENDENCY` |
+| `test_should_block_fatal_active_dependency_on_move` | MOVE of active-referenced file → `blocked=True`, `fatal=True`, reason contains `ACTIVE_TASK_DEPENDENCY` and "move" |
+| `test_should_block_allows_delete_when_no_active_reference` | DELETE with empty `find_references` → not blocked |
+| `test_should_block_dependency_override_bypasses_fatal_block` | `dependency_override_authorized=True` on stage → bypasses guard, `find_references` not called |
 
-**Minimum tests to add before relocation:**
+### 7.2 `_check_run_code_dependency`
 
-1. `_check_active_dependency`:
-   - Returns `fatal=True` block when DELETE targets an active-referenced path.
-   - Returns `fatal=True` block when MOVE targets an active-referenced path.
-   - Returns non-blocked when no conflict.
-   - Returns non-blocked when `dependency_override_authorized=True`.
+| Test | What it verifies |
+|------|-----------------|
+| `test_check_run_code_dependency_blocks_os_remove_on_active_file` | `os.remove("active_file.txt")` in RUN_CODE → fatal block |
+| `test_check_run_code_dependency_blocks_shutil_move_on_active_file` | `shutil.move("active_file.txt", ...)` in RUN_CODE → fatal block |
+| `test_check_run_code_dependency_ignores_dynamic_paths` | Variable-path loops (`for f in files: os.remove(f)`) → silently passes |
+| `test_check_run_code_dependency_override_bypasses_block` | `dependency_override_authorized=True` → bypasses guard |
 
-2. `_check_run_code_dependency`:
-   - Detects `os.remove("active_file.txt")` and returns fatal block.
-   - Detects `shutil.move("active_file.txt", ...)` and returns fatal block.
-   - Skips dynamic/path-variable code silently.
-   - Returns non-blocked when `dependency_override_authorized=True`.
+### 7.3 `_check_run_code_task_event_escape`
 
-3. `_check_run_code_task_event_escape`:
-   - Blocks `from workspace import add_event`.
-   - Blocks direct call to `add_task(...)`.
-   - Blocks `event_store` attribute access.
-   - Allows plain file I/O without blocking.
+| Test | What it verifies |
+|------|-----------------|
+| `test_check_run_code_task_event_escape_blocks_workspace_import` | `from workspace import add_event` → blocked |
+| `test_check_run_code_task_event_escape_blocks_direct_helper_call` | `list_tasks()` → blocked |
+| `test_check_run_code_task_event_escape_blocks_event_store_attribute` | `workspace.event_store` → blocked |
+| `test_check_run_code_task_event_escape_allows_plain_file_io` | `open("data.txt", "w")` → not blocked |
 
-Once those tests exist and pass, FileWorkEngine can be relocated with the
-same zero-behavior-change pattern used for `SearchWorkflowEngine`,
-`SummaryEngine`, and `VerificationEngine`.
+---
+
+## 8. Recommendation
+
+**A) Safe to relocate after tests are green.**
+
+All missing guard tests have been added and pass. FileWorkEngine remains a
+pure direct-call utility with no hooks, registries, or lifecycle participation.
+The relocation can proceed using the same zero-behavior-change pattern as
+`SearchWorkflowEngine`, `SummaryEngine`, and `VerificationEngine`.
 
 ---
 
