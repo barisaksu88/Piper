@@ -6,6 +6,8 @@ import { generateId, isThinkingPlaceholder, sanitizeOperationalText } from "../u
 const DELTA_COALESCE_MS = 16;
 const MAX_CODE_OUTPUT_LINES = 500;
 
+type DeltaFlushHandle = ReturnType<typeof setTimeout> | number;
+
 interface UseEventRouterOptions {
   // UI setters (from usePiperUI)
   setStatusText: (text: string) => void;
@@ -72,7 +74,8 @@ export function useEventRouter({
 
   const streamingRef = useRef(false);
   const pendingDeltasRef = useRef("");
-  const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deltaFlushHandleRef = useRef<DeltaFlushHandle | null>(null);
+  const deltaFlushModeRef = useRef<"raf" | "timeout" | null>(null);
 
   const appendActivity = useCallback((text: string) => {
     setActivities((prev) => [...prev.slice(-199), text]);
@@ -110,9 +113,14 @@ export function useEventRouter({
   const flushPendingDeltas = useCallback(() => {
     const text = pendingDeltasRef.current;
     pendingDeltasRef.current = "";
-    if (deltaFlushTimerRef.current) {
-      clearTimeout(deltaFlushTimerRef.current);
-      deltaFlushTimerRef.current = null;
+    if (deltaFlushHandleRef.current !== null) {
+      if (deltaFlushModeRef.current === "raf" && typeof window !== "undefined" && window.cancelAnimationFrame) {
+        window.cancelAnimationFrame(deltaFlushHandleRef.current as number);
+      } else {
+        clearTimeout(deltaFlushHandleRef.current as ReturnType<typeof setTimeout>);
+      }
+      deltaFlushHandleRef.current = null;
+      deltaFlushModeRef.current = null;
     }
     if (!text) return;
 
@@ -129,17 +137,31 @@ export function useEventRouter({
     });
   }, []);
 
+  const scheduleDeltaFlush = useCallback(() => {
+    if (deltaFlushHandleRef.current !== null) return;
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      deltaFlushModeRef.current = "raf";
+      deltaFlushHandleRef.current = window.requestAnimationFrame(() => {
+        deltaFlushHandleRef.current = null;
+        deltaFlushModeRef.current = null;
+        flushPendingDeltas();
+      });
+      return;
+    }
+    deltaFlushModeRef.current = "timeout";
+    deltaFlushHandleRef.current = setTimeout(() => {
+      deltaFlushHandleRef.current = null;
+      deltaFlushModeRef.current = null;
+      flushPendingDeltas();
+    }, DELTA_COALESCE_MS);
+  }, [flushPendingDeltas]);
+
   const queueDelta = useCallback(
     (text: string) => {
       pendingDeltasRef.current += text;
-      if (deltaFlushTimerRef.current) {
-        clearTimeout(deltaFlushTimerRef.current);
-      }
-      deltaFlushTimerRef.current = setTimeout(() => {
-        flushPendingDeltas();
-      }, DELTA_COALESCE_MS);
+      scheduleDeltaFlush();
     },
-    [flushPendingDeltas]
+    [scheduleDeltaFlush]
   );
 
   const clearThinkingPlaceholders = useCallback(() => {
@@ -148,9 +170,14 @@ export function useEventRouter({
 
   const settleStreaming = useCallback(() => {
     flushPendingDeltas();
-    if (deltaFlushTimerRef.current) {
-      clearTimeout(deltaFlushTimerRef.current);
-      deltaFlushTimerRef.current = null;
+    if (deltaFlushHandleRef.current !== null) {
+      if (deltaFlushModeRef.current === "raf" && typeof window !== "undefined" && window.cancelAnimationFrame) {
+        window.cancelAnimationFrame(deltaFlushHandleRef.current as number);
+      } else {
+        clearTimeout(deltaFlushHandleRef.current as ReturnType<typeof setTimeout>);
+      }
+      deltaFlushHandleRef.current = null;
+      deltaFlushModeRef.current = null;
     }
     pendingDeltasRef.current = "";
     streamingRef.current = false;
@@ -214,9 +241,14 @@ export function useEventRouter({
     setErrors([]);
     streamingRef.current = false;
     pendingDeltasRef.current = "";
-    if (deltaFlushTimerRef.current) {
-      clearTimeout(deltaFlushTimerRef.current);
-      deltaFlushTimerRef.current = null;
+    if (deltaFlushHandleRef.current !== null) {
+      if (deltaFlushModeRef.current === "raf" && typeof window !== "undefined" && window.cancelAnimationFrame) {
+        window.cancelAnimationFrame(deltaFlushHandleRef.current as number);
+      } else {
+        clearTimeout(deltaFlushHandleRef.current as ReturnType<typeof setTimeout>);
+      }
+      deltaFlushHandleRef.current = null;
+      deltaFlushModeRef.current = null;
     }
   }, []);
 
