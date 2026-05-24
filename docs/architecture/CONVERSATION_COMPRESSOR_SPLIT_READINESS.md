@@ -1,7 +1,8 @@
 # ConversationCompressor Split Readiness Audit
 
-**Status:** Active audit — recommendation ready  
-**Source:** `core/engines/conversation_compressor.py`  
+**Status:** Split completed ✅  
+**Service:** `core/services/conversation_compressor.py`  
+**Hook:** `core/engines/conversation_compressor.py`  
 **Date:** 2026-05-23
 
 ---
@@ -10,12 +11,10 @@
 
 **Bucket:** Hybrid Module — cleanly splittable.
 
-`core/engines/conversation_compressor.py` contains two distinct concerns:
+The original `core/engines/conversation_compressor.py` contained two distinct concerns. It has now been split:
 
-1. **Pure utility class** (`ConversationCompressor`) — stateless direct-call service with no hooks, registries, or lifecycle participation.
-2. **Lifecycle hook** (`_hook_deferred_conversation_summary`) — `@register_hook("on_turn_end")` wrapper that spawns a background thread to call the utility.
-
-The two concerns are **already decoupled**: the hook only references the class through a field on `orc` (`orc.conversation_compressor`). The class knows nothing about hooks, orchestrators, or threading.
+1. **Pure utility class** (`ConversationCompressor`) → `core/services/conversation_compressor.py`
+2. **Lifecycle hook** (`_hook_deferred_conversation_summary`) → stays in `core/engines/conversation_compressor.py`
 
 ---
 
@@ -105,44 +104,44 @@ def _hook_deferred_conversation_summary(orc, *, reporter_just_ran: bool = False)
 |--------|-------|
 | `scripts/conversation_compressor_smoke_test.py` | Imports `ConversationCompressor` directly; tests `compress_history`, `load_summary`, `save_summary` |
 
-**No pytest unit tests exist** for `ConversationCompressor` in `tests/`.
+`tests/test_conversation_compressor.py` imports `ConversationCompressor` from `core.services.conversation_compressor` and covers the service behavior.
 
 ---
 
 ## 5. Import / Export Map
 
 **Current exports (`core/engines/__init__.py`):**
-- `ConversationCompressor`
+- No `ConversationCompressor` export.
 
-**Current exports (`core/engines/conversation_compressor.py`):**
+**Current exports (`core/services/conversation_compressor.py`):**
 - `ConversationCompressor` (class)
 - `ConversationCompressionResult` (frozen dataclass)
+
+**Current exports (`core/engines/conversation_compressor.py`):**
 - `_hook_deferred_conversation_summary` (hook function, module-private by convention)
 
 ---
 
 ## 6. Split Plan
 
-If **Option A** is accepted, the split is:
+The completed split is:
 
-### 6.1 Move to `core/services/conversation_compressor.py`
-- `ConversationCompressor` class (lines 30–263)
-- `ConversationCompressionResult` dataclass (lines 22–28)
+### 6.1 Moved to `core/services/conversation_compressor.py`
+- `ConversationCompressor` class
+- `ConversationCompressionResult` dataclass
 - Module-level constants `_TOKEN_RE`, `_SUMMARY_HEADERS`
 
-### 6.2 Keep in `core/engines/conversation_compressor.py`
-- `_hook_deferred_conversation_summary` function (lines 266–299)
-- Import `ConversationCompressor` from `core.services.conversation_compressor`
+### 6.2 Kept in `core/engines/conversation_compressor.py`
+- `_hook_deferred_conversation_summary` function
+- Imports `ConversationCompressor` from `core.services.conversation_compressor`
 
-### 6.3 Update callers
-- `core/orchestrator.py` — change import from `core.engines.conversation_compressor` to `core.services.conversation_compressor`
-- `core/orchestrator_phases.py` — no import change needed (uses `orc.conversation_compressor`)
-- `core/engines/__init__.py` — remove `ConversationCompressor` export
-- `core/services/__init__.py` — add `ConversationCompressor` export
-- `scripts/conversation_compressor_smoke_test.py` — change import to `core.services.conversation_compressor`
-
-### 6.4 File rename consideration
-After the split, `core/engines/conversation_compressor.py` contains only the hook. Consider renaming it to `core/engines/conversation_summary_hook.py` for clarity, but this is optional.
+### 6.3 Updated callers
+- `core/orchestrator.py` — imports from `core.services.conversation_compressor`
+- `core/orchestrator_phases.py` — no change (uses `orc.conversation_compressor`)
+- `core/engines/__init__.py` — no longer exports `ConversationCompressor`
+- `core/services/__init__.py` — exports `ConversationCompressor` and `ConversationCompressionResult`
+- `tests/test_conversation_compressor.py` — imports from `core.services.conversation_compressor`
+- `scripts/conversation_compressor_smoke_test.py` — imports from `core.services.conversation_compressor`
 
 ---
 
@@ -175,7 +174,7 @@ After the split, `core/engines/conversation_compressor.py` contains only the hoo
 | Import path breakage in `orchestrator.py` | Low | Single import line change, well-grepped. |
 | Smoke test import breakage | Low | Single import line change in `scripts/`. |
 | Hook still references `orc.conversation_compressor` | Low | The hook already accesses the compressor through the orchestrator; the field type doesn't change. |
-| No unit test coverage | Medium | **Resolved.** `tests/test_conversation_compressor.py` (58 tests) now covers all public methods and edge cases. |
+| No unit test coverage | Medium | **Resolved.** `tests/test_conversation_compressor.py` (58 tests) covers all public methods and edge cases. |
 | `core/engines/__init__.py` no longer exports `ConversationCompressor` | Low | No external consumers of `core.engines.ConversationCompressor` outside the orchestrator. |
 
 ---
@@ -194,16 +193,16 @@ Partial fit. Tests are required, but the correct action is a **split**, not a wh
 
 Not recommended. The `ConversationCompressor` class is a pure direct-call utility with no engine characteristics. Leaving it in `core/engines/` perpetuates the hybrid-module pattern.
 
-### D) Split after tests are green — move only pure service pieces ✅ **Recommended**
+### D) Split after tests are green — move only pure service pieces ✅ **Completed**
 
 **Decision:**
-- **Do not move the whole module.**
-- **Keep `_hook_deferred_conversation_summary`** in `core/engines/conversation_compressor.py` — it is engine lifecycle behavior (hook registration, threading, orchestrator state access).
-- **Move only the pure service pieces** to `core/services/conversation_compressor.py`:
+- **Do not move the whole module.** ✅ Done.
+- **Keep `_hook_deferred_conversation_summary`** in `core/engines/conversation_compressor.py` — it is engine lifecycle behavior. ✅ Done.
+- **Move only the pure service pieces** to `core/services/conversation_compressor.py`: ✅ Done.
   - `ConversationCompressor` class
   - `ConversationCompressionResult` dataclass
   - Pure helper constants (`_TOKEN_RE`, `_SUMMARY_HEADERS`)
-- **Tests are now green.** `tests/test_conversation_compressor.py` (58 tests) and the fixed smoke test both pass. The split is unblocked.
+- **Tests were green before the split.** `tests/test_conversation_compressor.py` (58 tests) and the fixed smoke test both passed.
 
 ---
 

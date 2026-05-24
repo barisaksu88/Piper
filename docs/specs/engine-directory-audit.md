@@ -33,13 +33,13 @@ Lifecycle engines:
 - `stats_collector.py`
 
 Direct-call services/utilities to review:
-- `conversation_compressor.py` — audited split candidate; tests required before split
 - `context_pack.py`
 
 Audited — keep in `core/engines/`:
 - `computer_use_engine.py` — lifecycle engine with mutable browser session state, see `docs/architecture/COMPUTER_USE_ENGINE_SERVICE_READINESS.md`
 
 Already relocated to `core/services/`:
+- `conversation_compressor.py` — `ConversationCompressor` class and `ConversationCompressionResult` moved to `core/services/conversation_compressor.py`; hook remains in `core/engines/conversation_compressor.py`
 - `file_work.py`
 - `followup_resolution.py`
 - `route_clarity.py`

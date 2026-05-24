@@ -1,4 +1,4 @@
-"""Unit tests for core.engines.conversation_compressor.ConversationCompressor.
+"""Unit tests for core.services.conversation_compressor.ConversationCompressor.
 
 These tests require no LLM server, no browser, no threading, and no
 orchestrator. They validate deterministic pure behavior of the compressor
@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from core.engines.conversation_compressor import (
+from core.services.conversation_compressor import (
     ConversationCompressor,
     ConversationCompressionResult,
     _SUMMARY_HEADERS,

@@ -23,9 +23,15 @@ from core.services.computer_use_verifier import (
     new_stage_evidence,
     update_stage_evidence,
 )
+from core.services.conversation_compressor import (
+    ConversationCompressor,
+    ConversationCompressionResult,
+)
 
 __all__ = [
     "build_verified_payload",
+    "ConversationCompressionResult",
+    "ConversationCompressor",
     "evaluate_stage",
     "FileWorkEngine",
     "FollowupResolutionEngine",
