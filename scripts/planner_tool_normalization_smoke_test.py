@@ -17,7 +17,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from core.json_utils import normalize_tool_invocation, parse_json_response  # noqa: E402
 from core.executor import StageExecutor  # noqa: E402
-from core.engines.summary import SummaryEngine  # noqa: E402
+from core.services.summary import SummaryEngine  # noqa: E402
 from core.planner_boundary import PlannerBoundary  # noqa: E402
 from core.prompting import ScratchpadFormatter  # noqa: E402
 from tools.file_ops import parse_normalized_tool_tag_payload  # noqa: E402

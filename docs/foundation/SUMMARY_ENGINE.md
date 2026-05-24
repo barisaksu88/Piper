@@ -309,7 +309,7 @@ class SummaryEngine:
 - `ContextPackEngine` imports `SummaryEngine` (one-directional, no cycle)
 - `ScratchpadFormatter` imports `SummaryEngine` (one-directional, no cycle)
 - `PromptBuilder` imports `SummaryEngine` (one-directional, no cycle)
-- `core/engines/__init__.py` exports `SummaryEngine`
+- `core/services/__init__.py` exports `SummaryEngine`
 
 ---
 
@@ -325,11 +325,11 @@ If a `ScratchpadSnapshot` dataclass proves useful after extraction, it can be ad
 
 ## 9. Migration Sequence
 
-1. **Create** `core/engines/summary.py` with the full `SummaryEngine` implementation,
+1. **Create** `core/services/summary.py` with the full `SummaryEngine` implementation,
    porting all methods listed in §6.1, with no behaviour change.
-2. **Add** `SummaryEngine` export to `core/engines/__init__.py`.
+2. **Add** `SummaryEngine` export to `core/services/__init__.py`.
 3. **Update `context_pack.py`**:
-   - Add `from core.engines.summary import SummaryEngine` import
+   - Add `from core.services.summary import SummaryEngine` import
    - Replace all `cls.*` scratchpad extraction calls with `SummaryEngine.*` equivalents
    - Remove the 12 methods that moved (keep `build_runtime_context_pack`,
      `build_persona_runtime_pack`, `build_persona_directive_pack`, `build_persona_pack`,
@@ -337,7 +337,7 @@ If a `ScratchpadSnapshot` dataclass proves useful after extraction, it can be ad
      `render_runtime_context_message`, `_collect_runtime_context_paths`, and
      `_render_persona_active_skill_block` — those stay in `ContextPackEngine`)
 4. **Update `scratchpad_formatter.py`**:
-   - Add `from core.engines.summary import SummaryEngine` import
+   - Add `from core.services.summary import SummaryEngine` import
    - Replace `_select_outcome_detail`, `_extract_observation_detail`,
      `_is_generic_file_work_summary`, `_truncate_text` with `SummaryEngine.*` calls
    - Remove the four private methods from `ScratchpadFormatter`

@@ -6,7 +6,6 @@ from core.engines.file_work import FileWorkEngine
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.route_clarity import RouteClarifier
 from core.engines.state_mutation import StateMutationEngine
-from core.engines.summary import SummaryEngine
 from core.engines.verification import VerificationEngine
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     "FollowupResolutionEngine",
     "RouteClarifier",
     "StateMutationEngine",
-    "SummaryEngine",
     "VerificationEngine",
 ]

@@ -172,7 +172,7 @@ class TestSummaryEngine:
 
     def test_latest_stage_entries_finds_latest(self, sample_scratchpad):
         """Should return only entries from the latest stage."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.latest_stage_entries(sample_scratchpad)
 
@@ -182,7 +182,7 @@ class TestSummaryEngine:
 
     def test_latest_stage_entries_fallback_when_no_header(self):
         """Should fallback to last 6 entries when no stage header found."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         entries = [f"Entry {i}" for i in range(10)]
         result = SummaryEngine.latest_stage_entries(entries)
@@ -192,7 +192,7 @@ class TestSummaryEngine:
 
     def test_extract_verified_result_returns_summary(self, sample_scratchpad_with_verified_result):
         """Should extract and format verified result."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.extract_verified_result(sample_scratchpad_with_verified_result)
 
@@ -201,7 +201,7 @@ class TestSummaryEngine:
 
     def test_extract_verified_result_returns_empty_when_not_found(self):
         """Should return empty string when no verified result."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = ["STEP 1", "THOUGHT: Thinking..."]
         result = SummaryEngine.extract_verified_result(scratchpad)
@@ -211,7 +211,7 @@ class TestSummaryEngine:
     def test_extract_verified_result_uses_operation_label_created(self):
         """operation_label='created' should produce 'Created …' not 'Updated …'."""
         import json
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         payload = {
             "kind": "mutation_verified",
@@ -234,7 +234,7 @@ class TestSummaryEngine:
     def test_extract_verified_result_uses_operation_label_updated(self):
         """operation_label='updated' should still produce 'Updated …'."""
         import json
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         payload = {
             "kind": "mutation_verified",
@@ -255,7 +255,7 @@ class TestSummaryEngine:
 
     def test_extract_proposal_finds_proposal(self, sample_scratchpad_with_proposal):
         """Should extract proposal text."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.extract_proposal(sample_scratchpad_with_proposal)
 
@@ -264,7 +264,7 @@ class TestSummaryEngine:
 
     def test_extract_proposal_returns_empty_when_not_found(self):
         """Should return empty when no proposal."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = ["STEP 1", "No proposal here"]
         result = SummaryEngine.extract_proposal(scratchpad)
@@ -273,7 +273,7 @@ class TestSummaryEngine:
 
     def test_extract_exact_file_read_single_file(self, sample_scratchpad_with_exact_read):
         """Should extract exact file read content."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.extract_exact_file_read(sample_scratchpad_with_exact_read)
 
@@ -282,7 +282,7 @@ class TestSummaryEngine:
 
     def test_extract_exact_file_read_empty_when_not_found(self):
         """Should return empty when no exact read."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = ["STEP 1", "No file read"]
         result = SummaryEngine.extract_exact_file_read(scratchpad)
@@ -291,7 +291,7 @@ class TestSummaryEngine:
 
     def test_extract_file_lookup_finds_matches(self):
         """Should extract file lookup matches."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         # Matches must be inline after the colon in the same entry; the engine
         # partitions on "FILE_LOOKUP_MATCHES:" within a single string.
@@ -306,7 +306,7 @@ class TestSummaryEngine:
 
     def test_extract_file_lookup_returns_not_found_message(self):
         """Should return 'No matching files' when empty."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = ["FILE_LOOKUP_MATCHES:"]
         result = SummaryEngine.extract_file_lookup(scratchpad)
@@ -315,7 +315,7 @@ class TestSummaryEngine:
 
     def test_extract_stage_status_finds_result(self, sample_scratchpad):
         """Should extract stage status from outcome."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.extract_stage_status(sample_scratchpad)
 
@@ -324,7 +324,7 @@ class TestSummaryEngine:
 
     def test_build_runtime_note_uses_verified_result(self, sample_scratchpad_with_verified_result):
         """Should use verified result as primary source for runtime note."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.build_runtime_note(sample_scratchpad_with_verified_result)
 
@@ -332,7 +332,7 @@ class TestSummaryEngine:
 
     def test_build_runtime_note_falls_back_to_observation(self):
         """Should fall back to observation text when no verified result."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "=== STAGE 1 OUTCOME ===\nRESULT: FILE OPERATION SUCCESS\nLAST_LOG: File operation completed",
@@ -343,7 +343,7 @@ class TestSummaryEngine:
 
     def test_build_outcome_block_includes_instruction(self, sample_scratchpad):
         """Should build outcome block with appropriate instruction."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         result = SummaryEngine.build_outcome_block(sample_scratchpad)
 
@@ -353,7 +353,7 @@ class TestSummaryEngine:
 
     def test_build_outcome_block_handles_failure(self):
         """Should include failure instruction for failed outcome."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "=== STAGE 1 OUTCOME ===\nRESULT: FAILED\nLAST_LOG: Error occurred",
@@ -365,7 +365,7 @@ class TestSummaryEngine:
 
     def test_build_outcome_block_handles_paused_input(self):
         """Should include pause instruction for user input."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "=== STAGE 1 OUTCOME ===\nRESULT: PAUSED / AWAITING USER INPUT",
@@ -377,7 +377,7 @@ class TestSummaryEngine:
 
     def test_build_outcome_block_handles_paused_approval(self):
         """Should include pause instruction for approval."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "=== STAGE 1 OUTCOME ===\nRESULT: PAUSED / AWAITING USER APPROVAL",
@@ -389,7 +389,7 @@ class TestSummaryEngine:
 
     def test_build_outcome_block_returns_empty_when_no_outcome(self):
         """Should return empty string when no outcome block."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = ["STEP 1", "Just thinking"]
         result = SummaryEngine.build_outcome_block(scratchpad)
@@ -398,7 +398,7 @@ class TestSummaryEngine:
 
     def test_is_generic_file_work_summary_detects_generic(self):
         """Should identify generic file work summaries."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         generic_summaries = [
             "Execution succeeded",
@@ -412,7 +412,7 @@ class TestSummaryEngine:
 
     def test_is_generic_file_work_summary_rejects_specific(self):
         """Should not identify specific summaries as generic."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         specific_summaries = [
             "Created the configuration file for the API client",
@@ -425,7 +425,7 @@ class TestSummaryEngine:
 
     def test_sanitize_note_collapses_whitespace(self):
         """Should collapse multiple whitespace."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         text = "This  has   multiple    spaces"
         result = SummaryEngine.sanitize_note(text)
@@ -435,7 +435,7 @@ class TestSummaryEngine:
 
     def test_sanitize_note_truncates_long_text(self):
         """Should truncate very long notes."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         text = "A" * 500
         result = SummaryEngine.sanitize_note(text)
@@ -444,7 +444,7 @@ class TestSummaryEngine:
 
     def test_truncate_scratchpad_adds_header(self):
         """Should add header when truncating."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         text = "A" * 10000
         result = SummaryEngine.truncate_scratchpad(text, limit=1000)
@@ -453,7 +453,7 @@ class TestSummaryEngine:
 
     def test_truncate_scratchpad_no_change_when_under_limit(self):
         """Should not modify text under limit."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         text = "Short text"
         result = SummaryEngine.truncate_scratchpad(text, limit=1000)
@@ -462,7 +462,7 @@ class TestSummaryEngine:
 
     def test_truncate_text_adds_marker(self):
         """Should add truncation marker."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         text = "A" * 500
         result = SummaryEngine.truncate_text(text, 100)
@@ -472,7 +472,7 @@ class TestSummaryEngine:
 
     def test_select_outcome_detail_prefers_verified_result(self):
         """Should prefer verified result for FILE_WORK stages."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         stage_entries = [
             "FILE_WORK_VERIFIED_RESULT: {\"summary\":\"File created\"}",
@@ -484,7 +484,7 @@ class TestSummaryEngine:
 
     def test_select_outcome_detail_uses_proposal_for_non_file(self):
         """Should use proposal for non-FILE_WORK stages."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         stage_entries = [
             "PROPOSAL: The task is complete",
@@ -495,7 +495,7 @@ class TestSummaryEngine:
 
     def test_extract_observation_detail_handles_json_payload(self):
         """Should extract details from JSON payload."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         observation = 'FILE_WORK_VERIFIED_RESULT: {"summary":"Done","reason":"Success"}'
         result = SummaryEngine.extract_observation_detail(observation)
@@ -504,7 +504,7 @@ class TestSummaryEngine:
 
     def test_extract_observation_detail_handles_plain_text(self):
         """Should handle plain observation text."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         observation = "OBSERVATION_TEXT: The file was created successfully"
         result = SummaryEngine.extract_observation_detail(observation)
@@ -1532,7 +1532,7 @@ class TestEngineIntegration:
         ]
 
         # 2. ContextPackEngine extracts from scratchpad
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         exact_read = SummaryEngine.extract_exact_file_read(scratchpad)
         assert exact_read != ""
@@ -1567,7 +1567,7 @@ class TestEdgeCases:
 
     def test_empty_scratchpad_handling(self):
         """Should handle empty scratchpad gracefully."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         assert SummaryEngine.latest_stage_entries([]) == []
         assert SummaryEngine.extract_verified_result([]) == ""
@@ -1576,7 +1576,7 @@ class TestEdgeCases:
 
     def test_malformed_json_in_verified_result(self):
         """Should handle malformed JSON in verified result."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "FILE_WORK_VERIFIED_RESULT: {invalid json}",
@@ -1589,7 +1589,7 @@ class TestEdgeCases:
 
     def test_very_long_scratchpad_entry(self):
         """Should truncate very long entries."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         long_content = "A" * 100000
         scratchpad = [
@@ -1603,7 +1603,7 @@ class TestEdgeCases:
 
     def test_unicode_in_content(self):
         """Should handle unicode content."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         scratchpad = [
             "PROPOSAL: 你好世界 🎉",
@@ -1630,7 +1630,7 @@ class TestEdgeCases:
         """Engines should handle concurrent access (no state mutation)."""
         import threading
 
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
         from core.engines.file_work import FileWorkEngine
 
         errors = []
@@ -1652,7 +1652,7 @@ class TestEdgeCases:
 
     def test_none_inputs(self):
         """Should handle None inputs gracefully."""
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
         from core.engines.file_work import FileWorkEngine
 
         assert SummaryEngine.latest_stage_entries(None) == []
@@ -1688,7 +1688,7 @@ class TestPerformance:
         """SummaryEngine should process large scratchpads quickly."""
         import time
 
-        from core.engines.summary import SummaryEngine
+        from core.services.summary import SummaryEngine
 
         # Create a large scratchpad
         scratchpad = []

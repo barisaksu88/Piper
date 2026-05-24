@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict
 
 from core.contracts import PromptContext
-from core.engines.summary import SummaryEngine
+from core.services.summary import SummaryEngine
 from core.file_stage_policy import FileStagePolicy
 from memory.documents import extract_document_reference_labels
 from tools.registry import get_tool_spec, iter_tool_specs, render_stage_guide

@@ -17,7 +17,7 @@ from core.feature_hooks import fire_hooks
 from core.engines.context_pack import _hook_upsert_runtime_context
 from core.engines.followup_resolution import FollowupResolutionEngine
 from core.engines.rollback_engine import invert_manifest as invert_rollback_manifest
-from core.engines.summary import SummaryEngine
+from core.services.summary import SummaryEngine
 from core.services.search_workflow import SearchWorkflowEngine
 from core.engines.proactive_monitor import (
     PROACTIVE_TRIGGER_PREFIX,

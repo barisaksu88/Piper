@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable
 
 from core.engines.state_mutation import StateMutationEngine
-from core.engines.summary import SummaryEngine
+from core.services.summary import SummaryEngine
 from core.file_stage_policy import FileStagePolicy
 
 
@@ -438,4 +438,4 @@ RESULT: {pack.status}{detail}"""
         )
 
     # _select_outcome_detail, _extract_observation_detail, _is_generic_file_work_summary,
-    # _truncate_text → moved to SummaryEngine (core/engines/summary.py)
+    # _truncate_text → moved to SummaryEngine (core/services/summary.py)
