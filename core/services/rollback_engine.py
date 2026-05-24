@@ -1,4 +1,4 @@
-"""core/engines/rollback_engine.py
+"""core/services/rollback_engine.py
 
 Bulk mutation rollback manifest engine.
 

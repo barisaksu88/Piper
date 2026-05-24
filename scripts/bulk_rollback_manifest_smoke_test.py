@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.engines.rollback_engine import (
+from core.services.rollback_engine import (
     _prune_old_manifests,
     _safe_turn_id,
     invert_manifest,

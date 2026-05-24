@@ -221,7 +221,7 @@ Primary spec: `docs/specs/voice-identity.md`
 
 ---
 
-**Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/engines/rollback_engine.py`.*
+**Bulk mutation rollback manifests** — *Implemented as §13.18. See `docs/architecture/TRIGGER_FLOW.md §13.18` and `core/services/rollback_engine.py`.*
 
 ---
 
