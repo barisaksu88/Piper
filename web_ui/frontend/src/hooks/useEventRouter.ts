@@ -131,6 +131,23 @@ export function useEventRouter({
     setMessages((prev) => prev.filter((m) => !isThinkingPlaceholder(m)));
   }, []);
 
+  const ensureAssistantStreamMessage = useCallback(() => {
+    setMessages((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant" && last.streaming) {
+        return next;
+      }
+      next.push({
+        id: generateId(),
+        role: "assistant",
+        content: "",
+        streaming: true,
+      });
+      return next;
+    });
+  }, []);
+
   const appendCodeOutput = useCallback((text: string) => {
     setCodeOutput((prev) => {
       const next = [...prev, text];
@@ -230,13 +247,10 @@ export function useEventRouter({
           if (!streamingRef.current) {
             streamingRef.current = true;
             setIsGenerating(true);
-            setMessages((prev) => [
-              ...prev,
-              { id: generateId(), role: "assistant", content: text, streaming: true },
-            ]);
-          } else {
-            queueDelta(text);
+            clearThinkingPlaceholders();
+            ensureAssistantStreamMessage();
           }
+          queueDelta(text);
           break;
         }
 
@@ -455,7 +469,7 @@ export function useEventRouter({
           break;
       }
     },
-    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen]
+    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, ensureAssistantStreamMessage, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen]
   );
 
   return {
