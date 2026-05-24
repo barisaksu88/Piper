@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, List
 from core.engines.context_pack import ContextPackEngine
 from core.feature_hooks import register_hook
 from core.engines.state_mutation import StateMutationEngine
-from core.engines.summary import SummaryEngine
 from core.engines.verification import VerificationResult
 from core.contracts import (
     PersonaContextPack,
@@ -172,21 +171,6 @@ class PromptContextService:
             active_skill=active_skill,
             persona_runtime=persona_runtime,
         )
-
-    def latest_stage_entries(self, scratchpad: list[str]) -> list[str]:
-        return SummaryEngine.latest_stage_entries(scratchpad)
-
-    def extract_exact_file_read_answer(self, scratchpad: list[str]) -> str:
-        return SummaryEngine.extract_exact_file_read(scratchpad)
-
-    def extract_file_lookup_answer(self, scratchpad: list[str]) -> str:
-        return SummaryEngine.extract_file_lookup(scratchpad)
-
-    def extract_verified_file_work_answer(self, scratchpad: list[str]) -> str:
-        return SummaryEngine.extract_verified_result(scratchpad)
-
-    def extract_latest_stage_proposal_answer(self, scratchpad: list[str]) -> str:
-        return SummaryEngine.extract_proposal(scratchpad)
 
     def build_readonly_state_answer(self, query: str) -> str:
         # Knowledge queries are intentionally excluded — the hardcoded subject

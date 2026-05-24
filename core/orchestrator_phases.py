@@ -1699,8 +1699,8 @@ def _run_manager_core(orc) -> None:
         if (
             not success
             and FileStagePolicy.stage_requires_analysis_report(stage)
-            and bool(orc.prompt_context.extract_latest_stage_proposal_answer(stage_log))
-            and bool(orc.prompt_context.extract_exact_file_read_answer(stage_log))
+            and bool(SummaryEngine.extract_proposal(stage_log))
+            and bool(SummaryEngine.extract_exact_file_read(stage_log))
         ):
             success = True
         if (
