@@ -712,7 +712,7 @@ Both share the same retry counter (`orc.failed_task_router_retries`), ensuring a
 | Change how persona narrates an outcome | `build_persona_runtime_pack()` in `core/prompt_context.py` + `core/engines/context_pack.py` |
 | Add a new engine | `core/engines/` + `core/engines/__init__.py` + update `AGENTS.md` |
 | Change verification logic | `VerificationEngine` in `core/services/verification.py` |
-| Change file operation behavior | `FileWorkEngine` in `core/engines/file_work.py` |
+| Change file operation behavior | `FileWorkEngine` in `core/services/file_work.py` |
 | Change state mutation (tasks/events/knowledge) | `StateMutationEngine` in `core/engines/state_mutation.py` |
 | Change follow-up resolution patterns | `FollowupResolutionEngine` in `core/engines/followup_resolution.py` |
 | Change memory read/write policy | `memory/stores.py` + `memory/transient_state.py` |
@@ -843,7 +843,7 @@ The fallback rule now lives in the validator itself rather than in ad hoc parse 
 
 **Goal:** Each file stage's intent is classified exactly once, at construction time. `file_stage_policy.py` is a policy dispatcher (read kind → apply rule), not a classifier.
 
-**Files:** `core/contracts.py`; `core/engines/file_work.py`; `core/file_stage_policy.py`; `core/orchestrator_phases.py` → `PlannerBoundary.normalize_output()`
+**Files:** `core/contracts.py`; `core/services/file_work.py`; `core/file_stage_policy.py`; `core/orchestrator_phases.py` → `PlannerBoundary.normalize_output()`
 
 ---
 
@@ -1173,7 +1173,7 @@ The planner prompt (`manager.txt`) instructs FILE_WORK stage completions to incl
 
 Prose `success_condition` is kept as fallback during migration. Once all plan types emit explicit constraints the prose-heuristic path will be removed.
 
-**Files:** `core/contracts.py` (`PlanConstraintType`, `PlanConstraint`, `StageCard.constraints`); `core/engines/file_work.py` (`FileWorkEngine.derive_constraints`); `core/services/verification.py` (`evaluate_with_constraints`, six `_check_*` methods, constraint-first path in `evaluate`); `data/prompts/manager.txt` (completion JSON + constraint-type reference)
+**Files:** `core/contracts.py` (`PlanConstraintType`, `PlanConstraint`, `StageCard.constraints`); `core/services/file_work.py` (`FileWorkEngine.derive_constraints`); `core/services/verification.py` (`evaluate_with_constraints`, six `_check_*` methods, constraint-first path in `evaluate`); `data/prompts/manager.txt` (completion JSON + constraint-type reference)
 
 ---
 
@@ -1213,7 +1213,7 @@ A file could be deleted while an active Task held a reference to it. `phase_mana
 
 **No automatic resolution:** When `_check_active_dependency` blocks an operation, the persona reports the dependency to the user and stops. The system never automatically closes or updates the referenced task/event. The user must decide: either manage the event/task themselves and retry the file operation, or explicitly ask Piper to do both in the same request. If the user follows up with a short affirmative ("yes", "proceed"), the router re-routes to FILE_WORK only — it does not create a TASK_EVENT_WORK precondition stage. See §12 and staging rules 10–11 in `data/prompts/secretary.txt`.
 
-**Files:** `core/file_reference_matcher.py` (shared normalized file-reference matcher); `core/operational_state_service.py` (`find_references`); `core/engines/file_work.py` (`_check_active_dependency`, extended `should_block`); `core/contracts.py` (`FileWorkBlock.fatal`); `core/executor.py` (fatal-block path, new init params); `core/orchestrator_phases.py` (wire params to StageExecutor); `data/prompts/secretary.txt` (staging rules 10–11 enforce no-auto-resolution at router level)
+**Files:** `core/file_reference_matcher.py` (shared normalized file-reference matcher); `core/operational_state_service.py` (`find_references`); `core/services/file_work.py` (`_check_active_dependency`, extended `should_block`); `core/contracts.py` (`FileWorkBlock.fatal`); `core/executor.py` (fatal-block path, new init params); `core/orchestrator_phases.py` (wire params to StageExecutor); `data/prompts/secretary.txt` (staging rules 10–11 enforce no-auto-resolution at router level)
 
 ---
 
@@ -1470,7 +1470,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 |---------|-------------|------|
 | SummaryEngine | `orchestrator_phases.py` | `core/services/summary.py` |
 | VerificationEngine | `orchestrator_phases.py` | `core/services/verification.py` |
-| FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/engines/file_work.py` |
+| FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/services/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
 | RouteClarifier | `route_normalizer.py` | `core/engines/route_clarity.py` |
 | StateMutationEngine | `orchestrator_phases.py` | `core/engines/state_mutation.py` |

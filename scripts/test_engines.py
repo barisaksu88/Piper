@@ -521,7 +521,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_extracts_from_dict(self):
         """Should extract paths from tool result dictionary."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -537,7 +537,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_normalizes_backslashes(self):
         """Should normalize backslashes to forward slashes."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {"path": "src\\main.py"}
         result = FileWorkEngine.candidate_paths(tool_result)
@@ -546,7 +546,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_deduplicates(self):
         """Should remove duplicate paths."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "path": "main.py",
@@ -559,7 +559,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_extracts_from_files_dict(self):
         """Should extract paths from files dictionary."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "files": {
@@ -574,7 +574,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_extracts_from_snippets(self):
         """Should extract paths from file_snippets."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "file_snippets": {
@@ -587,7 +587,7 @@ class TestFileWorkEngine:
 
     def test_candidate_paths_returns_empty_for_non_dict(self):
         """Should return empty list for non-dict input."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         result = FileWorkEngine.candidate_paths("not a dict")
         assert result == []
@@ -597,7 +597,7 @@ class TestFileWorkEngine:
 
     def test_exact_read_paths_from_scratchpad(self):
         """Should extract exact read paths from scratchpad."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         scratchpad = [
             "FILE_READ_EXACT_PATH: config.json\nFILE_READ_EXACT_CONTENT:\n{}",
@@ -610,7 +610,7 @@ class TestFileWorkEngine:
 
     def test_exact_read_paths_deduplicates(self):
         """Should deduplicate paths."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         scratchpad = [
             "FILE_READ_EXACT_PATH: main.py",
@@ -623,7 +623,7 @@ class TestFileWorkEngine:
 
     def test_is_code_path_detects_code_files(self):
         """Should identify code files by extension."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         code_files = [
             "main.py",
@@ -638,7 +638,7 @@ class TestFileWorkEngine:
 
     def test_is_code_path_rejects_non_code(self):
         """Should reject non-code files."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         non_code = [
             "readme.txt",
@@ -651,7 +651,7 @@ class TestFileWorkEngine:
 
     def test_render_artifact_view_renders_code(self):
         """Should render code preview for code files."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -666,7 +666,7 @@ class TestFileWorkEngine:
 
     def test_render_artifact_view_uses_snippets(self):
         """Should use file_snippets when files not present."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -684,7 +684,7 @@ class TestFileWorkEngine:
 
     def test_render_artifact_view_returns_empty_for_non_code(self):
         """Should return empty for non-code files."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "files": {
@@ -697,7 +697,7 @@ class TestFileWorkEngine:
 
     def test_capture_exact_read_single_file(self, sample_file_stage):
         """Should capture single file read."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -718,7 +718,7 @@ class TestFileWorkEngine:
 
     def test_capture_exact_read_multiple_files_under_limit(self, sample_file_stage):
         """Should capture multiple files under the limit."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -745,7 +745,7 @@ class TestFileWorkEngine:
 
     def test_capture_exact_read_respects_existing_paths(self, sample_file_stage):
         """Should not re-capture already read files."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -766,7 +766,7 @@ class TestFileWorkEngine:
 
     def test_capture_exact_read_returns_none_for_non_read_actions(self, sample_file_stage):
         """Should return None for non-read actions."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -782,7 +782,7 @@ class TestFileWorkEngine:
 
     def test_should_block_redundant_exact_read(self, sample_code_stage):
         """Should block redundant exact read of code file."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
         from core.contracts import FileWorkBlock
 
         tool_tag = '[FILE_OP]\n{"action":"read_text","path":"app.py"}\n[/FILE_OP]'
@@ -798,7 +798,7 @@ class TestFileWorkEngine:
 
     def test_should_block_allows_new_file_read(self, sample_code_stage):
         """Should allow reading a file not yet read."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[FILE_OP]\n{"action":"read_text","path":"newfile.py"}\n[/FILE_OP]'
 
@@ -813,7 +813,7 @@ class TestFileWorkEngine:
 
     def test_should_block_code_file_write_text_embedding(self, sample_code_stage):
         """Should block embedding full code file in write_text."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # Create a very long tool tag with code
         code_content = "def hello():\n    print('world')\n" * 1000
@@ -834,7 +834,7 @@ class TestFileWorkEngine:
 
     def test_should_block_allows_code_write_after_exact_read(self, sample_code_stage):
         """Should allow write_text if file was read and target matches."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         short_content = "print('hello')"
         tool_tag = f'[FILE_OP]\n{{"action":"write_text","path":"app.py","content":"{short_content}"}}\n[/FILE_OP]'
@@ -855,7 +855,7 @@ class TestFileWorkEngine:
         sample_analysis_stage,
     ):
         """Should classify stages correctly."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # Script launch stage
         launch_stage = {
@@ -891,7 +891,7 @@ class TestFileWorkEngine:
 
     def test_recovery_hint_for_invalid_json(self, sample_file_stage):
         """Should provide hint for invalid JSON in write_text."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "tool": "FILE_OP",
@@ -909,7 +909,7 @@ class TestFileWorkEngine:
 
     def test_recovery_hint_for_code_mismatch(self, sample_code_stage):
         """Should provide hint for code content mismatch."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # "path" is required so candidate_paths is non-empty; without it
         # paths_are_code_files([]) returns False and the hint is suppressed.
@@ -929,7 +929,7 @@ class TestFileWorkEngine:
 
     def test_collect_evidence_combines_all(self, sample_file_stage):
         """Should combine all evidence in one call."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
         from core.contracts import FileWorkEvidence
 
         tool_result = {
@@ -957,7 +957,7 @@ class TestFileWorkEngine:
 
     def test_should_block_fatal_active_dependency_on_delete(self):
         """Guard 1: DELETE targeting an active-referenced file is fatal."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
         from core.contracts import FileWorkBlock
 
         stage = {"stage_goal": "Clean up", "stage_type": "FILE_WORK"}
@@ -979,7 +979,7 @@ class TestFileWorkEngine:
 
     def test_should_block_fatal_active_dependency_on_move(self):
         """Guard 1: MOVE targeting an active-referenced file is fatal."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         stage = {"stage_goal": "Reorganize", "stage_type": "FILE_WORK"}
         tool_tag = (
@@ -1002,7 +1002,7 @@ class TestFileWorkEngine:
 
     def test_should_block_allows_delete_when_no_active_reference(self):
         """Guard 1: DELETE with no active reference proceeds."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         stage = {"stage_goal": "Clean up", "stage_type": "FILE_WORK"}
         tool_tag = '[FILE_OP] {"action":"delete_path","path":"orphan.txt"} [/FILE_OP]'
@@ -1018,7 +1018,7 @@ class TestFileWorkEngine:
 
     def test_should_block_dependency_override_bypasses_fatal_block(self):
         """Guard 1: dependency_override_authorized=True bypasses the fatal block."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         stage = {
             "stage_goal": "Clean up",
@@ -1046,7 +1046,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_dependency_blocks_os_remove_on_active_file(self):
         """RUN_CODE os.remove on active-referenced file is fatal."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] import os\nos.remove("active_file.txt") [/RUN_CODE]'
         mock_service = Mock()
@@ -1066,7 +1066,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_dependency_blocks_shutil_move_on_active_file(self):
         """RUN_CODE shutil.move on active-referenced file is fatal."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = (
             '[RUN_CODE] import shutil\n'
@@ -1088,7 +1088,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_dependency_ignores_dynamic_paths(self):
         """RUN_CODE with variable paths passes through silently."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] import os\nfor f in files: os.remove(f) [/RUN_CODE]'
         mock_service = Mock()
@@ -1106,7 +1106,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_dependency_override_bypasses_block(self):
         """dependency_override_authorized=True bypasses RUN_CODE dependency block."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] import os\nos.remove("active_file.txt") [/RUN_CODE]'
         mock_service = Mock()
@@ -1128,7 +1128,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_task_event_escape_blocks_workspace_import(self):
         """Blocks FILE_WORK RUN_CODE that imports workspace helpers."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] from workspace import add_event\nadd_event("x") [/RUN_CODE]'
         result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
@@ -1138,7 +1138,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_task_event_escape_blocks_direct_helper_call(self):
         """Blocks FILE_WORK RUN_CODE that calls task/event helpers directly."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] list_tasks() [/RUN_CODE]'
         result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
@@ -1148,7 +1148,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_task_event_escape_blocks_event_store_attribute(self):
         """Blocks FILE_WORK RUN_CODE that accesses .event_store attribute."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = '[RUN_CODE] x = workspace.event_store [/RUN_CODE]'
         result = FileWorkEngine._check_run_code_task_event_escape(tool_tag)
@@ -1158,7 +1158,7 @@ class TestFileWorkEngine:
 
     def test_check_run_code_task_event_escape_allows_plain_file_io(self):
         """Allows FILE_WORK RUN_CODE that only does plain file I/O."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_tag = (
             '[RUN_CODE] with open("data.txt", "w") as f:\n    f.write("hello") [/RUN_CODE]'
@@ -1697,7 +1697,7 @@ class TestEngineIntegration:
 
     def test_file_work_engine_uses_file_stage_policy(self):
         """FileWorkEngine should use FileStagePolicy for classification."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # success_condition must supply a content cue ("code", "source"…) so
         # that stage_is_content_edit_stage fires; see test_classify_returns_correct_kinds.
@@ -1712,7 +1712,7 @@ class TestEngineIntegration:
     def test_no_duplicate_recovery_hints(self):
         """Ensure recovery hints are not duplicated."""
         from core.file_stage_policy import FileStagePolicy
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         stage = {
             "stage_goal": "Fix the bug",
@@ -1760,7 +1760,7 @@ class TestEngineIntegration:
 
     def test_verification_engine_uses_file_work_engine_for_paths(self):
         """VerificationEngine should use FileWorkEngine for path extraction."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # FileWorkEngine.candidate_paths should be used by verification
         # This is implicit in the design - verification uses file checker
@@ -1832,7 +1832,7 @@ class TestEdgeCases:
 
     def test_special_characters_in_paths(self):
         """Should handle special characters in file paths."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         tool_result = {
             "path": "my file (copy).txt",
@@ -1848,7 +1848,7 @@ class TestEdgeCases:
         import threading
 
         from core.services.summary import SummaryEngine
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         errors = []
 
@@ -1870,7 +1870,7 @@ class TestEdgeCases:
     def test_none_inputs(self):
         """Should handle None inputs gracefully."""
         from core.services.summary import SummaryEngine
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         assert SummaryEngine.latest_stage_entries(None) == []
         assert FileWorkEngine.candidate_paths(None) == []
@@ -1878,7 +1878,7 @@ class TestEdgeCases:
 
     def test_circular_reference_in_tool_result(self):
         """Should handle tool results with potential circular references."""
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # Tool result should not have circular refs in practice
         # but ensure we don't crash
@@ -1933,7 +1933,7 @@ class TestPerformance:
         """FileWorkEngine should extract paths quickly."""
         import time
 
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
 
         # Create a complex tool result
         tool_result = {

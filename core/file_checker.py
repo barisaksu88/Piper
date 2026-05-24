@@ -8,7 +8,7 @@ from typing import Any
 
 from config import CFG
 from core.contracts import FileCheckDecision, StageCard
-from core.engines.file_work import FileWorkEngine
+from core.services.file_work import FileWorkEngine
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker_rules import LocalFileOpRuleChecker
 from core.json_utils import parse_json_response

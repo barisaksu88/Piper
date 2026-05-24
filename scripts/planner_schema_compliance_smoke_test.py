@@ -26,7 +26,7 @@ from _bootstrap import ROOT_DIR
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.engines.file_work import FileWorkEngine  # noqa: E402
+from core.services.file_work import FileWorkEngine  # noqa: E402
 from core.engines.stats_collector import StatsCollector  # noqa: E402
 from core.file_stage_policy import FileStagePolicy  # noqa: E402
 

@@ -5,11 +5,13 @@ background threads.  They are deterministic utilities that happen to be
 large enough to live in their own files.
 """
 
+from core.services.file_work import FileWorkEngine
 from core.services.search_workflow import SearchWorkflowEngine
 from core.services.summary import SummaryEngine
 from core.services.verification import VerificationEngine, VerificationResult
 
 __all__ = [
+    "FileWorkEngine",
     "SearchWorkflowEngine",
     "SummaryEngine",
     "VerificationEngine",

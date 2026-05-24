@@ -19,7 +19,7 @@ from core.file_target_confirmation import (
     classify_pending_file_target_confirmation_reply,
     extract_pending_file_target_confirmation,
 )
-from core.engines.file_work import FileWorkEngine
+from core.services.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
 from core.routing.environment_queries import looks_like_live_environment_query
 from core.runtime_context import extract_latest_runtime_context_fields

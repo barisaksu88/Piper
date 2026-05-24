@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from core.contracts import PlannerDecision, StageCard
-from core.engines.file_work import FileWorkEngine
+from core.services.file_work import FileWorkEngine
 from core.file_stage_policy import FileStagePolicy
 from core.stage_policy import stage_is_chat
 from tools.registry import resolve_domain_tools

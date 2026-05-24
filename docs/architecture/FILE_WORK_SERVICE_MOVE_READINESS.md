@@ -3,8 +3,8 @@
 **Status:** Audit complete — recommendation: add tests first  
 **Branch:** `audit/file-work-service-move-readiness`  
 **Date:** 2026-05-24  
-**Source:** `core/engines/file_work.py`  
-**Possible target:** `core/services/file_work.py`
+**Source:** `core/services/file_work.py` (relocated from `core/engines/file_work.py`)  
+**Status:** Relocated ✅
 
 ---
 
@@ -24,11 +24,11 @@ FileWorkEngine is a **pure direct-call utility**.
 
 ## 2. Caller Map
 
-### 2.1 Production code (direct import of `core.engines.file_work`)
+### 2.1 Production code (direct import of `core.services.file_work`)
 
 | File | Usage |
 |------|-------|
-| `core/engines/__init__.py` | Package export |
+| `core/services/__init__.py` | Package export |
 | `core/executor.py` | `should_block`, `candidate_paths`, `exact_read_paths_from_scratchpad`, `capture_exact_read`, `render_artifact_view`, `recovery_hint` |
 | `core/file_checker.py` | `candidate_paths` |
 | `core/file_stage_policy.py` | `recovery_hint` (deprecation wrapper) |

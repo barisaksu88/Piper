@@ -27,7 +27,7 @@ from core.engines.computer_use_verifier import (
     new_stage_evidence as new_computer_use_stage_evidence,
     update_stage_evidence as update_computer_use_stage_evidence,
 )
-from core.engines.file_work import FileWorkEngine
+from core.services.file_work import FileWorkEngine
 from core.engines.state_mutation import StateMutationEngine
 from core.services.verification import VerificationEngine, VerificationResult
 from core.executor_support import (
