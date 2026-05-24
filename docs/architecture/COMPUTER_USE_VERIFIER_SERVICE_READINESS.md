@@ -117,7 +117,15 @@ The following public functions have **no dedicated test coverage**:
 | `update_stage_evidence` | Low | Dict accumulation, mostly mechanical |
 | `new_stage_evidence` | Low | Simple dict builder |
 
-**Critical observation:** `evaluate_stage()` is entirely untested. It contains complex scoring logic (download hint matching with token aliases, form fill verification with selector aliases, navigation back/forward detection, extraction topic matching) that could silently regress if modified.
+**Tests added:** `tests/test_computer_use_verifier.py` (49 tests) covers:
+- `new_stage_evidence()` — default structure, stage metadata preservation
+- `update_stage_evidence()` — URL/title, actions, extracts, downloads, field values, inventory, history navigation; deduplication; non-BROWSER_OP filtering
+- `evaluate_stage()` download verification — success, missing, hint match above threshold, hint mismatch below threshold, download directory filtering
+- `evaluate_stage()` form fill — selector/value match, inventory alias match, missing field, value mismatch (partial), no-selector-hint fallback
+- `evaluate_stage()` navigation — forward click + URL change, missing click (partial), unchanged URL (partial), go_back success, go_back missing history (partial)
+- `evaluate_stage()` extraction — topic match, missing topic (partial), title report, missing title, selector match, status text, missing extraction
+- `evaluate_stage()` fallback — verified when page opened, failed when nothing done, partial when extracts exist without requirements
+- `build_verified_payload()` — extracts, downloads, field values, status text, heading text, reported title, summary preservation, download label/href, requested topic, extracted text from expected_text, topic match sets extracted_text
 
 ---
 
@@ -133,30 +141,28 @@ The module already imports from `core.services.verification` (a relocated servic
 
 ## 10. Recommendation
 
-**B) Safe only after adding tests.**
+**A) Safe to relocate after tests are green.**
 
 **Rationale:**
 
-`core/engines/computer_use_verifier.py` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. In principle, it is eligible for relocation to `core/services/` under the established doctrine.
+`core/engines/computer_use_verifier.py` is correctly classified as a **pure direct-call utility** with no hooks, registries, or lifecycle participation. It has:
 
-However, `evaluate_stage()` is **safety-critical** — it controls whether a `COMPUTER_USE` stage is classified as `VERIFIED`, `PARTIAL`, or `FAILED`, which directly affects retry budgets and user-facing success claims. The function contains complex threshold scoring (download hint matching ≥ 28, form fill alias resolution, navigation back/forward detection, extraction topic matching) and **has zero test coverage**.
+- **Only 1 production caller** (`core/executor.py`) — minimal blast radius
+- **No cross-engine dependencies** — it already imports from `core.services.verification`
+- **Deterministic pure functions** — no side effects, no state, no threading
+- **No registry participation** — no hooks, no tail-blocks, no interceptors
 
-Under Piper's architecture cleanup workflow, safety-critical untested verifier logic must get deterministic tests before relocation. A relocation itself is mechanical and low-risk (1 caller, no import cycles), but moving an untested safety-critical module would leave the codebase without a regression baseline.
+**Unit tests have now been added** (`tests/test_computer_use_verifier.py`, 49 tests) covering all four public functions and the major behavioral branches of `evaluate_stage()`, including threshold boundary behavior for download hint scoring, form fill alias resolution, navigation back/forward detection, and extraction topic matching.
 
-**Recommended next steps:**
+The relocation is mechanical: move file, update 1 import line in `core/executor.py`, update doc references. `compileall` + pytest + smoke tests would catch any import issue.
 
-1. Add `tests/test_computer_use_verifier.py` covering:
-   - `evaluate_stage()` — download verification (success, missing, hint mismatch)
-   - `evaluate_stage()` — form fill verification (success, missing, alias match)
-   - `evaluate_stage()` — navigation verification (forward click, back navigation, missing)
-   - `evaluate_stage()` — extraction verification (topic match, selector match, title report, status text)
-   - `evaluate_stage()` — fallback (page opened vs. nothing done)
-   - `evaluate_stage()` — partial vs. failed boundary
-   - `build_verified_payload()` — output shape for all major evidence types
+**Recommended next steps for relocation:**
 
-2. Once tests pass, create `move/computer-use-verifier-service` branch and relocate.
-
-3. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + relevant smoke tests.
+1. Create `move/computer-use-verifier-service` branch.
+2. Move `core/engines/computer_use_verifier.py` → `core/services/computer_use_verifier.py`.
+3. Update import in `core/executor.py`.
+4. Update doc references.
+5. Run validation: `compileall` + `pytest tests/` + `pytest web_ui/bridge/` + `computer_use_engine_smoke_test.py` + `computer_use_browser_followup_harness_smoke_test.py`.
 
 ---
 
