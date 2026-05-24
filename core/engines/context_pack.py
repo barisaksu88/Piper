@@ -17,7 +17,7 @@ from core.contracts import (
     PromptContext,
     RuntimeContextPack,
 )
-from core.engines.summary import SummaryEngine
+from core.services.summary import SummaryEngine
 from core.engines.verification import VerificationResult
 from core.feature_hooks import register_hook
 from core.file_stage_policy import FileStagePolicy
@@ -560,7 +560,7 @@ class ContextPackEngine:
     # extract_latest_stage_proposal_answer, _extract_latest_exact_file_read_path,
     # _extract_latest_file_lookup_brief, _sanitize_runtime_note, _build_outcome_block,
     # _extract_latest_stage_status, _extract_latest_runtime_note
-    # → moved to SummaryEngine (core/engines/summary.py)
+    # → moved to SummaryEngine (core/services/summary.py)
 
     @staticmethod
     def _render_persona_active_skill_block(skill: Dict[str, Any]) -> str:

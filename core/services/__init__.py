@@ -6,7 +6,9 @@ large enough to live in their own files.
 """
 
 from core.services.search_workflow import SearchWorkflowEngine
+from core.services.summary import SummaryEngine
 
 __all__ = [
     "SearchWorkflowEngine",
+    "SummaryEngine",
 ]

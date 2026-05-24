@@ -1,4 +1,4 @@
-"""core/engines/summary.py
+"""core/services/summary.py
 
 SummaryEngine — single owner of scratchpad-level extraction and carry-forward compression.
 

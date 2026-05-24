@@ -1468,7 +1468,7 @@ These are imported and called explicitly by orchestrator/executor/prompt layers:
 
 | Utility | Called From | File |
 |---------|-------------|------|
-| SummaryEngine | `orchestrator_phases.py` | `core/engines/summary.py` |
+| SummaryEngine | `orchestrator_phases.py` | `core/services/summary.py` |
 | VerificationEngine | `orchestrator_phases.py` | `core/engines/verification.py` |
 | FileWorkEngine | `executor.py`, `file_stage_policy.py` | `core/engines/file_work.py` |
 | FollowupResolutionEngine | `orchestrator_phases.py` | `core/engines/followup_resolution.py` |
