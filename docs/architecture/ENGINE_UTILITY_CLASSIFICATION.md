@@ -51,8 +51,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 ---
 
-## Migration Rules
-
 ## Services outside `core/engines/`
 
 `SearchWorkflowEngine` was relocated from `core/engines/search_workflow.py` to `core/services/search_workflow.py` because it is a pure direct-call service with no hooks, registries, or lifecycle participation.  It is imported by orchestrator and UI layers exactly like a utility, but lives in `core/services/` to keep `core/engines/` reserved for modules that own runtime engine behavior.
