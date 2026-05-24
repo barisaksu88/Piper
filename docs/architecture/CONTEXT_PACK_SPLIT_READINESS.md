@@ -19,7 +19,7 @@
 | Registry / tail-block surface | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, all `@register_tail_block` builders | **Extracted** to `core/engines/tail_block_registry.py` |
 | Runtime path helpers | `_collect_runtime_context_paths`, `_normalize_runtime_context_path` | **Extracted** to `core/services/context_pack_paths.py` |
 
-The module is **not** a pure lifecycle engine (it exposes a wide direct-call API) and **not** a pure service (it owns global mutable registry state and a lifecycle hook). Because `build_persona_directive_pack()` iterates `_TAIL_BLOCK_REGISTRY` and because `orchestrator_phases.py` imports `_hook_upsert_runtime_context` directly, the engine class and the registry/hook are tightly bound. Moving the entire module would pull registry behavior into `core/services/`, violating the engine/service boundary.
+Historically, `core/engines/context_pack.py` was a **hybrid** module: it exposed a wide direct-call API *and* owned global mutable registry state plus a lifecycle hook. After the staged split, all direct-call service behavior lives in `core/services/context_pack_service.py` (`ContextPackService`). The remaining `core/engines/context_pack.py` is a thin engine module containing only `ContextPackDirectiveEngine` and `_hook_upsert_runtime_context`. It remains under `core/engines/` because directive generation reads the tail-block registry (which lives in `core/engines/tail_block_registry.py`) and the hook is lifecycle behavior.
 
 ---
 
@@ -32,7 +32,7 @@ The module is **not** a pure lifecycle engine (it exposes a wide direct-call API
 | `core/engines/__init__.py` | `from core.engines.context_pack import ContextPackDirectiveEngine` (re-export) |
 | `core/prompt_context.py` | Composes `ContextPackService` (from `core.services.context_pack_service`) and `ContextPackDirectiveEngine` (from `core.engines.context_pack`); wraps every public method in `PromptContextService` |
 | `core/orchestrator_phases.py` | `from core.engines.context_pack import _hook_upsert_runtime_context`; direct call at line 1824; also calls `orc.prompt_context.*` |
-| `core/engines/proactive_monitor.py` | `from core.engines.context_pack import TailBlockContext, register_tail_block`; registers 2 tail blocks |
+| `core/engines/proactive_monitor.py` | `from core.engines.tail_block_registry import TailBlockContext, register_tail_block`; registers 2 proactive tail blocks |
 | `core/services/summary.py` | Comments only (method origin documentation); no runtime import |
 
 ### Test / script callers / imports
