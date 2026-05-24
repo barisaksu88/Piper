@@ -31,6 +31,8 @@ from core.engines import proactive_monitor as _proactive_monitor_registration  #
 from core.engines import change_journal as _change_journal_registration  # noqa: F401
 from core.engines import conversation_compressor as _conversation_compressor_registration  # noqa: F401
 from core.engines import stats_collector as _stats_collector_registration  # noqa: F401
+from core.engines import environment_query as _environment_query_registration  # noqa: F401
+from core.engines import operational_state_answer as _operational_state_answer_registration  # noqa: F401
 
 
 _LOG = logging.getLogger(__name__)

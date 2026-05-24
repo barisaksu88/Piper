@@ -33,7 +33,6 @@ from core.file_stage_policy import FileStagePolicy
 from core.persona_output import sanitize_persona_output
 from core.prompting import ScratchpadFormatter, PromptBuilder, build_persona_messages
 from core.route_boundary import BoundaryValidationError, RouterBoundary
-from core.routing.environment_queries import looks_like_live_environment_query
 from core.routing.route_normalizer import (
     annotate_file_stage_kinds,
     detect_route_interceptor,
@@ -899,7 +898,7 @@ def _run_route_core(orc) -> None:
         orc.next_stage = "PERSONA"
         return
 
-    route_interceptor = detect_route_interceptor(orc.user_msg, router_history)
+    route_interceptor = detect_route_interceptor(orc.user_msg, router_history, orc=orc)
     if route_interceptor is not None:
         interceptor_kind = str(route_interceptor.get("kind") or "").strip().upper()
         orc.route_interceptor = interceptor_kind
@@ -918,34 +917,6 @@ def _run_route_core(orc) -> None:
         )
         orc.stats_collector.end_phase(orc.turn_stats, "route")
         orc.next_stage = str(route_interceptor.get("next_stage") or interceptor_kind or "PERSONA").strip().upper()
-        return
-
-    if _is_live_environment_chat_query(orc.user_msg):
-        orc.route_decision = {"decision": "CHAT", "card": {"query": orc.user_msg}}
-        orc.ui.put(("agent_log", "   -> Live environment query. Skipping Secretary/router LLM and answering in PERSONA."))
-        orc.stats_collector.note_route(
-            orc.turn_stats,
-            decision="CHAT",
-            bypass="environment_query",
-        )
-        orc.stats_collector.end_phase(orc.turn_stats, "route")
-        orc.next_stage = "PERSONA"
-        return
-
-    try:
-        _opstate_answer = orc.prompt_context.build_readonly_state_answer(orc.user_msg)
-    except Exception:
-        _opstate_answer = ""
-    if _opstate_answer:
-        orc.route_decision = {"decision": "CHAT", "card": {"query": orc.user_msg}}
-        orc.ui.put(("agent_log", "   -> Operational state query. Skipping Secretary/router LLM and answering in PERSONA."))
-        orc.stats_collector.note_route(
-            orc.turn_stats,
-            decision="CHAT",
-            bypass="operational_state_query",
-        )
-        orc.stats_collector.end_phase(orc.turn_stats, "route")
-        orc.next_stage = "PERSONA"
         return
 
     orc.ingested_document_chat = False
@@ -2597,7 +2568,14 @@ def _run_persona_core(orc) -> None:
             )
             or ""
         ).strip()
-        readonly_state_answer = orc.prompt_context.build_readonly_state_answer(readonly_query)
+        readonly_state_answer = str(getattr(orc, "_cached_readonly_state_answer", "") or "").strip()
+        if readonly_state_answer:
+            try:
+                orc._cached_readonly_state_answer = ""
+            except Exception:
+                pass
+        else:
+            readonly_state_answer = orc.prompt_context.build_readonly_state_answer(readonly_query)
         if readonly_state_answer:
             _finish_persona_fast_path(
                 orc,

@@ -25,9 +25,7 @@ phase_route  ──────────────────────�
     │  Pre-LLM bypass checks (no model call):                      │
     ├── pending search payload in history? ──────► next: REPORTER  │
     ├── proactive trigger? ──────────────────────► next: PERSONA   │
-    ├── route interceptor (UNDO/REMINDER/EXPLAIN)? ─► interceptor  │
-    ├── environment query (date/time/day)? ───────► next: PERSONA  │
-    ├── operational state query (events/tasks)? ─► next: PERSONA   │
+    ├── route interceptor (UNDO/REMINDER/EXPLAIN/ENVIRONMENT/OP-STATE)? ─► interceptor  │
     ├── document chat heuristic? ────────────────► next: DOC_FOCUS │
     └── live screen visual query? ───────────────► next: PERSONA   │
     │                                                              │
@@ -230,15 +228,14 @@ Before routing, the orchestrator:
 
 1. **Pending search payload** in recent history → skip router, jump to `REPORTER`
 2. **Proactive trigger** (reminder fire-at reached) → force `CHAT`, jump to `PERSONA` — the trigger message becomes the user message and the proactive system notice is attached for persona context.
-3. **Route interceptor** (keyword-based early exit) → jump to interceptor-specific stage. Interceptors include:
+3. **Route interceptor** (keyword-based early exit) → jump to interceptor-specific stage. Interceptors are detected by `detect_route_interceptor()` in `core/routing/route_normalizer.py` before any LLM call. Registered interceptors include:
    - `UNDO` → `phase_undo` → `PERSONA`
    - `REMINDER_SET` → `phase_reminder_set` → `PERSONA`
    - `EXPLAIN` → `phase_explain` → `PERSONA`
-   Interceptors are detected by `detect_route_interceptor()` in `core/routing/route_normalizer.py` before any LLM call.
-4. **Environment query** (current date / time / day-of-week questions) → force `CHAT`, jump to `PERSONA` — answered directly from `[ENVIRONMENT]` block, never routed to `SEARCH`. The shared predicate lives in `core/routing/environment_queries.py`; `phase_route()` enforces the first true bypass, with `route_normalizer.py` and `phase_search()` acting as safety-net guards.
-5. **Operational state query** (events, tasks, schedule reads) → force `CHAT`, jump to `PERSONA` — `prompt_context.build_readonly_state_answer()` is called deterministically; if it returns a non-empty answer the router LLM is skipped entirely and the answer is delivered via the `phase_persona` fast path. This prevents the LLM router from misclassifying read queries as `TASK` regardless of phrasing. Mutation requests (add/remove/reschedule) are excluded by `build_readonly_answer`'s own gate and fall through to normal routing.
-6. **Document chat heuristic** matches user message + ingested documents → force `CHAT`, jump to `DOC_FOCUS`
-7. **Live screen visual query** → force `CHAT`, jump to `PERSONA`
+   - `ENVIRONMENT_QUERY` (date / time / day-of-week) → `PERSONA` — answered directly from `[ENVIRONMENT]` block, never routed to `SEARCH`. Registered by `core/engines/environment_query.py`. The `_registered_live_environment_chat` normalizer in `route_normalizer.py` remains as a safety net for any SEARCH route that slips past the interceptor.
+   - `OPERATIONAL_STATE_QUERY` (events, tasks, schedule reads) → `PERSONA` — `prompt_context.build_readonly_state_answer()` is called deterministically; if it returns a non-empty answer the router LLM is skipped entirely and the answer is delivered via the `phase_persona` fast path. Registered by `core/engines/operational_state_answer.py`. The answer is cached on `orc._cached_readonly_state_answer` so persona does not recompute it.
+4. **Document chat heuristic** matches user message + ingested documents → force `CHAT`, jump to `DOC_FOCUS`
+5. **Live screen visual query** → force `CHAT`, jump to `PERSONA`
 
 ### Router history construction
 

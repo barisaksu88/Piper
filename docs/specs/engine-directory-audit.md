@@ -61,6 +61,8 @@ This made the package boundary unclear. Over multiple split waves, every pure se
 | `conversation_compressor.py` | Registry wrapper only | `@register_hook("on_turn_end")` delegates to `core.services.conversation_compressor.ConversationCompressor`. |
 | `stats_collector.py` | Registry wrapper only | `@register_hook("on_pre_route")` delegates to `core.services.stats_collector.StatsCollector`. |
 | `tail_block_registry.py` | Registry infrastructure | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, and all `@register_tail_block` builders. |
+| `environment_query.py` | Registry wrapper only | `@register_route_interceptor` — `_registered_environment_query_interceptor` delegates to `core.routing.environment_queries.looks_like_live_environment_query()`. |
+| `operational_state_answer.py` | Registry wrapper only | `@register_route_interceptor` — `_registered_operational_state_interceptor` delegates to `core.prompt_context.build_readonly_state_answer()`. |
 | `__init__.py` | Package init | Re-exports `ContextPackDirectiveEngine`. |
 
 ---

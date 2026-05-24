@@ -24,6 +24,8 @@ Modules that participate exclusively in the lifecycle hook/registry system. They
 | `change_journal.py` | `@register_hook("on_task_verified")` — `_hook_record_change_journal` | `ChangeJournal` in `core/services/change_journal.py` |
 | `conversation_compressor.py` | `@register_hook("on_turn_end")` — `_hook_deferred_conversation_summary` | `ConversationCompressor` in `core/services/conversation_compressor.py` |
 | `stats_collector.py` | `@register_hook("on_pre_route")` — `_hook_note_pre_route_user_msg` | `StatsCollector` in `core/services/stats_collector.py` |
+| `environment_query.py` | `@register_route_interceptor` — `_registered_environment_query_interceptor` | `looks_like_live_environment_query()` in `core/routing/environment_queries.py` |
+| `operational_state_answer.py` | `@register_route_interceptor` — `_registered_operational_state_interceptor` | `build_readonly_state_answer()` in `core/prompt_context.py` |
 
 These modules are **thin wrappers**: they register a hook and immediately delegate to a service class. They do not re-export the service class.
 
