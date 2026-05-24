@@ -12,7 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from config import CFG  # noqa: E402
 from core.contracts import RuntimeContextPack  # noqa: E402
-from core.engines.context_pack import ContextPackRenderer  # noqa: E402
+from core.services.context_pack_renderer import ContextPackRenderer  # noqa: E402
 from core.orchestrator_phases import phase_persona, phase_reporter, phase_search  # noqa: E402
 from core.runtime_control import CancellationToken  # noqa: E402
 from core.search_contracts import (  # noqa: E402
