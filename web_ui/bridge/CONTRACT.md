@@ -113,6 +113,13 @@ The table below maps every observed `kind` to its payload shape, source location
 | `documents_view` | `str` | `controller.py` (`refresh_documents_view()`) | Sets `documents_view_text` widget value. | `document.view` | `document` | Rendered summary of ingested documents. |
 | `document_ingest_active` | `bool` | `controller_actions.py` | Sets flag, refreshes interaction state (disables ingest button). | `document.ingest_active` | `control` | True while document ingestion is running. |
 
+### 1.10A Workspace Events
+
+| Kind | Payload | Source | DPG Path | WS Name | Visibility | Notes |
+|---|---|---|---|---|---|---|
+| `workspace_files` | `dict` with `files: list[dict]`, optional `path` | workspace listing handlers | Workspace file list refresh | `workspace.files` | `workspace` | Updates the frontend workspace file list and current workspace root/path. |
+| `file_contents` | `dict` with `path`, `name`, `content`, optional `error` | workspace file read/save handlers | Workspace editor content update | `file.contents` | `workspace` | Updates the frontend workspace editor/viewer with file contents. |
+
 ---
 
 ### 1.9 User & Identity Events
@@ -231,6 +238,9 @@ User-facing actions are DPG callbacks registered in `ui/layout.py` and dispatche
 | `mic_start` | `controller._handle_web_mic_start()` | Web UI / WebView only | none | `state-changing` | Starts native backend mic recording. Emits `mic.status` → `listening`. |
 | `mic_stop` | `controller._handle_web_mic_stop()` | Web UI / WebView only | none | `state-changing` | Stops native backend mic recording, runs STT in a worker thread. Emits `mic.status` → `transcribing`, then `idle` or `error`. |
 | `mic_audio_submit` | `controller._handle_web_mic_audio_submit()` | Web UI / WebView only | `audio: str` (base64), `format: "webm" | "wav"`, `sample_rate_hint: int` | `state-changing` | **Experimental / quarantined.** Receives audio from Web UI / WebView mic capture, decodes locally, runs offline STT + voice identity, submits transcript as voice input. Disabled by default in frontend unless `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. |
+| `list_workspace_files` | workspace browser request | frontend workspace panel | none | `safe` | Requests the current workspace file list. |
+| `read_workspace_file` | `path: str` | frontend workspace panel | none | `safe` | Requests file contents for the workspace editor/viewer. |
+| `save_workspace_file` | `path: str`, `content: str` | frontend workspace editor | none | `state-changing` | Saves editor contents back to the workspace file. |
 
 ---
 
