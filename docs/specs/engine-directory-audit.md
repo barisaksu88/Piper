@@ -28,7 +28,7 @@ This is not a runtime bug by itself, but it does make the package boundary less 
 ## Candidate Classification
 
 Lifecycle engines:
-- `change_journal.py`
+- `change_journal.py` — under split-readiness audit. `ChangeJournal` class (~420 lines of direct-call service) is a candidate for `core/services/change_journal.py`; the `@register_hook("on_task_verified")` `_hook_record_change_journal` would remain in `core/engines/`. See `docs/architecture/CHANGE_JOURNAL_SPLIT_READINESS.md`.
 - `proactive_monitor.py`
 - `stats_collector.py`
 
