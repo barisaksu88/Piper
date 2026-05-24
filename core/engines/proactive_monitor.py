@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from config import CFG
-from core.engines.context_pack import TailBlockContext, register_tail_block
+from core.engines.tail_block_registry import TailBlockContext, register_tail_block
 from core.feature_hooks import register_hook
 from core.routing.route_dates import extract_date_phrase, resolve_date_phrase
 from core.routing.route_normalizer import register_route_interceptor
