@@ -309,7 +309,7 @@ class SummaryEngine:
 - `ContextPackEngine` imports `SummaryEngine` (one-directional, no cycle)
 - `ScratchpadFormatter` imports `SummaryEngine` (one-directional, no cycle)
 - `PromptBuilder` imports `SummaryEngine` (one-directional, no cycle)
-- `core/engines/__init__.py` exports `SummaryEngine`
+- `core/services/__init__.py` exports `SummaryEngine`
 
 ---
 
@@ -327,7 +327,7 @@ If a `ScratchpadSnapshot` dataclass proves useful after extraction, it can be ad
 
 1. **Create** `core/services/summary.py` with the full `SummaryEngine` implementation,
    porting all methods listed in §6.1, with no behaviour change.
-2. **Add** `SummaryEngine` export to `core/engines/__init__.py`.
+2. **Add** `SummaryEngine` export to `core/services/__init__.py`.
 3. **Update `context_pack.py`**:
    - Add `from core.services.summary import SummaryEngine` import
    - Replace all `cls.*` scratchpad extraction calls with `SummaryEngine.*` equivalents
