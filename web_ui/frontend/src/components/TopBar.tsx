@@ -4,6 +4,7 @@ interface TopBarProps {
   connState: ConnectionState;
   statusText: string;
   modeText: string;
+  canStop: boolean;
   onNewSession: () => void;
   onRestart: () => void;
   onStop: () => void;
@@ -14,6 +15,7 @@ export default function TopBar({
   connState,
   statusText,
   modeText,
+  canStop,
   onNewSession,
   onRestart,
   onStop,
@@ -71,7 +73,7 @@ export default function TopBar({
           className="icon-btn"
           onClick={onStop}
           title="Stop"
-          disabled={connState !== "connected"}
+          disabled={connState !== "connected" || !canStop}
         >
           ■
         </button>
