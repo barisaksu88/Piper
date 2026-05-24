@@ -39,7 +39,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
-| `file_work.py` | `FileWorkEngine` — file operation planning and execution. No hooks. *See `FILE_WORK_SERVICE_MOVE_READINESS.md`: behaviorally ready, but safety guards lack tests.* |
 | `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. |
 | `route_clarity.py` | `RouteClarifier` — route clarification logic. No hooks. |
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
@@ -55,7 +54,9 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 `SummaryEngine` was relocated from `core/engines/summary.py` to `core/services/summary.py` for the same reason.
 
-`VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.  All are imported by orchestrator and UI layers exactly like utilities, but live in `core/services/` to keep `core/engines/` reserved for modules that own runtime engine behavior.
+`VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.
+
+`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It was the last high-risk file-operation service move in this pass.  Other direct-call utilities remain in `core/engines/` and should be audited individually before relocation.
 
 ---
 

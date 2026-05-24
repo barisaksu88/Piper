@@ -1258,7 +1258,7 @@ class FileStagePolicy:
         """Return a SYSTEM HINT string to guide the planner past a FAILED verification.
 
         .. deprecated:: 2.0
-            Use :meth:`core.engines.file_work.FileWorkEngine.recovery_hint` instead.
+            Use :meth:`core.services.file_work.FileWorkEngine.recovery_hint` instead.
             This shim will be removed in a future version.
         """
         import warnings
@@ -1268,5 +1268,5 @@ class FileStagePolicy:
             DeprecationWarning,
             stacklevel=2,
         )
-        from core.engines.file_work import FileWorkEngine
+        from core.services.file_work import FileWorkEngine
         return FileWorkEngine.recovery_hint(stage, tool_result, file_check)

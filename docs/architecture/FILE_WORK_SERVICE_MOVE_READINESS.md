@@ -3,8 +3,8 @@
 **Status:** Audit complete — recommendation: add tests first  
 **Branch:** `audit/file-work-service-move-readiness`  
 **Date:** 2026-05-24  
-**Source:** `core/engines/file_work.py`  
-**Possible target:** `core/services/file_work.py`
+**Source:** `core/services/file_work.py` (relocated from `core/engines/file_work.py`)  
+**Status:** Relocated ✅
 
 ---
 
@@ -24,11 +24,11 @@ FileWorkEngine is a **pure direct-call utility**.
 
 ## 2. Caller Map
 
-### 2.1 Production code (direct import of `core.engines.file_work`)
+### 2.1 Production code (direct import of `core.services.file_work`)
 
 | File | Usage |
 |------|-------|
-| `core/engines/__init__.py` | Package export |
+| `core/services/__init__.py` | Package export |
 | `core/executor.py` | `should_block`, `candidate_paths`, `exact_read_paths_from_scratchpad`, `capture_exact_read`, `render_artifact_view`, `recovery_hint` |
 | `core/file_checker.py` | `candidate_paths` |
 | `core/file_stage_policy.py` | `recovery_hint` (deprecation wrapper) |
@@ -213,9 +213,10 @@ docs/foundation/BLUEPRINT.md                          — path updates
 
 ## 9. Notes
 
-- `FileWorkEngine` is the **last remaining** Direct-Call Utility in `core/engines/`.
-  All others (`search_workflow.py`, `summary.py`, `verification.py`) have already
-  been relocated to `core/services/`.
+- `FileWorkEngine` is the **last service moved in this pass** from `core/engines/`
+  to `core/services/`.  Other direct-call utilities (`followup_resolution.py`,
+  `route_clarity.py`, `state_mutation.py`, `computer_use_engine.py`, etc.)
+  remain in `core/engines/` and should be audited individually before relocation.
 - `file_work.py` has **no registry behavior** and is therefore the cleanest
   remaining candidate for relocation.
 - The only blocker is test coverage for the safety guards, not architecture.

@@ -11,7 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from core.executor import StageExecutor  # noqa: E402
-from core.engines.file_work import FileWorkEngine  # noqa: E402
+from core.services.file_work import FileWorkEngine  # noqa: E402
 from core.prompt_builder import PromptBuilder  # noqa: E402
 
 

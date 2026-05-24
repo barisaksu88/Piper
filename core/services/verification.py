@@ -162,7 +162,7 @@ class VerificationEngine:
         # Constraint-first path: derive typed constraints from stage + tool result,
         # check each against the actual filesystem.  No LLM call needed.
         # Falls through to RULES → LLM when no constraints are derivable.
-        from core.engines.file_work import FileWorkEngine as _FileWorkEngine
+        from core.services.file_work import FileWorkEngine as _FileWorkEngine
         _constraints = _FileWorkEngine.derive_constraints(stage, tool_result)
         if _constraints:
             _constraint_result = self.evaluate_with_constraints(_constraints, workspace)

@@ -206,7 +206,7 @@ No logic changes — just a single definition site.
 Follow the standard v1 phase workflow:
 
 1. Define `FileWorkEvidence`, `FileWorkBlock`, `FileStageKind` in `contracts.py`
-2. Implement `FileWorkEngine` shell in `core/engines/file_work.py`
+2. Implement `FileWorkEngine` shell in `core/services/file_work.py`
    - start with `CODE_FILE_EXTENSIONS` constant migration (zero-risk, easy to verify)
    - then `collect_evidence()` — consolidate the three path extractors
    - then `render_artifact_view()` + `capture_exact_read()`

@@ -566,7 +566,7 @@ JSON only. No extra text. Keep `thought` short and concrete.
             stage.get("stage_type", "UNKNOWN"),
             stage.get("allowed_tools", []),
         )
-        from core.engines.file_work import FileWorkEngine  # avoid circular import at module level
+        from core.services.file_work import FileWorkEngine  # avoid circular import at module level
         exact_read_paths = FileWorkEngine.exact_read_paths_from_scratchpad([scratchpad_text])
         if (
             FileStagePolicy.stage_is_content_edit_stage(stage)
