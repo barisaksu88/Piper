@@ -43,6 +43,8 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `ComputerUseVerifier` — computer-use verification. No hooks. |
 
+> **Note:** `state_mutation.py` is under audit for relocation to `core/services/`. See `docs/architecture/STATE_MUTATION_SERVICE_READINESS.md`. It remains in `core/engines/` pending test coverage improvements.
+
 ---
 
 ## Services outside `core/engines/`
