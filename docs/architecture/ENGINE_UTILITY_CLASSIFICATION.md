@@ -42,7 +42,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `ComputerUseVerifier` — computer-use verification. No hooks. |
-| `rollback_engine.py` | `invert_manifest()` and rollback utilities. No hooks. |
+| `rollback_engine.py` | `invert_manifest()` and rollback utilities. No hooks. *See `ROLLBACK_SERVICE_READINESS.md`: smoke test covers full public API; safe to move.* |
 
 ---
 
