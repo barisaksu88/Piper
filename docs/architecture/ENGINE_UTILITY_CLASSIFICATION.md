@@ -33,6 +33,8 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 | `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector.resume_or_start_turn()`, `.note_route()`, `.record_turn()`, `.build_dashboard_snapshot()` |
 | `proactive_monitor.py` | `@register_tail_block`, `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle (start/stop/loop), `ReminderStore` (add/due_entries/mark_fired), `parse_reminder_request()` |
 
+`context_pack.py` audit completed — see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Recommendation: **split first, then move pure service pieces**; registry and hook behavior must remain in `core/engines/`.
+
 `conversation_compressor.py` has been **split**. The `ConversationCompressor` class now lives in `core/services/conversation_compressor.py`; only the `_hook_deferred_conversation_summary` hook remains in `core/engines/conversation_compressor.py`. See `docs/architecture/CONVERSATION_COMPRESSOR_SPLIT_READINESS.md`.
 
 ### 3. Direct-Call Utilities
