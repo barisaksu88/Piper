@@ -101,6 +101,7 @@ export default function App() {
     setSelectedDocumentPaths,
     handleFrame,
     appendActivity,
+    settleStreaming,
     reset: resetRouter,
   } = router;
 
@@ -256,8 +257,9 @@ export default function App() {
 
   const handleStop = useCallback(() => {
     abortMicRecording(true);
+    settleStreaming();
     sendAction("stop");
-  }, [abortMicRecording, sendAction]);
+  }, [abortMicRecording, settleStreaming, sendAction]);
 
   const handleNewSession = useCallback(() => {
     abortMicRecording(true);
