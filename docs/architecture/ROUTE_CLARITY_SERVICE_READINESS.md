@@ -3,8 +3,8 @@
 **Status:** Audit complete — recommendation: add tests first  
 **Branch:** `audit/route-clarity-service-readiness`  
 **Date:** 2026-05-24  
-**Source:** `core/engines/route_clarity.py`  
-**Possible target:** `core/services/route_clarity.py`
+**Source:** `core/services/route_clarity.py` (relocated from `core/engines/route_clarity.py`)  
+**Status:** Relocated ✅
 
 ---
 
@@ -183,7 +183,7 @@ docs/architecture/TRIGGER_FLOW.md                     — path updates
 ```
 
 **Note on `_PATHISH_RE`:**
-`core/orchestrator_phases.py` imports `_PATHISH_RE` directly from `core.engines.route_clarity`.
+`core/orchestrator_phases.py` imports `_PATHISH_RE` directly from `core.services.route_clarity`.
 If RouteClarifier moves, this regex import must move with it or be re-exported.
 The regex is used in fallback clarification logic outside the class.
 

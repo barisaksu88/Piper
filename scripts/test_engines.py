@@ -1178,7 +1178,7 @@ class TestRouteClarifier:
 
     @pytest.fixture
     def clarifier(self):
-        from core.engines.route_clarity import RouteClarifier
+        from core.services.route_clarity import RouteClarifier
         return RouteClarifier()
 
     @pytest.fixture
@@ -1353,25 +1353,25 @@ class TestRouteClarifier:
 
     def test_task_is_targeted_file_lookup_true_for_read(self, clarifier, targeted_read_decision):
         """Targeted read stage is detected as file lookup."""
-        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        from core.services.route_clarity import _task_is_targeted_file_lookup
         result = _task_is_targeted_file_lookup(targeted_read_decision)
         assert result is True
 
     def test_task_is_targeted_file_lookup_true_for_lookup(self, clarifier, targeted_lookup_decision):
         """Targeted lookup stage is detected as file lookup."""
-        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        from core.services.route_clarity import _task_is_targeted_file_lookup
         result = _task_is_targeted_file_lookup(targeted_lookup_decision)
         assert result is True
 
     def test_task_is_targeted_file_lookup_false_for_non_task(self):
         """Non-TASK decision is not a file lookup."""
-        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        from core.services.route_clarity import _task_is_targeted_file_lookup
         result = _task_is_targeted_file_lookup({"decision": "CHAT"})
         assert result is False
 
     def test_task_is_targeted_file_lookup_false_for_non_file_stage(self, clarifier, task_decision):
         """Non-file stage is not a file lookup."""
-        from core.engines.route_clarity import _task_is_targeted_file_lookup
+        from core.services.route_clarity import _task_is_targeted_file_lookup
         result = _task_is_targeted_file_lookup(task_decision)
         assert result is False
 
@@ -1381,19 +1381,19 @@ class TestRouteClarifier:
 
     def test_task_is_computer_use_true(self, clarifier, computer_use_decision):
         """COMPUTER_USE stage is detected."""
-        from core.engines.route_clarity import _task_is_computer_use
+        from core.services.route_clarity import _task_is_computer_use
         result = _task_is_computer_use(computer_use_decision)
         assert result is True
 
     def test_task_is_computer_use_false_for_non_task(self):
         """Non-TASK decision is not computer use."""
-        from core.engines.route_clarity import _task_is_computer_use
+        from core.services.route_clarity import _task_is_computer_use
         result = _task_is_computer_use({"decision": "CHAT"})
         assert result is False
 
     def test_task_is_computer_use_false_for_non_computer_stage(self, clarifier, task_decision):
         """Non-computer-use stage is not computer use."""
-        from core.engines.route_clarity import _task_is_computer_use
+        from core.services.route_clarity import _task_is_computer_use
         result = _task_is_computer_use(task_decision)
         assert result is False
 

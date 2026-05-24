@@ -40,7 +40,6 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
 | `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. |
-| `route_clarity.py` | `RouteClarifier` — route clarification logic. No hooks. *See `ROUTE_CLARITY_SERVICE_READINESS.md`: behaviorally ready, but heuristic gates lack unit tests.* |
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `ComputerUseVerifier` — computer-use verification. No hooks. |
@@ -56,7 +55,9 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 `VerificationEngine` (and `VerificationResult`) was relocated from `core/engines/verification.py` to `core/services/verification.py` for the same reason.
 
-`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It was the last high-risk file-operation service move in this pass.  Other direct-call utilities remain in `core/engines/` and should be audited individually before relocation.
+`FileWorkEngine` was relocated from `core/engines/file_work.py` to `core/services/file_work.py` for the same reason.  It was the last high-risk file-operation service move in this pass.
+
+`RouteClarifier` was relocated from `core/engines/route_clarity.py` to `core/services/route_clarity.py` for the same reason.  Other direct-call utilities remain in `core/engines/` and should be audited individually before relocation.
 
 ---
 

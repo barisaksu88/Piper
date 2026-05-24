@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.engines.route_clarity import RouteClarifier  # noqa: E402
+from core.services.route_clarity import RouteClarifier  # noqa: E402
 
 
 class _DummyLLM:
