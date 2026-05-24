@@ -12,7 +12,7 @@ from typing import Any
 
 from config import CFG
 from core.contracts import RuntimeSignal
-from core.engines.change_journal import ChangeJournal
+from core.services.change_journal import ChangeJournal
 from core.services.conversation_compressor import ConversationCompressor
 from core.engines.stats_collector import StatsCollector
 from core.orchestrator_phases import (

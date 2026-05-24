@@ -1,6 +1,6 @@
 """Guard tests for ChangeJournal.
 
-These tests lock behavior before any refactor of `core/engines/change_journal.py`.
+These tests lock behavior for `ChangeJournal`.
 They require no LLM, no web search, no threading, and no external services.
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from core.engines.change_journal import ChangeJournal
+from core.services.change_journal import ChangeJournal
 
 
 # ── 1. load/save behavior ────────────────────────────────────────────

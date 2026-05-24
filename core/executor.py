@@ -19,7 +19,7 @@ from core.planner_boundary import PlannerBoundary
 from core.json_utils import normalize_tool_invocation, parse_json_response
 from core.file_stage_policy import FileStagePolicy
 from core.file_checker import FileWorkChecker
-from core.engines.change_journal import ChangeJournal
+from core.services.change_journal import ChangeJournal
 from core.services.rollback_engine import is_bulk_action, record_manifest as record_rollback_manifest
 from core.services.computer_use_verifier import (
     build_verified_payload as build_verified_computer_use_payload,
