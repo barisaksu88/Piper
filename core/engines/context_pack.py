@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import Any, Dict, List
 
 from config import CFG
@@ -32,10 +30,7 @@ from core.engines.tail_block_registry import (
     TailBlockContext,
     _TAIL_BLOCK_REGISTRY,
 )
-
-_RUNTIME_CONTEXT_PATH_RE = re.compile(
-    r"(?i)(?:[A-Za-z]:[\\/][^\s`\"'<>|]+|/mnt/[a-z]/[^\s`\"'<>|]+|[\w./\\-]+\.[A-Za-z0-9]{1,8})"
-)
+from core.services.context_pack_paths import collect_runtime_context_paths
 
 
 @dataclass
@@ -240,7 +235,7 @@ class ContextPackEngine:
             search_query=search_query if (previous_route == "SEARCH" or reporter_just_ran) else "",
             execution_status="" if reporter_just_ran else SummaryEngine.extract_stage_status(getattr(orc, "scratchpad", []) or []),
             runtime_note="" if reporter_just_ran else SummaryEngine.build_runtime_note(getattr(orc, "scratchpad", []) or []),
-            relevant_paths=self._collect_runtime_context_paths(orc),
+            relevant_paths=collect_runtime_context_paths(orc),
             reporter_just_ran=bool(reporter_just_ran),
             search_failed=bool(getattr(orc, "latest_search_failed", False)) if reporter_just_ran else False,
             search_error=str(getattr(orc, "latest_search_error", "") or "") if reporter_just_ran else "",
@@ -417,75 +412,8 @@ class ContextPackEngine:
     # _extract_latest_stage_status, _extract_latest_runtime_note
     # → moved to SummaryEngine (core/services/summary.py)
 
-    def _collect_runtime_context_paths(self, orc) -> List[str]:
-        workspace_root = Path(getattr(getattr(orc, "brain", None), "workspace", CFG.DATA_DIR / "workspace")).resolve()
-        blobs: list[str] = [str(getattr(orc, "user_msg", "") or "").strip()]
-        card = dict(getattr(orc, "context_card", {}) or getattr(orc, "route_decision", {}).get("card") or {})
-        blobs.append(str(card.get("goal") or "").strip())
-        blobs.extend(str(item or "").strip() for item in (card.get("context") or []))
-        for stage in card.get("stages") or []:
-            if not isinstance(stage, dict):
-                continue
-            blobs.append(str(stage.get("stage_goal") or "").strip())
-            blobs.append(str(stage.get("success_condition") or "").strip())
-        blobs.extend(str(entry or "") for entry in SummaryEngine.latest_stage_entries(getattr(orc, "scratchpad", []) or []))
-
-        ordered: list[str] = []
-        seen: set[str] = set()
-        for blob in blobs:
-            for match in _RUNTIME_CONTEXT_PATH_RE.findall(blob):
-                normalized = self._normalize_runtime_context_path(str(match or ""), workspace_root)
-                if not normalized:
-                    continue
-                lowered = normalized.lower()
-                if lowered in seen:
-                    continue
-                seen.add(lowered)
-                ordered.append(normalized)
-        return ordered
-
-    @staticmethod
-    def _normalize_runtime_context_path(raw_path: str, workspace_root: Path | None) -> str:
-        candidate = str(raw_path or "").strip().strip("`\"'.,;:()[]{}")
-        if not candidate:
-            return ""
-        normalized = candidate.replace("\\", "/").strip()
-        if not normalized or normalized.endswith(":"):
-            return ""
-
-        resolved: Path | None = None
-        windows_match = re.match(r"^([A-Za-z]):/(.*)$", normalized)
-        if windows_match:
-            drive = windows_match.group(1).lower()
-            suffix = windows_match.group(2)
-            if os.name == "nt":
-                windows_suffix = suffix.replace("/", "\\")
-                resolved = Path(f"{drive.upper()}:\\{windows_suffix}")
-            else:
-                resolved = Path(f"/mnt/{drive}/{suffix}")
-        elif normalized.startswith("/mnt/"):
-            if os.name == "nt" and len(normalized) > 6:
-                drive = normalized[5].upper()
-                suffix = normalized[7:].replace("/", "\\")
-                resolved = Path(f"{drive}:\\{suffix}")
-            else:
-                resolved = Path(normalized)
-        else:
-            resolved = (workspace_root / normalized).resolve() if workspace_root is not None else Path(normalized)
-
-        if workspace_root is not None:
-            try:
-                canonical_workspace = Path(os.path.normcase(os.path.realpath(workspace_root)))
-                canonical_candidate = Path(os.path.normcase(os.path.realpath(resolved)))
-                rel = canonical_candidate.relative_to(canonical_workspace)
-                if canonical_candidate.exists():
-                    return rel.as_posix()
-                return ""
-            except Exception:
-                return ""
-
-        return normalized
-
+    # _collect_runtime_context_paths and _normalize_runtime_context_path
+    # → moved to core.services.context_pack_paths
 
 
 @register_hook("on_turn_end")

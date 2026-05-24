@@ -17,6 +17,7 @@
 | Direct-call service behavior | `ContextPackEngine.build_persona_pack()`, `.build_runtime_context_pack()`, `.build_persona_runtime_pack()`, etc. | Could move to `core/services/` **after** registry is separated |
 | Pure helper/value behavior | `resolve_persona_turn_type()`, `render_context_arbitration_block()`, `_clear_pack_field_value()` | **Extracted** to `core/services/context_pack_renderer.py` |
 | Registry / tail-block surface | `TailBlockContext`, `TailBlockBuilder`, `_TAIL_BLOCK_REGISTRY`, `register_tail_block`, all `@register_tail_block` builders | **Extracted** to `core/engines/tail_block_registry.py` |
+| Runtime path helpers | `_collect_runtime_context_paths`, `_normalize_runtime_context_path` | **Extracted** to `core/services/context_pack_paths.py` |
 
 The module is **not** a pure lifecycle engine (it exposes a wide direct-call API) and **not** a pure service (it owns global mutable registry state and a lifecycle hook). Because `build_persona_directive_pack()` iterates `_TAIL_BLOCK_REGISTRY` and because `orchestrator_phases.py` imports `_hook_upsert_runtime_context` directly, the engine class and the registry/hook are tightly bound. Moving the entire module would pull registry behavior into `core/services/`, violating the engine/service boundary.
 
@@ -262,6 +263,7 @@ Rationale:
 
 1. ✅ **Add missing tests** (proactive tail blocks, path normalization, hook direct-call path) — completed in `test/context-pack-split-guards`.
 2. ✅ **Extract `_TAIL_BLOCK_REGISTRY` + `register_tail_block` + `TailBlockContext` + all builders** into `core/engines/tail_block_registry.py`. Tail-block-specific helpers (`_render_persona_active_skill_block`, `_render_verification_result_block`) are now local to `tail_block_registry.py`; the registry module no longer imports back into `ContextPackEngine`.
+3. ✅ **Extract runtime context path helpers** (`_collect_runtime_context_paths`, `_normalize_runtime_context_path`) into `core/services/context_pack_paths.py`.
 3. ✅ **Move `ContextPackRenderer` + pure helpers** to `core/services/context_pack_renderer.py`.
 4. **Update `PromptContextService`** to import renderer from the new location; keep `ContextPackEngine` in `core/engines/` until its registry-bound method can be decoupled.
 5. ✅ **Run regression pack** after each stage: `python -m compileall …`, `pytest tests/ -q`, `scripts/context_pack_engine_smoke_test.py --json`.
