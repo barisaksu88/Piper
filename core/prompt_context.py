@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, List
 
-from core.engines.context_pack import ContextPackEngine
+from core.engines.context_pack import ContextPackDirectiveEngine
 from core.feature_hooks import register_hook
+from core.services.context_pack_service import ContextPackService
 from core.services.state_mutation import StateMutationEngine
 from core.services.verification import VerificationResult
 from core.contracts import (
@@ -32,11 +33,12 @@ class PromptContextService:
     vision_session_memory: VisionSessionMemory | None = None
     transient_state_mgr: Any | None = None
     user_runtime: Any | None = None
-    engine: ContextPackEngine = field(init=False)
+    context_service: ContextPackService = field(init=False)
+    directive_engine: ContextPackDirectiveEngine = field(init=False)
     state_mutation_engine: StateMutationEngine = field(init=False)
 
     def __post_init__(self) -> None:
-        self.engine = ContextPackEngine(
+        self.context_service = ContextPackService(
             instruction_loader=self.instruction_loader,
             environment_service=self.environment_service,
             operational_state_service=self.operational_state_service,
@@ -47,6 +49,7 @@ class PromptContextService:
             vision_session_memory=self.vision_session_memory,
             user_runtime=self.user_runtime,
         )
+        self.directive_engine = ContextPackDirectiveEngine()
         self.state_mutation_engine = StateMutationEngine()
 
     def build_persona_pack(
@@ -58,7 +61,7 @@ class PromptContextService:
         brain_limit: int = 9,
         document_limit: int = 5,
     ) -> PersonaContextPack:
-        return self.engine.build_persona_pack(
+        return self.context_service.build_persona_pack(
             user_msg=user_msg,
             style_overlay=style_overlay,
             knowledge_enabled=knowledge_enabled,
@@ -75,7 +78,7 @@ class PromptContextService:
         sources: List[str] | None = None,
         clear_document_hits: bool = True,
     ) -> PersonaContextPack:
-        return self.engine.apply_document_focus(
+        return self.context_service.apply_document_focus(
             pack,
             focus_text=focus_text,
             references=references,
@@ -84,7 +87,7 @@ class PromptContextService:
         )
 
     def clear_memory_for_file_work(self, pack: PersonaContextPack) -> PersonaContextPack:
-        return self.engine.clear_memory_for_file_work(pack)
+        return self.context_service.clear_memory_for_file_work(pack)
 
     def apply_context_arbitration(
         self,
@@ -95,7 +98,7 @@ class PromptContextService:
         reporter_just_ran: bool = False,
         document_focus_active: bool = False,
     ) -> PersonaContextPack:
-        return self.engine.apply_context_arbitration(
+        return self.context_service.apply_context_arbitration(
             pack,
             route_decision=route_decision,
             ingested_document_chat=ingested_document_chat,
@@ -104,7 +107,7 @@ class PromptContextService:
         )
 
     def to_prompt_context(self, pack: PersonaContextPack) -> PromptContext:
-        return self.engine.to_prompt_context(pack)
+        return self.context_service.to_prompt_context(pack)
 
     def build_persona_context(
         self,
@@ -125,10 +128,10 @@ class PromptContextService:
         return self.to_prompt_context(pack)
 
     def build_runtime_context_pack(self, orc, *, reporter_just_ran: bool = False) -> RuntimeContextPack:
-        return self.engine.build_runtime_context_pack(orc, reporter_just_ran=reporter_just_ran)
+        return self.context_service.build_runtime_context_pack(orc, reporter_just_ran=reporter_just_ran)
 
     def render_runtime_context_message(self, pack: RuntimeContextPack) -> str:
-        return self.engine.render_runtime_context_message(pack)
+        return self.context_service.render_runtime_context_message(pack)
 
     def build_runtime_context_message(self, orc, *, reporter_just_ran: bool = False) -> str:
         pack = self.build_runtime_context_pack(orc, reporter_just_ran=reporter_just_ran)
@@ -144,7 +147,7 @@ class PromptContextService:
         verification_result: VerificationResult | None = None,
         outcome_pack: Any | None = None,
     ) -> PersonaRuntimePack:
-        return self.engine.build_persona_runtime_pack(
+        return self.context_service.build_persona_runtime_pack(
             scratchpad,
             latest_stage=latest_stage,
             reporter_just_ran=reporter_just_ran,
@@ -163,7 +166,7 @@ class PromptContextService:
         active_skill: dict[str, Any] | None = None,
         persona_runtime: PersonaRuntimePack | None = None,
     ) -> PersonaDirectivePack:
-        return self.engine.build_persona_directive_pack(
+        return self.directive_engine.build_persona_directive_pack(
             route_decision=route_decision,
             ingested_document_chat=ingested_document_chat,
             document_focus_active=document_focus_active,
