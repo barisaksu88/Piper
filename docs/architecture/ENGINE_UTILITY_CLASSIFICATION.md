@@ -39,7 +39,7 @@ Modules that expose a direct-call service API and **do not** register hooks, tai
 
 | Module | Direct-Call Service Behavior |
 |--------|------------------------------|
-| `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. |
+| `followup_resolution.py` | `FollowupResolutionEngine` — follow-up intent resolution. No hooks. *See `FOLLOWUP_RESOLUTION_SERVICE_READINESS.md`: behaviorally ready, but deterministic gate lacks unit tests.* |
 | `state_mutation.py` | `StateMutationEngine` — state mutation planning. No hooks. |
 | `computer_use_engine.py` | `ComputerUseEngine` — computer-use orchestration. No hooks. |
 | `computer_use_verifier.py` | `ComputerUseVerifier` — computer-use verification. No hooks. |
