@@ -13,7 +13,7 @@ import dearpygui.dearpygui as dpg
 from config import CFG
 from core.code_session import EmbeddedCodeSession
 from core.engines.proactive_monitor import ProactiveMonitor
-from core.engines.stats_collector import StatsCollector
+from core.services.stats_collector import StatsCollector
 from core.pipeline import ChatPipeline
 from core.runtime_control import CancellationToken
 from ui.layout import build_ui
