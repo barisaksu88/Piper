@@ -50,6 +50,14 @@ export interface RawEvent {
   receivedAt: number;
 }
 
+export interface UiError {
+  id: string;
+  message: string;
+  sourceKind: string;
+  kind: string;
+  receivedAt: number;
+}
+
 export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
 
 export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";

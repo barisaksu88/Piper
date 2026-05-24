@@ -87,6 +87,7 @@ export default function App() {
     activities,
     logs,
     rawEvents,
+    errors,
     codeOutput,
     codeStatus,
     codeActive,
@@ -457,6 +458,7 @@ export default function App() {
         onClose={() => setSystemDrawerOpen(false)}
         connState={connState}
         ttsState={ttsState}
+        errors={errors}
         logs={logs}
         userName={userName}
         backendVersion="Piper v2.0"

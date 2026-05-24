@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { BackendFrame, ChatMessage, MicStatus, RawEvent } from "../types";
+import type { BackendFrame, ChatMessage, MicStatus, RawEvent, UiError } from "../types";
 import type { TtsState } from "../types";
 import { generateId, isThinkingPlaceholder, sanitizeOperationalText } from "../utils";
 
@@ -55,6 +55,7 @@ export function useEventRouter({
   const [activities, setActivities] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [rawEvents, setRawEvents] = useState<RawEvent[]>([]);
+  const [errors, setErrors] = useState<UiError[]>([]);
 
   // Code session state
   const [codeOutput, setCodeOutput] = useState<string[]>([]);
@@ -88,6 +89,19 @@ export function useEventRouter({
         kind: frame.kind,
         sourceKind: "sourceKind" in frame ? String(frame.sourceKind) : "",
         payload: frame.payload,
+        receivedAt: Date.now(),
+      },
+    ]);
+  }, []);
+
+  const addError = useCallback((message: string, sourceKind: string, kind: string) => {
+    setErrors((prev) => [
+      ...prev.slice(-199),
+      {
+        id: generateId(),
+        message,
+        sourceKind,
+        kind,
         receivedAt: Date.now(),
       },
     ]);
@@ -197,6 +211,7 @@ export function useEventRouter({
     setDocumentIngestActive(false);
     setSelectedDocumentPaths([]);
     setMicStatus({ state: "idle" });
+    setErrors([]);
     streamingRef.current = false;
     pendingDeltasRef.current = "";
     if (deltaFlushTimerRef.current) {
@@ -208,8 +223,10 @@ export function useEventRouter({
   const handleFrame = useCallback(
     (frame: BackendFrame) => {
       if (frame.frame === "error") {
-        appendActivity(`[Error] ${frame.message}`);
         addRawEvent(frame);
+        const message = String(frame.message || "Unknown error");
+        appendActivity(`[Error] ${message}`);
+        addError(message, "", frame.kind);
         setStatusText("Idle");
         setModeText("");
         settleStreaming();
@@ -352,11 +369,11 @@ export function useEventRouter({
         }
 
         case "error": {
+          const message = String((payload as { message?: string }).message || "Unknown error");
           streamingRef.current = false;
           setIsGenerating(false);
-          appendActivity(
-            `[Error] ${String((payload as { message?: string }).message || "Unknown error")}`
-          );
+          appendActivity(`[Error] ${message}`);
+          addError(message, String((frame as { sourceKind?: string }).sourceKind || ""), kind);
           if (!isOperational) {
             onBootProgress?.("Error", "error");
           }
@@ -511,7 +528,7 @@ export function useEventRouter({
           break;
       }
     },
-    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, clearThinkingPlaceholders, ensureAssistantStreamMessage, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen]
+    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, addError, clearThinkingPlaceholders, ensureAssistantStreamMessage, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen]
   );
 
   return {
@@ -521,6 +538,7 @@ export function useEventRouter({
     activities,
     logs,
     rawEvents,
+    errors,
     codeOutput,
     codeStatus,
     codeActive,

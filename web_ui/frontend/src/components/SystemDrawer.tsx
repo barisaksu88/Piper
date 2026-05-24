@@ -5,6 +5,13 @@ interface SystemDrawerProps {
   onClose: () => void;
   connState: string;
   ttsState: string;
+  errors: Array<{
+    id: string;
+    message: string;
+    sourceKind: string;
+    kind: string;
+    receivedAt: number;
+  }>;
   logs: string[];
   userName?: string;
   backendVersion?: string;
@@ -15,6 +22,7 @@ export default function SystemDrawer({
   onClose,
   connState,
   ttsState,
+  errors,
   logs,
   userName,
   backendVersion = "Piper",
@@ -72,6 +80,23 @@ export default function SystemDrawer({
               <span className="system-row-label">State</span>
               <span className="system-row-value">{ttsState}</span>
             </div>
+          </div>
+
+          {/* Logs */}
+          <div className="system-section">
+            <h4 className="system-section-title">Errors</h4>
+            {errors.length === 0 ? (
+              <div className="system-empty">No errors yet</div>
+            ) : (
+              <div className="system-stats-list">
+                {errors.slice(-50).map((err) => (
+                  <div key={err.id} className="system-stat-line error">
+                    <strong>{err.message}</strong>
+                    {err.sourceKind || err.kind ? ` (${err.kind}${err.sourceKind ? ` · ${err.sourceKind}` : ""})` : ""}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Logs */}
