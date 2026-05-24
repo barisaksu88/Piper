@@ -55,3 +55,10 @@ export type MicState = "idle" | "requesting_permission" | "listening" | "transcr
 export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
 
 export type TtsState = "idle" | "synthesizing" | "playing" | "error";
+
+export interface MicStatus {
+  state: "idle" | "listening" | "transcribing" | "error";
+  stage?: string;
+  message?: string;
+  error?: string;
+}
