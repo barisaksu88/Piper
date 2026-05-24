@@ -20,7 +20,7 @@ from core.file_target_confirmation import (
     extract_pending_file_target_confirmation,
 )
 from core.services.file_work import FileWorkEngine
-from core.engines.state_mutation import StateMutationEngine
+from core.services.state_mutation import StateMutationEngine
 from core.routing.environment_queries import looks_like_live_environment_query
 from core.runtime_context import extract_latest_runtime_context_fields
 from core.turn_explanation import (

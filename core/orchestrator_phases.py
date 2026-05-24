@@ -27,7 +27,7 @@ from core.engines.proactive_monitor import (
     parse_reminder_request,
 )
 from core.services.route_clarity import RouteClarifier, _PATHISH_RE
-from core.engines.state_mutation import StateMutationEngine
+from core.services.state_mutation import StateMutationEngine
 from core.executor import StageExecutor
 from core.file_stage_policy import FileStagePolicy
 from core.persona_output import sanitize_persona_output

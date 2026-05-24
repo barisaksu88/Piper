@@ -23,7 +23,7 @@ Right now that question is answered in pieces across:
 - `core/file_checker.py` — coordinates deterministic rules vs LLM checker
 - `core/file_checker_rules.py` — deterministic filesystem checks
 - `core/file_stage_policy.py` — gates whether verification runs at all
-- `core/engines/state_mutation.py` — packages mutation outcomes under a separate label scheme
+- `core/services/state_mutation.py` — packages mutation outcomes under a separate label scheme
 
 The engine does not replace any of that logic.
 It absorbs it under one owner with one output contract.
