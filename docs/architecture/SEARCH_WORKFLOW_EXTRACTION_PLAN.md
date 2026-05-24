@@ -4,13 +4,13 @@
 - Helper extraction: `audit/search-workflow-engine-mainline` → merged.  
 - Context builder adoption: `audit/search-context-builders` → merged.  
 - Search smoke suite is green (including `search_tool_fallback_smoke_test.py` log assertion fix).
-**Scope:** Extract pure helpers from `core/orchestrator_phases.py` into `core/engines/search_workflow.py`
+**Scope:** Extract pure helpers from `core/orchestrator_phases.py` into `core/services/search_workflow.py`
 
 ---
 
 ## What Was Extracted
 
-`core/engines/search_workflow.py` contains a direct-call utility class `SearchWorkflowEngine` with the following pure helpers:
+`core/services/search_workflow.py` contains a direct-call utility class `SearchWorkflowEngine` with the following pure helpers:
 
 - `build_search_failure_summary(query, error_text)`
 - `summarize_search_error_for_user(error_text)`
