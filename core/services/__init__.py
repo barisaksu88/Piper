@@ -6,6 +6,7 @@ large enough to live in their own files.
 """
 
 from core.services.file_work import FileWorkEngine
+from core.services.followup_resolution import FollowupResolutionEngine
 from core.services.route_clarity import RouteClarifier
 from core.services.search_workflow import SearchWorkflowEngine
 from core.services.summary import SummaryEngine
@@ -13,6 +14,7 @@ from core.services.verification import VerificationEngine, VerificationResult
 
 __all__ = [
     "FileWorkEngine",
+    "FollowupResolutionEngine",
     "RouteClarifier",
     "SearchWorkflowEngine",
     "SummaryEngine",
