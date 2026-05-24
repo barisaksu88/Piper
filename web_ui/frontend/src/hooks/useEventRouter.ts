@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { BackendFrame, ChatMessage, RawEvent } from "../types";
+import type { BackendFrame, ChatMessage, MicStatus, RawEvent } from "../types";
 import type { TtsState } from "../types";
 import { generateId, isThinkingPlaceholder, sanitizeOperationalText } from "../utils";
 
@@ -67,6 +67,7 @@ export function useEventRouter({
   const [documentsView, setDocumentsView] = useState("");
   const [documentIngestActive, setDocumentIngestActive] = useState(false);
   const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
+  const [micStatus, setMicStatus] = useState<MicStatus>({ state: "idle" });
 
   const streamingRef = useRef(false);
   const pendingDeltasRef = useRef("");
@@ -195,6 +196,7 @@ export function useEventRouter({
     setDocumentsView("");
     setDocumentIngestActive(false);
     setSelectedDocumentPaths([]);
+    setMicStatus({ state: "idle" });
     streamingRef.current = false;
     pendingDeltasRef.current = "";
     if (deltaFlushTimerRef.current) {
@@ -482,9 +484,23 @@ export function useEventRouter({
         }
 
         case "mic.status": {
-          // Handled by useMic hook — just log here
-          const p = payload as { state?: string; error?: string; message?: string };
-          appendActivity(`Mic status: ${p.state}${p.error ? ` (${p.error})` : ""}`);
+          const p = payload as {
+            state?: string;
+            stage?: string;
+            message?: string;
+            error?: string;
+          };
+          const state = ["idle", "listening", "transcribing", "error"].includes(String(p.state))
+            ? (String(p.state) as MicStatus["state"])
+            : "idle";
+          const next: MicStatus = { state };
+          if (p.stage) next.stage = String(p.stage);
+          if (p.message) next.message = String(p.message);
+          if (p.error) next.error = String(p.error);
+          setMicStatus(next);
+          appendActivity(
+            `Mic status: ${state}${p.stage ? `/${p.stage}` : ""}${p.message ? ` - ${p.message}` : ""}${p.error ? ` (${p.error})` : ""}`
+          );
           break;
         }
 
@@ -514,6 +530,7 @@ export function useEventRouter({
     documentIngestActive,
     selectedDocumentPaths,
     setSelectedDocumentPaths,
+    micStatus,
     handleFrame,
     appendActivity,
     appendLog,

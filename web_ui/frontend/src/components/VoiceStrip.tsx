@@ -1,4 +1,4 @@
-import type { MicState } from "../types";
+import type { MicState, MicStatus } from "../types";
 
 interface VoiceStripProps {
   micState: MicState;
@@ -6,6 +6,7 @@ interface VoiceStripProps {
   micButtonClass: string;
   micDisabled: boolean;
   micStatusText: string;
+  backendMicStatus: MicStatus;
   onMicClick: () => void;
   connState: string;
   isGenerating?: boolean;
@@ -18,6 +19,7 @@ export default function VoiceStrip({
   micButtonClass,
   micDisabled,
   micStatusText,
+  backendMicStatus,
   onMicClick,
   connState,
   isGenerating,
@@ -36,7 +38,17 @@ export default function VoiceStrip({
       ? "generating"
       : "idle";
 
-  const statusDisplay = micStatusText || (isSpeaking ? "Speaking..." : isGenerating ? "Generating reply..." : "");
+  const backendStatusDisplay =
+    backendMicStatus.state === "idle"
+      ? ""
+      : backendMicStatus.state === "listening"
+        ? backendMicStatus.message || "Listening..."
+        : backendMicStatus.state === "transcribing"
+          ? backendMicStatus.message || backendMicStatus.stage || "Transcribing..."
+          : backendMicStatus.error || backendMicStatus.message || "Mic error";
+
+  const statusDisplay =
+    backendStatusDisplay || micStatusText || (isSpeaking ? "Speaking..." : isGenerating ? "Generating reply..." : "");
 
   return (
     <div className={`voice-strip ${stripState}`}>

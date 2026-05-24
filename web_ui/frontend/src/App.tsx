@@ -99,6 +99,7 @@ export default function App() {
     documentIngestActive,
     selectedDocumentPaths,
     setSelectedDocumentPaths,
+    micStatus,
     handleFrame,
     appendActivity,
     settleStreaming,
@@ -393,6 +394,7 @@ export default function App() {
             micButtonClass={micButtonClass}
             micDisabled={micDisabled}
             micStatusText={micStatusText}
+            backendMicStatus={micStatus}
             onMicClick={handleMicClick}
             connState={connState}
             isGenerating={isGenerating}
