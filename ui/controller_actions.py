@@ -10,7 +10,7 @@ import dearpygui.dearpygui as dpg
 
 from config import CFG
 from core.commands import handle_command
-from core.engines.proactive_monitor import (
+from core.services.reminders import (
     build_proactive_consumed_message,
     build_proactive_trigger_message,
 )

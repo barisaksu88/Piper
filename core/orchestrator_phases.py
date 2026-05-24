@@ -19,7 +19,7 @@ from core.services.followup_resolution import FollowupResolutionEngine
 from core.services.rollback_engine import invert_manifest as invert_rollback_manifest
 from core.services.summary import SummaryEngine
 from core.services.search_workflow import SearchWorkflowEngine
-from core.engines.proactive_monitor import (
+from core.services.reminders import (
     PROACTIVE_TRIGGER_PREFIX,
     ReminderStore,
     display_fire_at_local,

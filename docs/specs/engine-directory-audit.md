@@ -29,7 +29,7 @@ This is not a runtime bug by itself, but it does make the package boundary less 
 
 Lifecycle engines:
 - `change_journal.py` — split complete. `ChangeJournal` class moved to `core/services/change_journal.py`; only the `@register_hook("on_task_verified")` `_hook_record_change_journal` remains in `core/engines/change_journal.py`. See `docs/architecture/CHANGE_JOURNAL_SPLIT_READINESS.md`.
-- `proactive_monitor.py` — under split-readiness audit. See `docs/architecture/PROACTIVE_MONITOR_SPLIT_READINESS.md`.
+- `proactive_monitor.py` — split complete. `ReminderStore`, `ReminderParseResult`, and all parser/message helpers moved to `core/services/reminders.py`; `ProactiveMonitor` lifecycle class and all registry decorators remain in `core/engines/proactive_monitor.py`. See `docs/architecture/PROACTIVE_MONITOR_SPLIT_READINESS.md`.
 - `stats_collector.py` — split complete. `StatsCollector` class and `TurnStatsState` dataclass moved to `core/services/stats_collector.py`; only the `@register_hook("on_pre_route")` `_hook_note_pre_route_user_msg` remains in `core/engines/stats_collector.py`. See `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md`.
 
 Direct-call services/utilities to review:

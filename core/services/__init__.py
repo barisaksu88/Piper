@@ -39,6 +39,17 @@ from core.services.context_pack_renderer import (
 from core.services.context_pack_service import ContextPackService
 from core.services.change_journal import ChangeJournal
 from core.services.stats_collector import StatsCollector, TurnStatsState
+from core.services.reminders import (
+    ReminderParseResult,
+    ReminderStore,
+    display_fire_at_local,
+    parse_reminder_request,
+    build_proactive_trigger_message,
+    parse_proactive_trigger_message,
+    build_proactive_consumed_message,
+    PROACTIVE_TRIGGER_PREFIX,
+    PROACTIVE_TRIGGER_CONSUMED_PREFIX,
+)
 
 __all__ = [
     "build_verified_payload",
@@ -67,4 +78,13 @@ __all__ = [
     "update_stage_evidence",
     "VerificationEngine",
     "VerificationResult",
+    "ReminderParseResult",
+    "ReminderStore",
+    "display_fire_at_local",
+    "parse_reminder_request",
+    "build_proactive_trigger_message",
+    "parse_proactive_trigger_message",
+    "build_proactive_consumed_message",
+    "PROACTIVE_TRIGGER_PREFIX",
+    "PROACTIVE_TRIGGER_CONSUMED_PREFIX",
 ]
