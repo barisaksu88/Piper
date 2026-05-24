@@ -15,7 +15,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from config import CFG
-from core.engines.stats_collector import StatsCollector, TurnStatsState
+from core.services.stats_collector import StatsCollector, TurnStatsState
 from core.executor import StageExecutor
 
 

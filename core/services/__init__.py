@@ -38,6 +38,7 @@ from core.services.context_pack_renderer import (
 )
 from core.services.context_pack_service import ContextPackService
 from core.services.change_journal import ChangeJournal
+from core.services.stats_collector import StatsCollector, TurnStatsState
 
 __all__ = [
     "build_verified_payload",
@@ -45,6 +46,8 @@ __all__ = [
     "ContextPackRenderer",
     "ChangeJournal",
     "ContextPackService",
+    "StatsCollector",
+    "TurnStatsState",
     "ConversationCompressionResult",
     "ConversationCompressor",
     "evaluate_stage",

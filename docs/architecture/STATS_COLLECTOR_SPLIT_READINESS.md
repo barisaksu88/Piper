@@ -1,8 +1,8 @@
 # StatsCollector Split Readiness Audit
 
-**Status:** Audit complete — ready to split  
-**Scope:** `core/engines/stats_collector.py`  
-**Branch:** `audit/stats-collector-split-readiness`  
+**Status:** Split complete  
+**Scope:** `core/engines/stats_collector.py` + `core/services/stats_collector.py`  
+**Branch:** `split/stats-collector-service`  
 **Date:** 2026-05-24
 
 ---
@@ -41,7 +41,7 @@ The class owns two append-only files:
 
 | Caller | Import / Usage | Direct or Hook | Risk |
 |---|---|---|---|
-| `core/orchestrator.py` | `from core.engines.stats_collector import StatsCollector`; `self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)` | Direct (instantiation) | Medium — orchestrator holds the reference |
+| `core/orchestrator.py` | `from core.services.stats_collector import StatsCollector`; `self.stats_collector = StatsCollector(CFG.STATS_PATH, CFG.STATS_ALERTS_PATH)` | Direct (instantiation) | Medium — orchestrator holds the reference |
 | `core/orchestrator.py` | `self.stats_collector.startup_check_once()` | Direct | Low |
 | `core/orchestrator.py` | `self.stats_collector.resume_or_start_turn(...)` | Direct | Low |
 | `core/orchestrator.py` | `self.stats_collector.record_turn(self.turn_stats)` / `record_aborted_turn(...)` | Direct | Low |
@@ -53,9 +53,9 @@ The class owns two append-only files:
 
 | Caller | Import / Usage |
 |---|---|
-| `scripts/stats_collector_smoke_test.py` | `from core.engines.stats_collector import StatsCollector, TurnStatsState`; full smoke test |
-| `scripts/executor_budget_smoke_test.py` | `from core.engines.stats_collector import StatsCollector, TurnStatsState`; budget/timeout smoke test |
-| `scripts/planner_schema_compliance_smoke_test.py` | `from core.engines.stats_collector import StatsCollector`; `note_constraint_violation` test |
+| `scripts/stats_collector_smoke_test.py` | `from core.services.stats_collector import StatsCollector, TurnStatsState`; full smoke test |
+| `scripts/executor_budget_smoke_test.py` | `from core.services.stats_collector import StatsCollector, TurnStatsState`; budget/timeout smoke test |
+| `scripts/planner_schema_compliance_smoke_test.py` | `from core.services.stats_collector import StatsCollector`; `note_constraint_violation` test |
 | `scripts/search_error_contract_smoke_test.py` | `DummyStatsCollector` stub (no real import) |
 | `scripts/search_thread_cleanup_smoke_test.py` | `DummyStatsCollector` stub (no real import) |
 | `scripts/stage_pause_snapshot_smoke_test.py` | `DummyStatsCollector` stub (no real import) |
@@ -63,7 +63,7 @@ The class owns two append-only files:
 
 ### No direct `_hook_note_pre_route_user_msg` callers
 
-Grep confirms `_hook_note_pre_route_user_msg` is **only** referenced inside `core/engines/stats_collector.py` (definition). It is fired indirectly via `fire_hooks("on_pre_route", ...)` in `core/orchestrator_phases.py`.
+Grep confirms `_hook_note_pre_route_user_msg` is **only** referenced inside `core/engines/stats_collector.py` (definition). It is fired indirectly via `fire_hooks("on_pre_route", ...)` in `core/orchestrator_phases.py`. `StatsCollector` and `TurnStatsState` are no longer defined in `core/engines/stats_collector.py`.
 
 ### No frontend/bridge direct consumers
 
@@ -219,20 +219,17 @@ Before moving `StatsCollector` to `core/services/stats_collector.py`, the follow
 
 ## Recommended Staging
 
-### Stage 1 — Add guard tests
-- Create `tests/test_stats_collector.py` with the minimum viable guard set above.
-- Keep tests green against current `core/engines/stats_collector.py`.
-- **Do not move code yet.**
+### Stage 1 — Add guard tests ✅
+- `tests/test_stats_collector.py` created with 21 unit tests.
+- Kept green against `core/engines/stats_collector.py` (now `core/services/stats_collector.py`).
 
-### Stage 2 — Move `TurnStatsState` + `StatsCollector` + helpers to `core/services/stats_collector.py`
-- Move `TurnStatsState` dataclass, `StatsCollector` class, module constants, and all free functions.
-- Update imports inside `StatsCollector` if any relative references change.
-- `core/engines/stats_collector.py` becomes a thin module containing only `_hook_note_pre_route_user_msg` and its imports.
-- Update `core/orchestrator.py`, `core/executor.py`, and smoke scripts to import from `core.services.stats_collector`.
+### Stage 2 — Move service code ✅
+- `TurnStatsState` dataclass, `StatsCollector` class, module constants, and all free functions moved to `core/services/stats_collector.py`.
+- `core/engines/stats_collector.py` reduced to `_hook_note_pre_route_user_msg` only.
 
-### Stage 3 — Update `core/engines/stats_collector.py` to thin hook module
-- Keep `_hook_note_pre_route_user_msg` in `core/engines/stats_collector.py`.
-- Remove `register_hook` import if no longer needed by any other symbol in the file (it is still needed by the hook).
+### Stage 3 — Update imports and exports ✅
+- Imports updated in `core/orchestrator.py`, `tests/test_stats_collector.py`, smoke scripts.
+- `core/services/__init__.py` exports `StatsCollector` and `TurnStatsState`.
 
 ### Stage 4 — Update docs and exports
 - Update `core/engines/__init__.py` if it re-exports symbols.

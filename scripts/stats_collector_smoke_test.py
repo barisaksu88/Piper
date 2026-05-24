@@ -13,7 +13,7 @@ from _bootstrap import ROOT_DIR
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from core.engines.stats_collector import StatsCollector, TurnStatsState
+from core.services.stats_collector import StatsCollector, TurnStatsState
 
 
 @dataclass(frozen=True)

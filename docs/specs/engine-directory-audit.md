@@ -30,7 +30,7 @@ This is not a runtime bug by itself, but it does make the package boundary less 
 Lifecycle engines:
 - `change_journal.py` — split complete. `ChangeJournal` class moved to `core/services/change_journal.py`; only the `@register_hook("on_task_verified")` `_hook_record_change_journal` remains in `core/engines/change_journal.py`. See `docs/architecture/CHANGE_JOURNAL_SPLIT_READINESS.md`.
 - `proactive_monitor.py`
-- `stats_collector.py` — under split-readiness audit. `StatsCollector` class and `TurnStatsState` dataclass are candidates for `core/services/stats_collector.py`; the `@register_hook("on_pre_route")` `_hook_note_pre_route_user_msg` would remain in `core/engines/stats_collector.py`. See `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md`.
+- `stats_collector.py` — split complete. `StatsCollector` class and `TurnStatsState` dataclass moved to `core/services/stats_collector.py`; only the `@register_hook("on_pre_route")` `_hook_note_pre_route_user_msg` remains in `core/engines/stats_collector.py`. See `docs/architecture/STATS_COLLECTOR_SPLIT_READINESS.md`.
 
 Direct-call services/utilities to review:
 - `context_pack.py` — audited, see `docs/architecture/CONTEXT_PACK_SPLIT_READINESS.md`. Split complete. `ContextPackService` moved to `core/services/context_pack_service.py`; `ContextPackDirectiveEngine` and the `on_turn_end` hook remain in `core/engines/context_pack.py`. Tail-block registry lives in `core/engines/tail_block_registry.py`; renderer/helpers in `core/services/context_pack_renderer.py`; runtime path helpers in `core/services/context_pack_paths.py`.
