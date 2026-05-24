@@ -28,7 +28,7 @@ Modules that **both** register hooks / tail-blocks / interceptors **and** expose
 | Module | Registry Behavior | Direct-Call Service Behavior |
 |--------|-------------------|------------------------------|
 | `conversation_compressor.py` | `@register_hook("on_turn_end")` for deferred conversation summarization | `ConversationCompressor` class split to `core/services/conversation_compressor.py`; hook remains in `core/engines/conversation_compressor.py` |
-| `context_pack.py` | `@register_hook("on_turn_end")`; `ContextPackEngine` (registry-bound). Tail-block registry extracted to `core/engines/tail_block_registry.py`. Renderer/helpers extracted to `core/services/context_pack_renderer.py`. |
+| `context_pack.py` | `@register_hook("on_turn_end")`; tail-block registry extracted to `core/engines/tail_block_registry.py`. | `ContextPackEngine` remains in `core/engines/context_pack.py`; renderer/helpers extracted to `core/services/context_pack_renderer.py`. |
 | `change_journal.py` | `@register_hook("on_task_verified")` to record change journal after task verification | `ChangeJournal.record_turn()`, `.prepare_file_op_capture()`, `.finalize_file_op_capture()`, `.undo_latest()` |
 | `stats_collector.py` | `@register_hook("on_pre_route")` to note user message before routing | `StatsCollector.resume_or_start_turn()`, `.note_route()`, `.record_turn()`, `.build_dashboard_snapshot()` |
 | `proactive_monitor.py` | `@register_tail_block`, `@register_hook("on_turn_end")`, `@register_route_interceptor` for reminder interception | `ProactiveMonitor` lifecycle (start/stop/loop), `ReminderStore` (add/due_entries/mark_fired), `parse_reminder_request()` |
