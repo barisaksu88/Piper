@@ -86,7 +86,7 @@ class PiperBrain:
         self._fallback_store_path = data_dir / "state" / "brain_fallback.json"
         self._fallback_lock = threading.Lock()
         self._fallback_entries: list[dict] = []
-        self._vector_memory_available = self._vector_backend_dependencies_available()
+        self._vector_memory_available = True
         self._vector_init_lock = threading.Lock()
         self._vector_init_started = False
         self._vector_init_failed = False
@@ -100,14 +100,9 @@ class PiperBrain:
         self.collection = None
         self._fallback_entries = self._load_fallback_entries()
 
-        if self._vector_memory_available:
-            self.start_vector_warmup()
-            _LOG.info("[Brain] Fallback memory ready. Vector warm-up started in background.")
-            _LOG.info("[Brain] Memory Ready. Current fallback entries: %d", len(self._fallback_entries))
-            return
-
-        _LOG.info("[Brain] ChromaDB unavailable. Using lightweight local fallback memory.")
-        _LOG.info("[Brain] Memory Ready. Current entries: %d", len(self._fallback_entries))
+        self.start_vector_warmup()
+        _LOG.info("[Brain] Fallback memory ready. Vector warm-up started in background.")
+        _LOG.info("[Brain] Memory Ready. Current fallback entries: %d", len(self._fallback_entries))
 
     @property
     def vector_ready(self) -> bool:
@@ -150,7 +145,16 @@ class PiperBrain:
     def _initialize_vector_backend(self) -> None:
         try:
             import chromadb
+        except Exception as exc:
+            with self._vector_init_lock:
+                self._vector_init_failed = True
+                self._vector_memory_available = False
+                self._vector_init_error = str(exc)
+            _LOG.warning("[Brain] Vector warm-up failed. Staying on lightweight fallback memory.")
+            _LOG.warning("[Brain] Vector init error: %s", exc)
+            return
 
+        try:
             embedding_func = _QuietSentenceTransformerEmbeddingFunction("all-MiniLM-L6-v2")
             client = chromadb.PersistentClient(path=str(self.db_path))
             collection = client.get_or_create_collection(
@@ -172,6 +176,7 @@ class PiperBrain:
         except Exception as exc:
             with self._vector_init_lock:
                 self._vector_init_failed = True
+                self._vector_memory_available = False
                 self._vector_init_error = str(exc)
             _LOG.warning("[Brain] Vector warm-up failed. Staying on lightweight fallback memory.")
             _LOG.warning("[Brain] Vector init error: %s", exc)
