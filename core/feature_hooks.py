@@ -8,9 +8,17 @@ HookFn = Callable[..., None]
 _HOOKS: dict[str, list[HookFn]] = defaultdict(list)
 
 
+def _registry_key(fn: Callable[..., Any]) -> str:
+    return f"{getattr(fn, '__module__', '<unknown>')}.{getattr(fn, '__qualname__', getattr(fn, '__name__', '<unknown>'))}"
+
+
 def register_hook(hook_type: str) -> Callable[[HookFn], HookFn]:
     def _decorator(fn: HookFn) -> HookFn:
-        _HOOKS[str(hook_type or "").strip()].append(fn)
+        ht = str(hook_type or "").strip()
+        key = _registry_key(fn)
+        existing = {_registry_key(h) for h in _HOOKS[ht]}
+        if key not in existing:
+            _HOOKS[ht].append(fn)
         return fn
 
     return _decorator

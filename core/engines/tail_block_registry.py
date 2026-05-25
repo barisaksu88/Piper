@@ -34,8 +34,15 @@ TailBlockBuilder = Callable[[TailBlockContext], str]
 _TAIL_BLOCK_REGISTRY: list[TailBlockBuilder] = []
 
 
+def _registry_key(fn: Any) -> str:
+    return f"{getattr(fn, '__module__', '<unknown>')}.{getattr(fn, '__qualname__', getattr(fn, '__name__', '<unknown>'))}"
+
+
 def register_tail_block(fn: TailBlockBuilder) -> TailBlockBuilder:
-    _TAIL_BLOCK_REGISTRY.append(fn)
+    key = _registry_key(fn)
+    existing = {_registry_key(item) for item in _TAIL_BLOCK_REGISTRY}
+    if key not in existing:
+        _TAIL_BLOCK_REGISTRY.append(fn)
     return fn
 
 

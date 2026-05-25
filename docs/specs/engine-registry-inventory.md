@@ -94,6 +94,16 @@ Known tail blocks at time of writing:
 - The script imports `core.orchestrator` and `core.prompt_context` to trigger the normal registration path; additional conditional imports in `app.py` could in theory register more items, but none are known at time of writing.
 - No file is written unless `--output` is passed.
 
+## Registry idempotency
+
+All three registries are idempotent by `module + qualname`:
+
+- `register_hook` — does not append a duplicate function (same `__module__` + `__qualname__`) to the same hook type.
+- `register_route_interceptor` — does not append a duplicate interceptor.
+- `register_tail_block` — does not append a duplicate tail block builder.
+
+Duplicate imports or reloads will not create duplicate entries. Registration order remains first-registration order.
+
 ## Testing
 
 ```bash

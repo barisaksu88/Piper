@@ -313,13 +313,23 @@ _NORMALIZER_REGISTRY: list[NormalizerFn] = []
 _ROUTE_INTERCEPTOR_REGISTRY: list[RouteInterceptorFn] = []
 
 
+def _registry_key(fn: Any) -> str:
+    return f"{getattr(fn, '__module__', '<unknown>')}.{getattr(fn, '__qualname__', getattr(fn, '__name__', '<unknown>'))}"
+
+
 def register_normalizer(fn: NormalizerFn) -> NormalizerFn:
-    _NORMALIZER_REGISTRY.append(fn)
+    key = _registry_key(fn)
+    existing = {_registry_key(item) for item in _NORMALIZER_REGISTRY}
+    if key not in existing:
+        _NORMALIZER_REGISTRY.append(fn)
     return fn
 
 
 def register_route_interceptor(fn: RouteInterceptorFn) -> RouteInterceptorFn:
-    _ROUTE_INTERCEPTOR_REGISTRY.append(fn)
+    key = _registry_key(fn)
+    existing = {_registry_key(item) for item in _ROUTE_INTERCEPTOR_REGISTRY}
+    if key not in existing:
+        _ROUTE_INTERCEPTOR_REGISTRY.append(fn)
     return fn
 
 
