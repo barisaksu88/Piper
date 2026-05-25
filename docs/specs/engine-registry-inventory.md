@@ -64,7 +64,7 @@ Source: `core.feature_hooks.list_hooks()` (backed by `_HOOKS`)
 
 Hooks fire at specific lifecycle points. Known hook types:
 - `on_pre_route`
-- `on_turn_end`
+- `on_turn_end` (includes `core.engines.memory_insertion` hooks for memory consolidation and profile refresh)
 - `on_task_verified`
 
 ### Tail blocks
