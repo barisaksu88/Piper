@@ -88,10 +88,19 @@ Known tail blocks at time of writing:
 - `proactive_trigger`
 - `reminder_set_result`
 
+## Registration path
+
+The inventory exercises the normal backend registration path by importing `core.orchestrator`.  This import chain now explicitly includes:
+
+- `core.engines.*` registrations (proactive monitor, change journal, conversation compressor, stats collector, environment query, operational state answer, memory insertion)
+- `core.prompt_context` registration (`on_pre_route` hook)
+
+Because all registrations happen through the orchestrator import chain, the inventory does not depend on special one-off imports for completeness.
+
 ## Limitations
 
 - The inventory reflects the state **after** import-time side effects have run. If a module is imported conditionally in production, the inventory may differ unless the same import chain is exercised.
-- The script imports `core.orchestrator` and `core.prompt_context` to trigger the normal registration path; additional conditional imports in `app.py` could in theory register more items, but none are known at time of writing.
+- Additional conditional imports in `app.py` could in theory register more items, but none are known at time of writing.
 - No file is written unless `--output` is passed.
 
 ## Registry idempotency
