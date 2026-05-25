@@ -92,6 +92,30 @@ class TestFeatureHooks:
         assert "on_task_verified" in report.feature_hooks
         assert len(report.feature_hooks["on_task_verified"]) >= 1
 
+    def test_memory_hooks_under_engine_module(self):
+        report = inventory.build_report()
+        on_turn_end = report.feature_hooks.get("on_turn_end", [])
+        consolidate = [
+            e for e in on_turn_end
+            if e.function_name == "_hook_consolidate_recent_memory"
+        ]
+        refresh = [
+            e for e in on_turn_end
+            if e.function_name == "_hook_refresh_profile_knowledge"
+        ]
+        assert len(consolidate) == 1
+        assert len(refresh) == 1
+        assert consolidate[0].module == "core.engines.memory_insertion"
+        assert refresh[0].module == "core.engines.memory_insertion"
+
+    def test_no_hooks_registered_under_memory_world_model(self):
+        report = inventory.build_report()
+        for hook_type, entries in report.feature_hooks.items():
+            for entry in entries:
+                assert entry.module != "memory.world_model", (
+                    f"Unexpected hook in memory.world_model: {hook_type} {entry.qualname}"
+                )
+
     def test_hook_entries_have_signatures(self):
         report = inventory.build_report()
         for hook_type, entries in report.feature_hooks.items():

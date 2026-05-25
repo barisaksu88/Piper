@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
-from core.feature_hooks import register_hook
 from .knowledge_policy import (
     PROFILE_REFRESH_EVERY_CALLS,
     default_expiry_for_transient_fact,
@@ -1455,21 +1454,3 @@ class WorldModelManager:
             self._log(f"[Memory] Error: {exc}")
 
 
-@register_hook("on_turn_end")
-def _hook_consolidate_recent_memory(orc, *, reporter_just_ran: bool = False) -> None:
-    del reporter_just_ran
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    recent_messages = orc.chat.recent_messages(3)
-    if orc.knowledge_enabled and len(recent_messages) >= 3:
-        orc.knowledge.consolidate_memory_async(recent_messages)
-
-
-@register_hook("on_turn_end")
-def _hook_refresh_profile_knowledge(orc, *, reporter_just_ran: bool = False) -> None:
-    del reporter_just_ran
-    if bool(getattr(orc, "synthetic_user_turn", False)):
-        return
-    profile_messages = orc.chat.recent_messages(8)
-    if orc.knowledge_enabled and len(profile_messages) >= 4:
-        orc.knowledge.update_knowledge_async(profile_messages)
