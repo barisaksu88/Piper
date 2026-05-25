@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 from core.routing.environment_queries import looks_like_live_environment_query
 from core.routing.route_normalizer import register_route_interceptor
 
 
 @register_route_interceptor
 def _registered_environment_query_interceptor(
-    user_msg: str, recent_history
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
 ) -> dict[str, Any] | None:
     del recent_history
     if not looks_like_live_environment_query(user_msg):

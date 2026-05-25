@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 from core.routing.route_normalizer import register_route_interceptor
 
 
 @register_route_interceptor
 def _registered_operational_state_interceptor(
-    user_msg: str, recent_history, orc
+    user_msg: str,
+    recent_history: Sequence[dict[str, Any]],
+    orc,
 ) -> dict[str, Any] | None:
     del recent_history
     if orc is None:
@@ -16,7 +20,10 @@ def _registered_operational_state_interceptor(
         return None
     if not answer:
         return None
-    orc._cached_readonly_state_answer = answer
+    try:
+        orc._cached_readonly_state_answer = answer
+    except Exception:
+        pass
     return {
         "kind": "OPERATIONAL_STATE_QUERY",
         "next_stage": "PERSONA",

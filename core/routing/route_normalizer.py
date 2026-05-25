@@ -307,7 +307,7 @@ _CODE_EDIT_RE = re.compile(
 )
 
 NormalizerFn = Callable[[RouteDecision, str, Sequence[dict[str, Any]]], RouteDecision | None]
-RouteInterceptorFn = Callable[[str, Sequence[dict[str, Any]]], dict[str, Any] | None]
+RouteInterceptorFn = Callable[..., dict[str, Any] | None]
 
 _NORMALIZER_REGISTRY: list[NormalizerFn] = []
 _ROUTE_INTERCEPTOR_REGISTRY: list[RouteInterceptorFn] = []
