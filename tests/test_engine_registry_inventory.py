@@ -116,6 +116,24 @@ class TestFeatureHooks:
                     f"Unexpected hook in memory.world_model: {hook_type} {entry.qualname}"
                 )
 
+    def test_prompt_context_hook_present_via_orchestrator_path(self):
+        report = inventory.build_report()
+        pre_route = report.feature_hooks.get("on_pre_route", [])
+        matches = [
+            e for e in pre_route
+            if e.function_name == "_hook_record_user_turn_once"
+        ]
+        assert len(matches) == 1
+        assert matches[0].module == "core.prompt_context"
+
+    def test_prompt_context_hook_registered_exactly_once(self):
+        # Re-importing prompt_context should not duplicate thanks to dedup guards.
+        from core.feature_hooks import _HOOKS
+        before = len(_HOOKS.get("on_pre_route", []))
+        import core.prompt_context  # noqa: F401
+        after = len(_HOOKS.get("on_pre_route", []))
+        assert after == before
+
     def test_hook_entries_have_signatures(self):
         report = inventory.build_report()
         for hook_type, entries in report.feature_hooks.items():

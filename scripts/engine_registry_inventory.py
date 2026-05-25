@@ -37,8 +37,10 @@ if str(ROOT) not in sys.path:
 # Import the normal orchestrator registration path so side-effect registrations happen.
 from core import orchestrator  # noqa: F401
 
-# Also import prompt_context because it registers an on_pre_route hook during
-# normal app boot (app.py imports it), but orchestrator.py does not.
+# Import prompt_context explicitly to ensure its on_pre_route hook is captured
+# even if the orchestrator import path ever changes.  This is now redundant
+# because core.orchestrator imports prompt_context, but harmless thanks to
+# registry dedup guards.
 from core import prompt_context  # noqa: F401
 
 from core.engines.tail_block_registry import _TAIL_BLOCK_REGISTRY

@@ -34,6 +34,7 @@ from core.engines import stats_collector as _stats_collector_registration  # noq
 from core.engines import environment_query as _environment_query_registration  # noqa: F401
 from core.engines import operational_state_answer as _operational_state_answer_registration  # noqa: F401
 from core.engines import memory_insertion as _memory_insertion_registration  # noqa: F401
+from core import prompt_context as _prompt_context_registration  # noqa: F401
 
 
 _LOG = logging.getLogger(__name__)
