@@ -1,116 +1,69 @@
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import {
+  FakeBridge,
+  sendAction,
+  renderApp,
+  cleanupApp,
+} from "./test/appTestHarness";
+import type { AppHarness } from "./test/appTestHarness";
 
-const bridgeMock = vi.hoisted(() => {
-  const sendAction = vi.fn();
-  class FakeBridge {
-    static lastInstance: FakeBridge | null = null;
-    onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-    onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-    onError?: (message: string) => void;
-
-    constructor(callbacks: {
-      onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-      onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-      onError?: (message: string) => void;
-    }) {
-      this.onStateChange = callbacks.onStateChange;
-      this.onFrame = callbacks.onFrame;
-      this.onError = callbacks.onError;
-      bridgeMock.FakeBridge.lastInstance = this;
-    }
-
-    connect() {
-      this.onStateChange?.("connected");
-    }
-
-    disconnect() {
-      this.onStateChange?.("disconnected");
-    }
-
-    sendAction(action: string) {
-      sendAction(action);
-      return true;
-    }
-
-    emitFrame(kind: string, payload: Record<string, unknown> = {}) {
-      this.onFrame?.({ frame: "event", kind, payload });
-    }
-  }
-  return { FakeBridge, sendAction };
+vi.mock("./bridge", async () => {
+  const { FakeBridge } = await import("./test/appTestHarness");
+  return { PiperBridge: FakeBridge, WS_URL: "ws://127.0.0.1:8787/ws" };
 });
 
-vi.mock("./bridge", () => ({
-  PiperBridge: bridgeMock.FakeBridge,
-  WS_URL: "ws://127.0.0.1:8787/ws",
-}));
-
-vi.mock("./hooks/useMic", () => ({
-  useMic: () => ({
-    micState: "idle",
-    startMicRecording: vi.fn(),
-    stopMicRecording: vi.fn(),
-    abortMicRecording: vi.fn(),
-    handleBackendMicStatus: vi.fn(),
-    micButtonLabel: "MIC",
-    micButtonClass: "",
-    micStatusText: "",
-  }),
-}));
+vi.mock("./hooks/useMic", async () => {
+  const { micMock } = await import("./test/appTestHarness");
+  return { useMic: () => micMock };
+});
 
 describe("App smoke wiring", () => {
-  let container: HTMLDivElement;
-  let root: Root;
+  let harness: AppHarness;
 
   beforeEach(() => {
-    bridgeMock.sendAction.mockClear();
-    bridgeMock.FakeBridge.lastInstance = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    harness = renderApp();
+    sendAction.mockClear();
+    FakeBridge.lastInstance = null;
   });
 
   afterEach(() => {
-    act(() => {
-      root.unmount();
-    });
-    container.remove();
+    cleanupApp(harness);
   });
 
   it("opens chat after boot.ready, shows backend mic status, and sends stop", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
-    expect(bridgeMock.FakeBridge.lastInstance).toBeTruthy();
-    expect(container.textContent).toContain("Booting");
-    expect(container.querySelector(".chat-input")).toBeNull();
+    expect(FakeBridge.lastInstance).toBeTruthy();
+    expect(harness.container.textContent).toContain("Booting");
+    expect(harness.container.querySelector(".chat-input")).toBeNull();
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const chatInput = container.querySelector(".chat-input") as HTMLInputElement | null;
+    const chatInput = harness.container.querySelector(".chat-input") as HTMLInputElement | null;
     expect(chatInput).toBeTruthy();
     expect(chatInput!.placeholder).toBe("Type a message...");
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("mic.status", {
+      FakeBridge.lastInstance!.emitFrame("mic.status", {
         state: "listening",
         message: "Listening...",
       });
     });
 
-    expect(container.textContent).toContain("Listening...");
+    expect(harness.container.textContent).toContain("Listening...");
 
-    const stopButton = container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
+    const stopButton = harness.container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
     expect(stopButton).toBeTruthy();
     expect(stopButton!.disabled).toBe(true);
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("stream.start");
+      FakeBridge.lastInstance!.emitFrame("stream.start");
     });
 
     expect(stopButton!.disabled).toBe(false);
@@ -119,6 +72,6 @@ describe("App smoke wiring", () => {
       stopButton!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("stop");
+    expect(sendAction).toHaveBeenCalledWith("stop", {});
   });
 });
