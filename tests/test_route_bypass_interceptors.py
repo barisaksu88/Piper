@@ -233,3 +233,27 @@ class TestImportWiring:
         names = {fn.__name__ for fn in _ROUTE_INTERCEPTOR_REGISTRY}
         assert "_registered_environment_query_interceptor" in names
         assert "_registered_operational_state_interceptor" in names
+
+
+class TestLiveEnvironmentQueryImport:
+    """Regression: _is_live_environment_chat_query must not crash with NameError."""
+
+    def test_live_environment_date_query_returns_true(self) -> None:
+        from core.orchestrator_phases import _is_live_environment_chat_query
+
+        assert _is_live_environment_chat_query("what is today's date") is True
+
+    def test_live_environment_time_query_returns_true(self) -> None:
+        from core.orchestrator_phases import _is_live_environment_chat_query
+
+        assert _is_live_environment_chat_query("what time is it") is True
+
+    def test_normal_search_query_returns_false(self) -> None:
+        from core.orchestrator_phases import _is_live_environment_chat_query
+
+        assert _is_live_environment_chat_query("who invented the telephone") is False
+
+    def test_empty_query_returns_false(self) -> None:
+        from core.orchestrator_phases import _is_live_environment_chat_query
+
+        assert _is_live_environment_chat_query("") is False

@@ -33,6 +33,7 @@ from core.file_stage_policy import FileStagePolicy
 from core.persona_output import sanitize_persona_output
 from core.prompting import ScratchpadFormatter, PromptBuilder, build_persona_messages
 from core.route_boundary import BoundaryValidationError, RouterBoundary
+from core.routing.environment_queries import looks_like_live_environment_query
 from core.routing.route_normalizer import (
     annotate_file_stage_kinds,
     detect_route_interceptor,
