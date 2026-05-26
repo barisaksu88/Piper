@@ -50,6 +50,7 @@ vi.mock("./hooks/useMic", () => ({
     startMicRecording: vi.fn(),
     stopMicRecording: vi.fn(),
     abortMicRecording: vi.fn(),
+    handleBackendMicStatus: vi.fn(),
     micButtonLabel: "MIC",
     micButtonClass: "",
     micStatusText: "",

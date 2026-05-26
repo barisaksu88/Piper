@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PiperBridge } from "../bridge";
+import type { MicStatus } from "../types";
 import { blobToBase64, chooseMimeType, formatFromMimeType } from "../utils";
 
 export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
@@ -16,6 +17,7 @@ interface UseMicReturn {
   startMicRecording: () => Promise<void>;
   stopMicRecording: () => void;
   abortMicRecording: (discard?: boolean) => void;
+  handleBackendMicStatus: (status: MicStatus) => void;
   // Computed display values
   micButtonLabel: string;
   micButtonClass: string;
@@ -180,6 +182,30 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
     }
   }, [abortMicRecording, appendActivity, bridgeRef]);
 
+  const handleBackendMicStatus = useCallback((status: MicStatus) => {
+    if (micStateRef.current === "listening") return;
+    if (micStateRef.current === "requesting_permission") return;
+
+    if (micStateRef.current === "transcribing") {
+      if (status.state === "idle") {
+        if (micSubmitTimeoutRef.current) {
+          clearTimeout(micSubmitTimeoutRef.current);
+          micSubmitTimeoutRef.current = null;
+        }
+        setMicState("idle");
+        setMicError("");
+        setMicStageMessage("");
+      } else if (status.state === "error") {
+        if (micSubmitTimeoutRef.current) {
+          clearTimeout(micSubmitTimeoutRef.current);
+          micSubmitTimeoutRef.current = null;
+        }
+        setMicState("error");
+        setMicError(status.error || status.message || "Mic error");
+      }
+    }
+  }, []);
+
   const stopMicRecording = useCallback(() => {
     if (micStateRef.current !== "listening") return;
     const recorder = mediaRecorderRef.current;
@@ -226,6 +252,7 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
     startMicRecording,
     stopMicRecording,
     abortMicRecording,
+    handleBackendMicStatus,
     micButtonLabel,
     micButtonClass,
     micStatusText,

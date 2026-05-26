@@ -237,4 +237,59 @@ describe("useMic browser recording", () => {
       expect.any(Object)
     );
   });
+
+  it("backend idle acknowledgement clears transcribing state", async () => {
+    setupMediaMocks();
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    const blob = new Blob(["audio"], { type: "audio/webm" });
+    act(() => {
+      lastMockRecorder!.ondataavailable!({ data: blob });
+    });
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(mic!.micState).toBe("transcribing");
+
+    act(() => {
+      mic!.handleBackendMicStatus({ state: "idle" });
+    });
+
+    expect(mic!.micState).toBe("idle");
+    expect(mic!.micError).toBe("");
+    expect(mic!.micStageMessage).toBe("");
+  });
+
+  it("backend error acknowledgement clears transcribing to error", async () => {
+    setupMediaMocks();
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    const blob = new Blob(["audio"], { type: "audio/webm" });
+    act(() => {
+      lastMockRecorder!.ondataavailable!({ data: blob });
+    });
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(mic!.micState).toBe("transcribing");
+
+    act(() => {
+      mic!.handleBackendMicStatus({ state: "error", error: "Backend mic failed" });
+    });
+
+    expect(mic!.micState).toBe("error");
+    expect(mic!.micError).toBe("Backend mic failed");
+  });
 });
