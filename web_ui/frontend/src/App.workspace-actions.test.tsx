@@ -185,7 +185,7 @@ describe("App workspace action dispatch", () => {
     });
 
     expect(bridgeMock.sendAction).toHaveBeenCalledWith("save_workspace_file", {
-      path: "notes.txt",
+      path: "C:/Projects/Piper/data/workspace/notes.txt",
       content: "Updated notes",
     });
   });

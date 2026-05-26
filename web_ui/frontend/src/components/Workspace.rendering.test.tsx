@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Workspace from "./Workspace";
 
 function renderWorkspace(
@@ -90,5 +90,34 @@ describe("Workspace rendering", () => {
 
     expect(container.textContent).toContain("No files yet");
     expect(container.textContent).toContain("Open a file to begin");
+  });
+
+  it("renders text workspace and passes the full filePath to onTextSave", async () => {
+    const onTextSave = vi.fn();
+    await act(async () => {
+      root.render(
+        renderWorkspace({
+          mode: "text",
+          filePath: "C:/Projects/Piper/data/workspace/notes.txt",
+          textContent: "hello world",
+          onTextSave,
+        })
+      );
+    });
+
+    expect(container.textContent).toContain("notes.txt");
+
+    const saveBtn = container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
+    expect(saveBtn).toBeTruthy();
+    expect(saveBtn!.disabled).toBe(false);
+
+    await act(async () => {
+      saveBtn!.click();
+    });
+
+    expect(onTextSave).toHaveBeenCalledWith(
+      "hello world",
+      "C:/Projects/Piper/data/workspace/notes.txt"
+    );
   });
 });
