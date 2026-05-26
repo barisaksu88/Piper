@@ -261,6 +261,37 @@ class TestRegisteredReminderSetInterceptor:
         )
         assert result is None
 
+    def test_past_time_with_date_and_time_returns_reminder_set(self) -> None:
+        """Current behavior: past-time reminders are routed to REMINDER_SET.
+        The phase will catch the error later. This test documents the behavior
+        so a future refactor does not silently change routing.
+        """
+        result = pm._registered_reminder_set_interceptor(
+            "remind me to call mom today at 9:00 am",
+            recent_history=[],
+        )
+        assert result is not None
+        assert result["kind"] == "REMINDER_SET"
+        assert result["next_stage"] == "REMINDER_SET"
+        assert result["bypass"] == "reminder_set"
+
+    def test_unparseable_time_returns_task_event(self) -> None:
+        """An unparseable time (e.g. 99:00) is treated as no time info.
+        The interceptor falls back to TASK_EVENT routing.
+        """
+        result = pm._registered_reminder_set_interceptor(
+            "remind me to check the oven at 99:00",
+            recent_history=[],
+        )
+        assert result is not None
+        assert result["kind"] == "REMINDER_TASK_EVENT"
+        assert result["next_stage"] == "MANAGER"
+        assert result["stats_decision"] == "TASK"
+        route = result["route_decision"]
+        assert route["decision"] == "TASK"
+        assert route["card"]["stages"][0]["stage_type"] == "TASK_EVENT_WORK"
+        assert "ADD_TASK" in route["card"]["stages"][0]["allowed_tools"]
+
 
 # ── 5. Tail block behavior ───────────────────────────────────────────
 
@@ -435,6 +466,79 @@ class TestHookFinalizeProactiveTrigger:
         pm._hook_finalize_proactive_trigger(orc, reporter_just_ran=False)
         assert orc.chat.calls == []
 
+    def test_empty_raw_message_skips_chat_replacement(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pm.CFG, "REMINDERS_PATH", tmp_path / "reminders.json")
+        store = rem.ReminderStore(pm.CFG.REMINDERS_PATH)
+        entry = store.add(message="stretch", fire_at_utc="2026-01-01T00:00:00Z")
+
+        orc = _FakeOrc(
+            route_decision={
+                "system_notice": {
+                    "kind": "proactive_trigger",
+                    "id": entry["id"],
+                    "raw_message": "",
+                },
+            },
+            turn_stats=_FakeTurnStats(persona_error=False),
+            next_stage="FINISHED",
+        )
+
+        pm._hook_finalize_proactive_trigger(orc, reporter_just_ran=False)
+
+        loaded = store.load()
+        assert loaded[0]["fired"] is True
+        assert orc.chat.calls == []
+
+    def test_empty_reminder_id_skips_mark_fired(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pm.CFG, "REMINDERS_PATH", tmp_path / "reminders.json")
+        store = rem.ReminderStore(pm.CFG.REMINDERS_PATH)
+        store.add(message="stretch", fire_at_utc="2026-01-01T00:00:00Z")
+
+        orc = _FakeOrc(
+            route_decision={
+                "system_notice": {
+                    "kind": "proactive_trigger",
+                    "id": "",
+                    "raw_message": "msg",
+                },
+            },
+            turn_stats=_FakeTurnStats(persona_error=False),
+            next_stage="FINISHED",
+        )
+
+        pm._hook_finalize_proactive_trigger(orc, reporter_just_ran=False)
+
+        loaded = store.load()
+        assert loaded[0]["fired"] is False
+        assert len(orc.chat.calls) == 1
+        raw_msg, consumed = orc.chat.calls[0]
+        assert raw_msg == "msg"
+        assert consumed["role"] == "system"
+        assert consumed["hidden"] is True
+
+    def test_chat_replace_exception_is_swallowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(pm.CFG, "REMINDERS_PATH", tmp_path / "reminders.json")
+
+        class _FakeChatThatRaises:
+            def replace_last_system_message(self, raw_message: str, consumed: dict[str, Any]) -> None:
+                raise RuntimeError("chat boom")
+
+        orc = _FakeOrc(
+            route_decision={
+                "system_notice": {
+                    "kind": "proactive_trigger",
+                    "id": "abc",
+                    "raw_message": "msg",
+                },
+            },
+            turn_stats=_FakeTurnStats(persona_error=False),
+            next_stage="FINISHED",
+            chat=_FakeChatThatRaises(),
+        )
+
+        # Should not raise
+        pm._hook_finalize_proactive_trigger(orc, reporter_just_ran=False)
+
 
 # ── 7. ProactiveMonitor lifecycle behavior ───────────────────────────
 
@@ -527,3 +631,21 @@ class TestProactiveMonitorLifecycle:
         monitor._run_loop()
         assert len(dispatched) == 1
         assert dispatched[0]["message"] == "first"
+
+    def test_run_loop_logs_exception_and_continues(self, tmp_path: Path) -> None:
+        logs: list[str] = []
+
+        def _raise() -> None:
+            raise RuntimeError("dispatch boom")
+
+        monitor = pm.ProactiveMonitor(
+            tmp_path / "reminders.json",
+            can_dispatch=_raise,
+            is_inflight=lambda _id: False,
+            dispatch_callback=lambda _entry: True,
+            log_callback=lambda text: logs.append(text),
+        )
+        monitor._stop_event = OneShotStopEvent()
+        monitor._run_loop()
+
+        assert any("dispatch boom" in log for log in logs)
