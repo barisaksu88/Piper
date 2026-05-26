@@ -33,6 +33,17 @@ export default function EmptyWorkspace({
     return '📎';
   };
 
+  const getWorkspaceRelativeLabel = (filePath: string, fileName: string): string => {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const normalizedWorkspace = workspacePath?.replace(/\\/g, "/").replace(/\/+$/, "");
+
+    if (normalizedWorkspace && normalizedPath.startsWith(`${normalizedWorkspace}/`)) {
+      return normalizedPath.slice(normalizedWorkspace.length + 1);
+    }
+
+    return fileName;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0 && onFileSelected) {
@@ -67,7 +78,7 @@ export default function EmptyWorkspace({
                 tabIndex={0}
               >
                 <span className="workspace-file-icon">{getFileIcon(f.name)}</span>
-                <span className="workspace-file-name">{f.name}</span>
+                <span className="workspace-file-name">{getWorkspaceRelativeLabel(f.path, f.name)}</span>
                 <span className="workspace-file-size">{(f.size / 1024).toFixed(1)} KB</span>
               </div>
             ))}
