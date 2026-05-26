@@ -120,4 +120,33 @@ describe("Workspace rendering", () => {
       "C:/Projects/Piper/data/workspace/notes.txt"
     );
   });
+
+  it("shows only the filename for Windows backslash paths and preserves the full path on save", async () => {
+    const onTextSave = vi.fn();
+    await act(async () => {
+      root.render(
+        renderWorkspace({
+          mode: "text",
+          filePath: "C:\\Projects\\Piper\\data\\workspace\\notes.txt",
+          textContent: "backslash path",
+          onTextSave,
+        })
+      );
+    });
+
+    expect(container.textContent).toContain("notes.txt");
+    expect(container.textContent).not.toContain("C:\\Projects");
+
+    const saveBtn = container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
+    expect(saveBtn).toBeTruthy();
+
+    await act(async () => {
+      saveBtn!.click();
+    });
+
+    expect(onTextSave).toHaveBeenCalledWith(
+      "backslash path",
+      "C:\\Projects\\Piper\\data\\workspace\\notes.txt"
+    );
+  });
 });
