@@ -1720,7 +1720,7 @@ class PiperController:
             """Return initial frames for a newly connected WebSocket client."""
             try:
                 messages = renderable_chat_messages(self.chat_state.get_messages_snapshot())
-                return [
+                frames: list[str] = [
                     ui_tuple_to_ws_frame("chat_sync", messages),
                     ui_tuple_to_ws_frame(
                         "active_user_changed",
@@ -1739,6 +1739,14 @@ class PiperController:
                         _web_payload("web_tts_status_payload", {"state": "idle", "error": ""}),
                     ),
                 ]
+                if self.boot_ready:
+                    frames.append(
+                        ui_tuple_to_ws_frame(
+                            "boot_ready",
+                            self._pending_boot_ready_payload or "",
+                        )
+                    )
+                return frames
             except Exception:
                 return []
 
@@ -1824,10 +1832,20 @@ class PiperController:
 
                 from web_ui.window import open_piper_window
 
-                open_piper_window(f"http://{host}:{port}")
+                cache_bust = int(time.time())
+                open_piper_window(f"http://{host}:{port}?v={cache_bust}")
 
-                stop_event.set()
-                pump_thread.join(timeout=3.0)
+                if not self.boot_ready and not self.restart_requested:
+                    _LOG.info(
+                        "Window closed before boot complete — falling back to browser mode"
+                    )
+                    stop_event.set()
+                    pump_thread.join(timeout=3.0)
+                    stop_event.clear()
+                    _pump_loop()
+                else:
+                    stop_event.set()
+                    pump_thread.join(timeout=3.0)
             else:
                 boot_thread = threading.Thread(
                     target=self.boot_mgr.run_sequence, daemon=True

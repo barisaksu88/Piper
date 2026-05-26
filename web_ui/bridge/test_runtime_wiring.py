@@ -108,6 +108,15 @@ class TestConfigEnvOverrides:
         cfg = Config()
         assert cfg.WEB_UI_WINDOW is False
 
+    def test_web_ui_rebuild_on_boot_defaults_true(self) -> None:
+        cfg = Config()
+        assert cfg.WEB_UI_REBUILD_ON_BOOT is True
+
+    def test_web_ui_rebuild_on_boot_env_override_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PIPER_WEB_UI_REBUILD_ON_BOOT", "false")
+        cfg = Config()
+        assert cfg.WEB_UI_REBUILD_ON_BOOT is False
+
 
 # ---------------------------------------------------------------------------
 # app.py branch tests
@@ -152,6 +161,7 @@ class TestAppBranch:
 
         monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
         monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", False)
 
         result = app_module.main()
         assert result == 0
@@ -182,6 +192,7 @@ class TestAppBranch:
 
         monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
         monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", False)
 
         app_module.main()
         assert ("websockets.server", logging.WARNING) in set_level_calls
@@ -205,6 +216,7 @@ class TestAppBranch:
         monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
         monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
         monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", False)
         # Simulate missing pywebview
         monkeypatch.setitem(sys.modules, "webview", None)
 
@@ -239,6 +251,168 @@ class TestAppBranch:
 
 
 # ---------------------------------------------------------------------------
+# app.py rebuild tests
+# ---------------------------------------------------------------------------
+
+
+class TestAppRebuild:
+    def _fake_app_file(self, tmp_path: Path) -> Path:
+        """Create a fake app.py file inside a temp repo root so Path(__file__) resolves there."""
+        fake_app = tmp_path / "app.py"
+        fake_app.write_text("", encoding="utf-8")
+        return fake_app
+
+    def test_rebuild_on_boot_runs_npm_build(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import app as app_module
+
+        fake_app = self._fake_app_file(tmp_path)
+        src_dir = tmp_path / "web_ui" / "frontend" / "src"
+        src_dir.mkdir(parents=True)
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+        monkeypatch.setattr(app_module, "__file__", str(fake_app))
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_FRONTEND_DIST_DIR", dist_dir)
+
+        class FakeController:
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr("shutil.which", lambda cmd: "npm")
+
+        build_calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            build_calls.append(cmd)
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+
+        result = app_module.main()
+        assert result == 0
+        assert len(build_calls) == 1
+        assert build_calls[0] == ["npm", "run", "build"]
+
+    def test_rebuild_failure_without_dist_aborts(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import app as app_module
+
+        fake_app = self._fake_app_file(tmp_path)
+        src_dir = tmp_path / "web_ui" / "frontend" / "src"
+        src_dir.mkdir(parents=True)
+        dist_dir = tmp_path / "dist"  # does not exist
+
+        monkeypatch.setattr(app_module, "__file__", str(fake_app))
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_FRONTEND_DIST_DIR", dist_dir)
+
+        class FakeController:
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr("shutil.which", lambda cmd: "npm")
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(returncode=1, stderr="build failed"),
+        )
+
+        result = app_module.main()
+        assert result == 1
+
+    def test_rebuild_failure_with_dist_warns_and_continues(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import app as app_module
+
+        fake_app = self._fake_app_file(tmp_path)
+        src_dir = tmp_path / "web_ui" / "frontend" / "src"
+        src_dir.mkdir(parents=True)
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+        monkeypatch.setattr(app_module, "__file__", str(fake_app))
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_FRONTEND_DIST_DIR", dist_dir)
+
+        class FakeController:
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr("shutil.which", lambda cmd: "npm")
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: MagicMock(returncode=1, stderr="build failed"),
+        )
+
+        result = app_module.main()
+        assert result == 0
+
+    def test_rebuild_skipped_when_flag_false(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import app as app_module
+
+        fake_app = self._fake_app_file(tmp_path)
+        src_dir = tmp_path / "web_ui" / "frontend" / "src"
+        src_dir.mkdir(parents=True)
+        dist_dir = tmp_path / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+        monkeypatch.setattr(app_module, "__file__", str(fake_app))
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_FRONTEND_DIST_DIR", dist_dir)
+
+        class FakeController:
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+
+        build_calls: list[list[str]] = []
+        monkeypatch.setattr("subprocess.run", lambda cmd, **kwargs: build_calls.append(cmd))
+
+        result = app_module.main()
+        assert result == 0
+        assert build_calls == []
+
+    def test_no_npm_aborts_when_no_dist(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        import app as app_module
+
+        fake_app = self._fake_app_file(tmp_path)
+        src_dir = tmp_path / "web_ui" / "frontend" / "src"
+        src_dir.mkdir(parents=True)
+        dist_dir = tmp_path / "dist"  # does not exist
+
+        monkeypatch.setattr(app_module, "__file__", str(fake_app))
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_ENABLED", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_WINDOW", False)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_REBUILD_ON_BOOT", True)
+        monkeypatch.setattr(app_module.CFG, "WEB_UI_FRONTEND_DIST_DIR", dist_dir)
+
+        class FakeController:
+            def run_web(self, **kwargs: Any) -> int:
+                return 0
+
+        monkeypatch.setattr(app_module, "build_controller", lambda: FakeController())
+        monkeypatch.setattr("shutil.which", lambda cmd: None)
+
+        result = app_module.main()
+        assert result == 1
+
+
+# ---------------------------------------------------------------------------
 # Controller dispatch tests (MagicMock-based)
 # ---------------------------------------------------------------------------
 
@@ -269,6 +443,7 @@ def _make_mock_controller() -> MagicMock:
     ctrl._handle_web_mic_stop = PiperController._handle_web_mic_stop.__get__(  # type: ignore[method-assign]
         ctrl, MagicMock
     )
+    ctrl._workspace_relative_web_path = lambda x: x  # type: ignore[method-assign]
     ctrl.user_runtime = MagicMock()
     ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
     ctrl.style_mgr = MagicMock()
@@ -1959,7 +2134,7 @@ class TestRunWebWindowFlag:
         result = run_web_bound(host="127.0.0.1", port=port)
 
         assert len(window_calls) == 1
-        assert window_calls[0] == f"http://127.0.0.1:{port}"
+        assert window_calls[0].startswith(f"http://127.0.0.1:{port}?v=")
         assert result == 0  # not restarted
         ctrl.proactive_monitor.stop.assert_called_once()
         ctrl.agent_brain.shutdown.assert_called_once()
@@ -1988,3 +2163,205 @@ class TestRunWebWindowFlag:
         assert result == 0
         ctrl.proactive_monitor.stop.assert_called_once()
         ctrl.agent_brain.shutdown.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Late client boot sync tests
+# ---------------------------------------------------------------------------
+
+
+class TestOnClientConnectBootReadyReplay:
+    def test_connect_includes_boot_ready_when_already_booted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A late-connecting client must receive boot.ready if the backend is already ready."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_ready = True
+        ctrl._pending_boot_ready_payload = "System Ready"
+        ctrl.boot_mgr = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl.chat_state = MagicMock()
+        ctrl.chat_state.get_messages_snapshot.return_value = []
+        ctrl.user_runtime = MagicMock()
+        ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+        port = _get_free_port()
+
+        def _runner() -> None:
+            run_web_bound(host="127.0.0.1", port=port, use_window=False)
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        time.sleep(0.3)
+
+        import asyncio
+        import websockets
+
+        async def _connect() -> list[dict[str, Any]]:
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as ws:
+                frames: list[dict[str, Any]] = []
+                for _ in range(10):
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
+                        frames.append(json.loads(raw))
+                    except asyncio.TimeoutError:
+                        break
+                await ws.send(json.dumps({"frame": "action", "action": "restart_piper", "payload": {}}))
+                return frames
+
+        received = asyncio.run(_connect())
+        thread.join(timeout=3.0)
+
+        kinds = [f["kind"] for f in received]
+        assert "boot.ready" in kinds
+        boot_ready = next(f for f in received if f["kind"] == "boot.ready")
+        assert "text" in boot_ready["payload"]
+
+    def test_connect_omits_boot_ready_when_not_yet_booted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A connecting client must NOT receive boot.ready if the backend is not ready yet."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_ready = False
+        ctrl._pending_boot_ready_payload = ""
+        ctrl.boot_mgr = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl.chat_state = MagicMock()
+        ctrl.chat_state.get_messages_snapshot.return_value = []
+        ctrl.user_runtime = MagicMock()
+        ctrl.user_runtime.is_waiting_for_admin_password.return_value = False
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(ctrl, MagicMock)  # type: ignore[method-assign]
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+        port = _get_free_port()
+
+        def _runner() -> None:
+            run_web_bound(host="127.0.0.1", port=port, use_window=False)
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        time.sleep(0.3)
+
+        import asyncio
+        import websockets
+
+        async def _connect() -> list[dict[str, Any]]:
+            async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as ws:
+                frames: list[dict[str, Any]] = []
+                for _ in range(10):
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
+                        frames.append(json.loads(raw))
+                    except asyncio.TimeoutError:
+                        break
+                await ws.send(json.dumps({"frame": "action", "action": "restart_piper", "payload": {}}))
+                return frames
+
+        received = asyncio.run(_connect())
+        thread.join(timeout=3.0)
+
+        kinds = [f["kind"] for f in received]
+        assert "boot.ready" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# Window fallback tests
+# ---------------------------------------------------------------------------
+
+
+class TestRunWebWindowFallback:
+    def _make_ctrl_for_run_web(self) -> MagicMock:
+        """Return a MagicMock wired with the real run_web method."""
+        from ui.controller import PiperController
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.restart_requested = False
+        ctrl.boot_mgr = MagicMock()
+        ctrl.boot_mgr.run_sequence = MagicMock()
+        ctrl.proactive_monitor = MagicMock()
+        ctrl.agent_brain = MagicMock()
+        ctrl.code_session = MagicMock()
+        ctrl.searxng_service = None
+        ctrl.load_memory_into_chat = MagicMock()
+        ctrl.knowledge_mgr = MagicMock()
+        ctrl._dispatch_web_action = PiperController._dispatch_web_action.__get__(  # type: ignore[method-assign]
+            ctrl, MagicMock
+        )
+        return ctrl
+
+    def test_window_closed_before_boot_falls_back_to_browser_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If the window closes before boot_ready, run_web must fall back to _pump_loop."""
+        import ui.controller as controller_module
+        from ui.controller import PiperController
+
+        monkeypatch.setattr(controller_module.CFG, "WEB_UI_WINDOW", True)
+        monkeypatch.setattr(
+            "web_ui.bridge.server.BridgeServer",
+            lambda **kwargs: MagicMock(start=lambda: None, stop=lambda: None, is_running=lambda: True),
+        )
+
+        ctrl = self._make_ctrl_for_run_web()
+        ctrl.boot_ready = False
+
+        # open_piper_window returns immediately (simulates early close).
+        monkeypatch.setattr(
+            "web_ui.window.open_piper_window", lambda url: None, raising=False
+        )
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+
+        port = _get_free_port()
+
+        # Trigger exit via restart after a short delay so the fallback loop can run.
+        def _delayed_restart() -> None:
+            time.sleep(0.5)
+            ctrl.restart_requested = True
+
+        threading.Thread(target=_delayed_restart, daemon=True).start()
+
+        result = run_web_bound(host="127.0.0.1", port=port)
+
+        assert result == 85  # RESTART_EXIT_CODE
+        ctrl.proactive_monitor.stop.assert_called_once()
+
+    def test_window_closed_after_boot_shuts_down_normally(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """If the window closes after boot_ready, run_web must shut down cleanly."""
+        import ui.controller as controller_module
+        from ui.controller import PiperController
+
+        monkeypatch.setattr(controller_module.CFG, "WEB_UI_WINDOW", True)
+        monkeypatch.setattr(
+            "web_ui.bridge.server.BridgeServer",
+            lambda **kwargs: MagicMock(start=lambda: None, stop=lambda: None, is_running=lambda: True),
+        )
+
+        ctrl = self._make_ctrl_for_run_web()
+        ctrl.boot_ready = True
+
+        monkeypatch.setattr(
+            "web_ui.window.open_piper_window", lambda url: None, raising=False
+        )
+
+        run_web_bound = PiperController.run_web.__get__(ctrl, MagicMock)  # type: ignore[var-annotated]
+        port = _get_free_port()
+        result = run_web_bound(host="127.0.0.1", port=port)
+
+        assert result == 0
+        ctrl.proactive_monitor.stop.assert_called_once()

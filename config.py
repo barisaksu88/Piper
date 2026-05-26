@@ -909,6 +909,9 @@ class Config:
     WEB_UI_WINDOW: bool = field(
         default_factory=lambda: _env_flag("PIPER_WEB_UI_WINDOW", True)
     )
+    WEB_UI_REBUILD_ON_BOOT: bool = field(
+        default_factory=lambda: _env_flag("PIPER_WEB_UI_REBUILD_ON_BOOT", True)
+    )
     DEV_TRUSTED_ADMIN_TEXT_INPUT: bool = field(
         default_factory=lambda: _env_flag("PIPER_DEV_TRUSTED_ADMIN_TEXT_INPUT", False)
     )
