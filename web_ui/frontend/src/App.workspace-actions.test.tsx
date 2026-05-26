@@ -1,104 +1,60 @@
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import {
+  FakeBridge,
+  sendAction,
+  renderApp,
+  cleanupApp,
+} from "./test/appTestHarness";
+import type { AppHarness } from "./test/appTestHarness";
 
-const bridgeMock = vi.hoisted(() => {
-  const sendAction = vi.fn();
-  class FakeBridge {
-    static lastInstance: FakeBridge | null = null;
-    onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-    onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-
-    constructor(callbacks: {
-      onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-      onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-    }) {
-      this.onStateChange = callbacks.onStateChange;
-      this.onFrame = callbacks.onFrame;
-      bridgeMock.FakeBridge.lastInstance = this;
-    }
-
-    connect() {
-      this.onStateChange?.("connected");
-    }
-
-    disconnect() {
-      this.onStateChange?.("disconnected");
-    }
-
-    sendAction(action: string, payload: Record<string, unknown> = {}) {
-      sendAction(action, payload);
-      return true;
-    }
-
-    emitFrame(kind: string, payload: Record<string, unknown> = {}) {
-      this.onFrame?.({ frame: "event", kind, payload });
-    }
-  }
-  return { FakeBridge, sendAction };
+vi.mock("./bridge", async () => {
+  const { FakeBridge } = await import("./test/appTestHarness");
+  return { PiperBridge: FakeBridge, WS_URL: "ws://127.0.0.1:8787/ws" };
 });
 
-vi.mock("./bridge", () => ({
-  PiperBridge: bridgeMock.FakeBridge,
-  WS_URL: "ws://127.0.0.1:8787/ws",
-}));
-
-vi.mock("./hooks/useMic", () => ({
-  useMic: () => ({
-    micState: "idle",
-    startMicRecording: vi.fn(),
-    stopMicRecording: vi.fn(),
-    abortMicRecording: vi.fn(),
-    handleBackendMicStatus: vi.fn(),
-    micButtonLabel: "MIC",
-    micButtonClass: "",
-    micStatusText: "",
-  }),
-}));
+vi.mock("./hooks/useMic", async () => {
+  const { micMock } = await import("./test/appTestHarness");
+  return { useMic: () => micMock };
+});
 
 describe("App workspace action dispatch", () => {
-  let container: HTMLDivElement;
-  let root: Root;
+  let harness: AppHarness;
 
   beforeEach(() => {
-    bridgeMock.sendAction.mockClear();
-    bridgeMock.FakeBridge.lastInstance = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    harness = renderApp();
+    sendAction.mockClear();
+    FakeBridge.lastInstance = null;
   });
 
   afterEach(() => {
-    act(() => {
-      root.unmount();
-    });
-    container.remove();
+    cleanupApp(harness);
   });
 
   it("dispatches list_workspace_files on open and read_workspace_file on file click", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
-    expect(bridgeMock.FakeBridge.lastInstance).toBeTruthy();
+    expect(FakeBridge.lastInstance).toBeTruthy();
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const toggle = container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
     expect(toggle).toBeTruthy();
 
     await act(async () => {
       toggle!.click();
     });
 
-    expect(container.querySelector(".workspace-overlay-full")).toBeTruthy();
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("list_workspace_files", {});
+    expect(harness.container.querySelector(".workspace-overlay-full")).toBeTruthy();
+    expect(sendAction).toHaveBeenCalledWith("list_workspace_files", {});
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("workspace.files", {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
         path: "C:/Projects/Piper/data/workspace",
         files: [
           { name: "main.py", path: "C:/Projects/Piper/data/workspace/main.py", size: 1024 },
@@ -107,7 +63,7 @@ describe("App workspace action dispatch", () => {
       });
     });
 
-    const items = Array.from(container.querySelectorAll(".workspace-file-item"));
+    const items = Array.from(harness.container.querySelectorAll(".workspace-file-item"));
     expect(items.length).toBe(2);
 
     const mainPy = items.find((el) => el.textContent?.includes("main.py")) as HTMLElement | undefined;
@@ -117,21 +73,21 @@ describe("App workspace action dispatch", () => {
       mainPy!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("read_workspace_file", {
+    expect(sendAction).toHaveBeenCalledWith("read_workspace_file", {
       path: "C:/Projects/Piper/data/workspace/main.py",
     });
   });
 
   it("opens a Python file, emits contents, and dispatches code_run with full path", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const toggle = container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
     expect(toggle).toBeTruthy();
 
     await act(async () => {
@@ -139,7 +95,7 @@ describe("App workspace action dispatch", () => {
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("workspace.files", {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
         path: "C:/Projects/Piper/data/workspace",
         files: [
           { name: "main.py", path: "C:/Projects/Piper/data/workspace/main.py", size: 1024 },
@@ -147,7 +103,7 @@ describe("App workspace action dispatch", () => {
       });
     });
 
-    const mainItem = container.querySelector(".workspace-file-item") as HTMLElement | null;
+    const mainItem = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
     expect(mainItem).toBeTruthy();
     expect(mainItem!.textContent).toContain("main.py");
 
@@ -155,23 +111,23 @@ describe("App workspace action dispatch", () => {
       mainItem!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("read_workspace_file", {
+    expect(sendAction).toHaveBeenCalledWith("read_workspace_file", {
       path: "C:/Projects/Piper/data/workspace/main.py",
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("file.contents", {
+      FakeBridge.lastInstance!.emitFrame("file.contents", {
         path: "C:/Projects/Piper/data/workspace/main.py",
         name: "main.py",
         content: 'print("hello")',
       });
     });
 
-    const codeEditor = container.querySelector(".code-editor") as HTMLTextAreaElement | null;
+    const codeEditor = harness.container.querySelector(".code-editor") as HTMLTextAreaElement | null;
     expect(codeEditor).toBeTruthy();
     expect(codeEditor!.value).toBe('print("hello")');
 
-    const runBtn = container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
+    const runBtn = harness.container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
     expect(runBtn).toBeTruthy();
     expect(runBtn!.textContent).toBe("Run");
     expect(runBtn!.disabled).toBe(false);
@@ -180,7 +136,7 @@ describe("App workspace action dispatch", () => {
       runBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("code_run", {
+    expect(sendAction).toHaveBeenCalledWith("code_run", {
       path: "C:/Projects/Piper/data/workspace/main.py",
       content: 'print("hello")',
     });
@@ -188,14 +144,14 @@ describe("App workspace action dispatch", () => {
 
   it("opens a text file, emits contents, edits, and dispatches save_workspace_file", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const toggle = container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
     expect(toggle).toBeTruthy();
 
     await act(async () => {
@@ -203,7 +159,7 @@ describe("App workspace action dispatch", () => {
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("workspace.files", {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
         path: "C:/Projects/Piper/data/workspace",
         files: [
           { name: "notes.txt", path: "C:/Projects/Piper/data/workspace/notes.txt", size: 512 },
@@ -211,7 +167,7 @@ describe("App workspace action dispatch", () => {
       });
     });
 
-    const notesItem = container.querySelector(".workspace-file-item") as HTMLElement | null;
+    const notesItem = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
     expect(notesItem).toBeTruthy();
     expect(notesItem!.textContent).toContain("notes.txt");
 
@@ -219,19 +175,19 @@ describe("App workspace action dispatch", () => {
       notesItem!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("read_workspace_file", {
+    expect(sendAction).toHaveBeenCalledWith("read_workspace_file", {
       path: "C:/Projects/Piper/data/workspace/notes.txt",
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("file.contents", {
+      FakeBridge.lastInstance!.emitFrame("file.contents", {
         path: "C:/Projects/Piper/data/workspace/notes.txt",
         name: "notes.txt",
         content: "Initial notes",
       });
     });
 
-    const textarea = container.querySelector(".text-editor") as HTMLTextAreaElement | null;
+    const textarea = harness.container.querySelector(".text-editor") as HTMLTextAreaElement | null;
     expect(textarea).toBeTruthy();
     expect(textarea!.value).toBe("Initial notes");
 
@@ -241,7 +197,7 @@ describe("App workspace action dispatch", () => {
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const saveBtn = container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
+    const saveBtn = harness.container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
     expect(saveBtn).toBeTruthy();
     expect(saveBtn!.disabled).toBe(false);
 
@@ -249,9 +205,91 @@ describe("App workspace action dispatch", () => {
       saveBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("save_workspace_file", {
+    expect(sendAction).toHaveBeenCalledWith("save_workspace_file", {
       path: "C:/Projects/Piper/data/workspace/notes.txt",
       content: "Updated notes",
+    });
+  });
+
+  it("displays nested file workspace-relative labels and dispatches read with full path", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle!.click();
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
+        path: "C:/Projects/Piper/data/workspace",
+        files: [
+          { name: "main.py", path: "C:/Projects/Piper/data/workspace/src/main.py", size: 1024 },
+          { name: "main.py", path: "C:/Projects/Piper/data/workspace/tests/main.py", size: 512 },
+        ],
+      });
+    });
+
+    expect(harness.container.textContent).toContain("src/main.py");
+    expect(harness.container.textContent).toContain("tests/main.py");
+
+    const items = Array.from(harness.container.querySelectorAll(".workspace-file-item"));
+    const srcItem = items.find((el) => el.textContent?.includes("src/main.py")) as HTMLElement | undefined;
+    expect(srcItem).toBeTruthy();
+
+    await act(async () => {
+      srcItem!.click();
+    });
+
+    expect(sendAction).toHaveBeenCalledWith("read_workspace_file", {
+      path: "C:/Projects/Piper/data/workspace/src/main.py",
+    });
+  });
+
+  it("displays nested Windows backslash paths as relative labels and dispatches with original path", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle!.click();
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
+        path: "C:\\Projects\\Piper\\data\\workspace",
+        files: [
+          { name: "main.py", path: "C:\\Projects\\Piper\\data\\workspace\\src\\main.py", size: 1024 },
+        ],
+      });
+    });
+
+    expect(harness.container.textContent).toContain("src/main.py");
+    expect(harness.container.textContent).not.toContain("C:\\Projects");
+
+    const item = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
+    expect(item).toBeTruthy();
+
+    await act(async () => {
+      item!.click();
+    });
+
+    expect(sendAction).toHaveBeenCalledWith("read_workspace_file", {
+      path: "C:\\Projects\\Piper\\data\\workspace\\src\\main.py",
     });
   });
 });
