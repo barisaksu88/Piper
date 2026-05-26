@@ -1601,15 +1601,24 @@ class PiperController:
         elif action_name == "list_workspace_files":
             from pathlib import Path
             workspace_dir = self.code_session.workspace
+            supported_suffixes = {".py", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
             files = []
             if workspace_dir.exists():
-                for f in sorted(workspace_dir.iterdir()):
-                    if f.is_file() and f.suffix.lower() in (".py", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"):
-                        files.append({
-                            "name": f.name,
-                            "path": str(f),
-                            "size": f.stat().st_size,
-                        })
+                workspace_root = workspace_dir.resolve()
+                for f in sorted(workspace_dir.rglob("*")):
+                    if not f.is_file():
+                        continue
+                    try:
+                        f.resolve().relative_to(workspace_root)
+                    except ValueError:
+                        continue
+                    if f.suffix.lower() not in supported_suffixes:
+                        continue
+                    files.append({
+                        "name": f.name,
+                        "path": str(f),
+                        "size": f.stat().st_size,
+                    })
             self.ui_queue.put(("workspace_files", {"files": files, "path": str(workspace_dir)}))
         elif action_name == "read_workspace_file":
             from pathlib import Path
