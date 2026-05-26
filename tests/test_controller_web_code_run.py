@@ -203,3 +203,163 @@ class TestCodeRunDispatch:
             events.append(ctrl.ui_queue.get_nowait())
         chat_events = [e for e in events if e[0] == "chat_append"]
         assert any("Path outside workspace" in str(e[1].get("content", "")) for e in chat_events)
+
+
+class TestReadWorkspaceFileDispatch:
+    """Smoke tests for _dispatch_web_action read_workspace_file handler."""
+
+    def test_read_absolute_path_inside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "hello.py").write_text("print(1)", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "read_workspace_file",
+            {"path": str(workspace / "hello.py")},
+        )
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        file_events = [e for e in events if e[0] == "file_contents"]
+        assert len(file_events) == 1
+        payload = file_events[0][1]
+        assert payload.get("content") == "print(1)"
+        assert not payload.get("error")
+
+    def test_read_relative_path(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "hello.py").write_text("print(2)", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "read_workspace_file",
+            {"path": "hello.py"},
+        )
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        file_events = [e for e in events if e[0] == "file_contents"]
+        assert len(file_events) == 1
+        payload = file_events[0][1]
+        assert payload.get("content") == "print(2)"
+        assert not payload.get("error")
+
+    def test_read_rejects_absolute_outside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "evil.py"
+        outside.write_text("bad", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "read_workspace_file",
+            {"path": str(outside)},
+        )
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        file_events = [e for e in events if e[0] == "file_contents"]
+        assert len(file_events) == 1
+        payload = file_events[0][1]
+        assert payload.get("error") == "Access denied"
+
+    def test_read_rejects_sibling_prefix_outside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        evil_dir = tmp_path / "ws_evil"
+        evil_dir.mkdir()
+        (evil_dir / "file.txt").write_text("leak", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "read_workspace_file",
+            {"path": str(evil_dir / "file.txt")},
+        )
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        file_events = [e for e in events if e[0] == "file_contents"]
+        assert len(file_events) == 1
+        payload = file_events[0][1]
+        assert payload.get("error") == "Access denied"
+
+
+class TestSaveWorkspaceFileDispatch:
+    """Smoke tests for _dispatch_web_action save_workspace_file handler."""
+
+    def test_save_absolute_path_inside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "save_workspace_file",
+            {"path": str(workspace / "saved.py"), "content": "x = 1"},
+        )
+
+        assert (workspace / "saved.py").read_text(encoding="utf-8") == "x = 1"
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        log_events = [e for e in events if e[0] == "agent_log"]
+        assert log_events
+        assert "saved.py" in str(log_events[-1][1])
+
+    def test_save_relative_path(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "save_workspace_file",
+            {"path": "saved.py", "content": "x = 2"},
+        )
+
+        assert (workspace / "saved.py").read_text(encoding="utf-8") == "x = 2"
+
+    def test_save_rejects_absolute_outside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "evil.py"
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "save_workspace_file",
+            {"path": str(outside), "content": "bad"},
+        )
+
+        assert not outside.exists()
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        chat_events = [e for e in events if e[0] == "chat_append"]
+        assert any("Save denied" in str(e[1].get("content", "")) for e in chat_events)
+
+    def test_save_rejects_sibling_prefix_outside_workspace(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        evil_dir = tmp_path / "ws_evil"
+        evil_dir.mkdir()
+        outside_file = evil_dir / "file.txt"
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action(
+            "save_workspace_file",
+            {"path": str(outside_file), "content": "leak"},
+        )
+
+        assert not outside_file.exists()
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        chat_events = [e for e in events if e[0] == "chat_append"]
+        assert any("Save denied" in str(e[1].get("content", "")) for e in chat_events)
