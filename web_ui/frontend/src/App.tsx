@@ -116,6 +116,7 @@ export default function App() {
     startMicRecording,
     stopMicRecording,
     abortMicRecording,
+    handleBackendMicStatus,
     micButtonLabel,
     micButtonClass,
     micStatusText,
@@ -157,6 +158,11 @@ export default function App() {
     const el = documentsViewRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [documentsView]);
+
+  // Backend mic.status acknowledgement clears local transcribing state
+  useEffect(() => {
+    handleBackendMicStatus(micStatus);
+  }, [micStatus, handleBackendMicStatus]);
 
   // Bridge setup — empty deps: refs keep callbacks fresh without re-connects.
   useEffect(() => {
