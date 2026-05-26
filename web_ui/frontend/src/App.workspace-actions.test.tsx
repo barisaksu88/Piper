@@ -121,6 +121,70 @@ describe("App workspace action dispatch", () => {
     });
   });
 
+  it("opens a Python file, emits contents, and dispatches code_run with full path", async () => {
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    await act(async () => {
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    const toggle = container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle!.click();
+    });
+
+    await act(async () => {
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("workspace.files", {
+        path: "C:/Projects/Piper/data/workspace",
+        files: [
+          { name: "main.py", path: "C:/Projects/Piper/data/workspace/main.py", size: 1024 },
+        ],
+      });
+    });
+
+    const mainItem = container.querySelector(".workspace-file-item") as HTMLElement | null;
+    expect(mainItem).toBeTruthy();
+    expect(mainItem!.textContent).toContain("main.py");
+
+    await act(async () => {
+      mainItem!.click();
+    });
+
+    expect(bridgeMock.sendAction).toHaveBeenCalledWith("read_workspace_file", {
+      path: "C:/Projects/Piper/data/workspace/main.py",
+    });
+
+    await act(async () => {
+      bridgeMock.FakeBridge.lastInstance!.emitFrame("file.contents", {
+        path: "C:/Projects/Piper/data/workspace/main.py",
+        name: "main.py",
+        content: 'print("hello")',
+      });
+    });
+
+    const codeEditor = container.querySelector(".code-editor") as HTMLTextAreaElement | null;
+    expect(codeEditor).toBeTruthy();
+    expect(codeEditor!.value).toBe('print("hello")');
+
+    const runBtn = container.querySelector(".action-btn.primary") as HTMLButtonElement | null;
+    expect(runBtn).toBeTruthy();
+    expect(runBtn!.textContent).toBe("Run");
+    expect(runBtn!.disabled).toBe(false);
+
+    await act(async () => {
+      runBtn!.click();
+    });
+
+    expect(bridgeMock.sendAction).toHaveBeenCalledWith("code_run", {
+      path: "C:/Projects/Piper/data/workspace/main.py",
+      content: 'print("hello")',
+    });
+  });
+
   it("opens a text file, emits contents, edits, and dispatches save_workspace_file", async () => {
     await act(async () => {
       root.render(<App />);
