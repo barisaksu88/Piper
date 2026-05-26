@@ -62,34 +62,30 @@ Additional consumers that import the module directly:
 
 | Symbol | Current Location | Recommendation | Rationale |
 |---|---|---|---|
-| `ProactiveMonitor` class | `core/engines/proactive_monitor.py` | **Move** to `core/services/proactive_monitor.py` (or into `core/services/reminders.py`) | It is a background polling service, not a registry wrapper. `ui/controller.py` already treats it as a service dependency. |
-| `_registered_reminder_set_interceptor` | `core/engines/proactive_monitor.py` | **Keep** or move to `core/routing/route_normalizer.py` | Reminder-specific routing logic. Keeping it here is acceptable; moving it to `route_normalizer.py` would colocate it with other interceptors but increases file size. |
+| `ProactiveMonitor` class | `core/engines/proactive_monitor.py` | **Keep** | It owns daemon thread lifecycle, start/stop, dispatch gating, and background behavior. In Piper’s engine/service doctrine, lifecycle/background modules may remain in `core/engines/`. The heavy service logic is already in `core/services/reminders.py`. |
+| `_registered_reminder_set_interceptor` | `core/engines/proactive_monitor.py` | **Keep** | Reminder-specific routing logic. Keeping it here is acceptable. |
 | `_tail_block_proactive_trigger` | `core/engines/proactive_monitor.py` | **Keep** | Tail blocks are engine/persona-boundary wrappers. This is the correct layer. |
 | `_tail_block_reminder_set_result` | `core/engines/proactive_monitor.py` | **Keep** | Same as above. |
-| `_hook_finalize_proactive_trigger` | `core/engines/proactive_monitor.py` | **Keep** | `on_turn_end` hook wrappers belong in `core/engines/`. However, the inline `ReminderStore` instantiation and chat mutation should be delegated to a service helper. |
-
-### Preferred split outcome
-
-```
-core/engines/proactive_monitor.py      # interceptors, hooks, tail blocks only
-core/services/proactive_monitor.py     # ProactiveMonitor class + service helpers
-```
+| `_hook_finalize_proactive_trigger` | `core/engines/proactive_monitor.py` | **Keep** | `on_turn_end` hook wrappers belong in `core/engines/`. The inline `ReminderStore` call and chat mutation could later be delegated to a service helper without moving the hook itself. |
 
 ---
 
 ## 4. Proposed Split Plan
 
-### PR 1 — Extract `ProactiveMonitor` service class *(low risk)*
-- Move `ProactiveMonitor` to `core/services/proactive_monitor.py`.
-- Re-export from `core/engines/proactive_monitor.py` for backward compatibility, or update `ui/controller.py` and `scripts/proactive_monitor_smoke_test.py` to import from services.
-- Add a smoke test run to confirm monitor still starts/stops/dispatches.
+### Step 1 — Add edge guard tests *(immediate)*
+- Branch: `tests/proactive-monitor-edge-guards`
+- Add the 6 missing guard tests listed in §6 before touching any behavior.
+- These tests lock current behavior so later cleanups cannot drift silently.
 
-### PR 2 — Delegate hook storage/chat mutation *(low risk)*
-- Extract the body of `_hook_finalize_proactive_trigger` into a service function (e.g. `finalize_proactive_trigger_turn(orc, notice)`).
-- Keep the decorator in `core/engines/proactive_monitor.py`; move the imperative logic to `core/services/reminders.py`.
+### Step 2 — Delegate hook storage/chat mutation *(optional, low risk)*
+- Branch: `refactor/proactive-trigger-finalization-helper`
+- Extract the body of `_hook_finalize_proactive_trigger` into a service function (e.g. `finalize_proactive_trigger_turn(orc, notice)`) in `core/services/reminders.py`.
+- Keep the decorator in `core/engines/proactive_monitor.py`; call the service helper from the hook.
+- This is a small boundary cleanup, not a module split.
 
-### PR 3 — Unify interceptor fallback logic *(medium risk)*
-- The interceptor re-implements date/time extraction that `parse_reminder_request` already does. Refactor `parse_reminder_request` to expose structured fallback metadata (e.g. `fallback_kind: "event" | "task" | None`) so the interceptor does not duplicate parsing.
+### Step 3 — Unify interceptor fallback logic *(optional, medium risk)*
+- The interceptor re-implements date/time extraction that `parse_reminder_request` already does.
+- Refactor `parse_reminder_request` to expose structured fallback metadata (e.g. `fallback_kind: "event" | "task" | None`) so the interceptor does not duplicate parsing.
 - **Not recommended unless test coverage for edge cases is complete first.**
 
 ---
@@ -98,11 +94,11 @@ core/services/proactive_monitor.py     # ProactiveMonitor class + service helper
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **Import cycle** | Low | `core/services/reminders.py` already imports nothing from `core/engines/`. Moving `ProactiveMonitor` into services keeps the DAG `ui → core/services → core/engines` safe. |
-| **Registry registration loss** | Medium | If `core/engines/proactive_monitor.py` is emptied of decorators, `core/orchestrator.py` must import the replacement registration module. A re-export or updated import line prevents dead registration. |
+| **Import cycle** | Low | `core/services/reminders.py` imports nothing from `core/engines/`. Keeping `ProactiveMonitor` in `core/engines/` avoids any import churn. |
+| **Registry registration loss** | Low | All decorators stay in `core/engines/proactive_monitor.py`; `core/orchestrator.py` needs no changes. |
 | **Behavior drift** | Low | All logic is deterministic (regex, parsing, storage). Existing unit tests (`tests/test_proactive_monitor.py`, 42 tests) provide strong regression coverage. |
 | **Test coverage gaps** | Medium | Missing guards for past-time routing, empty `raw_message` in hook, and hook behavior when `reminder_id` is blank (see §6). |
-| **User-visible behavior** | Low | No user-visible changes if only `ProactiveMonitor` moves. Changing interceptor logic could alter routing. |
+| **User-visible behavior** | Low | No user-visible changes from doc revisions. Changing interceptor logic later could alter routing. |
 
 ---
 
@@ -138,13 +134,19 @@ The following tests should be added to `tests/test_proactive_monitor.py` **befor
 
 ## 7. Recommendation
 
-**`ADD_TESTS_FIRST`**
+**`LEAVE_AS_ENGINE_LIFECYCLE_MODULE`, with `ADD_EDGE_TESTS_FIRST` before any small cleanup.**
 
 Rationale:
-- The module is hybrid (class + interceptor + hooks + tail blocks) but the boundary with `core/services/reminders.py` is already clean.
-- The highest-value cleanup is moving `ProactiveMonitor` to `core/services/`, which is safe but requires updating imports in `ui/controller.py` and smoke tests.
-- There are real test gaps (§6) that should be closed before any code motion so that regressions are caught automatically.
-- After tests are added, the next branch should be **`refactor/proactive-monitor-extract-service`** (PR 1 in §4).
+- `ProactiveMonitor` owns a daemon thread, start/stop lifecycle, dispatch gating, and background behavior. In Piper’s engine/service doctrine, lifecycle/background behavior may remain in `core/engines/`.
+- The heavy service logic (parsing, storage, message builders) is already correctly extracted to `core/services/reminders.py`.
+- `core/engines/proactive_monitor.py` should keep:
+  - `ProactiveMonitor` class
+  - reminder route interceptor
+  - proactive/reminder tail blocks
+  - `on_turn_end` finalize hook
+- There are real test gaps (§6) that should be closed before any cleanup so regressions are caught automatically.
+- Exact next branch: **`tests/proactive-monitor-edge-guards`**
+- Optional later branch: **`refactor/proactive-trigger-finalization-helper`** (delegate hook body to a service helper without moving the hook decorator).
 
 ---
 
@@ -154,8 +156,7 @@ Rationale:
 |---|---|---|---|
 | **SHOULD_FIX** | Route interceptor routes past-time reminders to `REMINDER_SET` instead of failing fast or routing to task/event. | `_registered_reminder_set_interceptor` lines 84–126 | The phase handles it gracefully, but the interceptor does redundant work. |
 | **SHOULD_FIX** | Hook directly instantiates `ReminderStore` and mutates chat history inline instead of delegating to a service helper. | `_hook_finalize_proactive_trigger` lines 207–217 | Violates "service owns storage" boundary. |
-| **WATCH** | `ProactiveMonitor` is a background service class living in `core/engines/`. | `core/engines/proactive_monitor.py` lines 27–72 | Not wrong, but `core/services/` is the more natural home. |
-| **WATCH** | `ui/controller.py` imports `ProactiveMonitor` from `core/engines/`. | `ui/controller.py:15` | If the class moves, this import must update. |
+| **IGNORE_FOR_NOW** | `ProactiveMonitor` is a background service class living in `core/engines/`. | `core/engines/proactive_monitor.py` lines 27–72 | Acceptable per engine/service doctrine: lifecycle/background modules may stay in `core/engines/`. The heavy service logic is already in `core/services/reminders.py`. |
 | **WATCH** | Bare `except Exception: pass` around chat mutation in hook. | `_hook_finalize_proactive_trigger` lines 215–218 | Hides real bugs silently. Prefer logging at minimum. |
 | **IGNORE_FOR_NOW** | Interceptor duplicates date/time extraction logic already present in `core/services/reminders.py`. | `_registered_reminder_set_interceptor` lines 94–118 | Requires `parse_reminder_request` API change to unify. |
 | **IGNORE_FOR_NOW** | `tests/test_context_pack_snapshots.py` imports `core.engines.proactive_monitor` only for tail-block side-effects. | `tests/test_context_pack_snapshots.py:29` | Acceptable pattern; importing `core.orchestrator` would also work now that registration is unified. |
