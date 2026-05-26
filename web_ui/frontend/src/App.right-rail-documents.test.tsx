@@ -1,93 +1,49 @@
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import {
+  FakeBridge,
+  sendAction,
+  renderApp,
+  cleanupApp,
+} from "./test/appTestHarness";
+import type { AppHarness } from "./test/appTestHarness";
 
-const bridgeMock = vi.hoisted(() => {
-  const sendAction = vi.fn();
-  class FakeBridge {
-    static lastInstance: FakeBridge | null = null;
-    onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-    onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-
-    constructor(callbacks: {
-      onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-      onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-    }) {
-      this.onStateChange = callbacks.onStateChange;
-      this.onFrame = callbacks.onFrame;
-      bridgeMock.FakeBridge.lastInstance = this;
-    }
-
-    connect() {
-      this.onStateChange?.("connected");
-    }
-
-    disconnect() {
-      this.onStateChange?.("disconnected");
-    }
-
-    sendAction(action: string, payload: Record<string, unknown> = {}) {
-      sendAction(action, payload);
-      return true;
-    }
-
-    emitFrame(kind: string, payload: Record<string, unknown> = {}) {
-      this.onFrame?.({ frame: "event", kind, payload });
-    }
-  }
-  return { FakeBridge, sendAction };
+vi.mock("./bridge", async () => {
+  const { FakeBridge } = await import("./test/appTestHarness");
+  return { PiperBridge: FakeBridge, WS_URL: "ws://127.0.0.1:8787/ws" };
 });
 
-vi.mock("./bridge", () => ({
-  PiperBridge: bridgeMock.FakeBridge,
-  WS_URL: "ws://127.0.0.1:8787/ws",
-}));
-
-vi.mock("./hooks/useMic", () => ({
-  useMic: () => ({
-    micState: "idle",
-    startMicRecording: vi.fn(),
-    stopMicRecording: vi.fn(),
-    abortMicRecording: vi.fn(),
-    handleBackendMicStatus: vi.fn(),
-    micButtonLabel: "MIC",
-    micButtonClass: "",
-    micStatusText: "",
-  }),
-}));
+vi.mock("./hooks/useMic", async () => {
+  const { micMock } = await import("./test/appTestHarness");
+  return { useMic: () => micMock };
+});
 
 describe("App right rail documents action dispatch", () => {
-  let container: HTMLDivElement;
-  let root: Root;
+  let harness: AppHarness;
 
   beforeEach(() => {
-    bridgeMock.sendAction.mockClear();
-    bridgeMock.FakeBridge.lastInstance = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    harness = renderApp();
+    sendAction.mockClear();
+    FakeBridge.lastInstance = null;
   });
 
   afterEach(() => {
-    act(() => {
-      root.unmount();
-    });
-    container.remove();
+    cleanupApp(harness);
   });
 
   it("adds document paths, ingests, cancels, and clears selection", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
-    expect(bridgeMock.FakeBridge.lastInstance).toBeTruthy();
+    expect(FakeBridge.lastInstance).toBeTruthy();
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const headers = Array.from(container.querySelectorAll(".rail-card-header"));
+    const headers = Array.from(harness.container.querySelectorAll(".rail-card-header"));
     const documentsHeader = headers.find((h) => h.textContent?.includes("Documents")) as HTMLElement | undefined;
     expect(documentsHeader).toBeTruthy();
 
@@ -133,12 +89,12 @@ describe("App right rail documents action dispatch", () => {
       ingestBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("document_picker_selected", {
+    expect(sendAction).toHaveBeenCalledWith("document_picker_selected", {
       paths: ["C:/Docs/a.pdf", "C:/Docs/b.txt"],
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("document.ingest_active", { active: true });
+      FakeBridge.lastInstance!.emitFrame("document.ingest_active", { active: true });
     });
 
     const cancelBtn = Array.from(documentsCard.querySelectorAll("button")).find(
@@ -151,7 +107,7 @@ describe("App right rail documents action dispatch", () => {
       cancelBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("document_picker_cancel", {});
+    expect(sendAction).toHaveBeenCalledWith("document_picker_cancel", {});
 
     const clearBtn = Array.from(documentsCard.querySelectorAll("button")).find(
       (b) => b.textContent === "Clear"
