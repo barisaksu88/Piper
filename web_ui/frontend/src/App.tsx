@@ -433,7 +433,7 @@ export default function App() {
               const name = fileName.toLowerCase();
               if (name.endsWith(".py")) {
                 workspace.openFile(path, "code");
-                setCodePathInput(fileName);
+                setCodePathInput(path);
                 sendAction("read_workspace_file", { path });
               } else if (name.endsWith(".txt") || name.endsWith(".md")) {
                 workspace.openFile(path, "text");
