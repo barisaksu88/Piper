@@ -76,6 +76,7 @@ export function useEventRouter({
   const pendingDeltasRef = useRef("");
   const deltaFlushHandleRef = useRef<DeltaFlushHandle | null>(null);
   const deltaFlushModeRef = useRef<"raf" | "timeout" | null>(null);
+  const suppressStreamRef = useRef(false);
 
   const appendActivity = useCallback((text: string) => {
     setActivities((prev) => [...prev.slice(-199), text]);
@@ -208,6 +209,15 @@ export function useEventRouter({
     });
   }, [flushPendingDeltas]);
 
+  const stopStreamingLocally = useCallback(() => {
+    suppressStreamRef.current = true;
+    settleStreaming();
+  }, [settleStreaming]);
+
+  const clearStreamSuppression = useCallback(() => {
+    suppressStreamRef.current = false;
+  }, []);
+
   const ensureAssistantStreamMessage = useCallback(() => {
     setMessages((prev) => {
       const next = [...prev];
@@ -253,6 +263,7 @@ export function useEventRouter({
     setErrors([]);
     streamingRef.current = false;
     pendingDeltasRef.current = "";
+    suppressStreamRef.current = false;
     if (deltaFlushHandleRef.current !== null) {
       if (deltaFlushModeRef.current === "raf" && typeof window !== "undefined" && window.cancelAnimationFrame) {
         window.cancelAnimationFrame(deltaFlushHandleRef.current as number);
@@ -267,6 +278,7 @@ export function useEventRouter({
   const handleFrame = useCallback(
     (frame: BackendFrame) => {
       if (frame.frame === "error") {
+        suppressStreamRef.current = false;
         addRawEvent(frame);
         const message = getErrorMessage(frame, getEventPayload(frame));
         appendActivity(`[Error] ${message}`);
@@ -304,6 +316,7 @@ export function useEventRouter({
         }
 
         case "stream.start": {
+          if (suppressStreamRef.current) break;
           flushPendingDeltas();
           streamingRef.current = true;
           setIsGenerating(true);
@@ -332,6 +345,7 @@ export function useEventRouter({
         }
 
         case "stream.delta": {
+          if (suppressStreamRef.current) break;
           const text = getDeltaText(payload);
           if (!text) break;
           if (!streamingRef.current) {
@@ -345,6 +359,7 @@ export function useEventRouter({
         }
 
         case "stream.end": {
+          suppressStreamRef.current = false;
           flushPendingDeltas();
           streamingRef.current = false;
           setIsGenerating(false);
@@ -602,6 +617,8 @@ export function useEventRouter({
     appendLog,
     flushPendingDeltas,
     settleStreaming,
+    stopStreamingLocally,
+    clearStreamSuppression,
     reset,
   };
 }
