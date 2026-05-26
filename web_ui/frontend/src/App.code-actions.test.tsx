@@ -1,93 +1,49 @@
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import {
+  FakeBridge,
+  sendAction,
+  renderApp,
+  cleanupApp,
+} from "./test/appTestHarness";
+import type { AppHarness } from "./test/appTestHarness";
 
-const bridgeMock = vi.hoisted(() => {
-  const sendAction = vi.fn();
-  class FakeBridge {
-    static lastInstance: FakeBridge | null = null;
-    onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-    onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-
-    constructor(callbacks: {
-      onStateChange?: (state: "disconnected" | "connecting" | "connected" | "error") => void;
-      onFrame?: (frame: { frame: "event"; kind: string; payload: Record<string, unknown> }) => void;
-    }) {
-      this.onStateChange = callbacks.onStateChange;
-      this.onFrame = callbacks.onFrame;
-      bridgeMock.FakeBridge.lastInstance = this;
-    }
-
-    connect() {
-      this.onStateChange?.("connected");
-    }
-
-    disconnect() {
-      this.onStateChange?.("disconnected");
-    }
-
-    sendAction(action: string, payload: Record<string, unknown> = {}) {
-      sendAction(action, payload);
-      return true;
-    }
-
-    emitFrame(kind: string, payload: Record<string, unknown> = {}) {
-      this.onFrame?.({ frame: "event", kind, payload });
-    }
-  }
-  return { FakeBridge, sendAction };
+vi.mock("./bridge", async () => {
+  const { FakeBridge } = await import("./test/appTestHarness");
+  return { PiperBridge: FakeBridge, WS_URL: "ws://127.0.0.1:8787/ws" };
 });
 
-vi.mock("./bridge", () => ({
-  PiperBridge: bridgeMock.FakeBridge,
-  WS_URL: "ws://127.0.0.1:8787/ws",
-}));
-
-vi.mock("./hooks/useMic", () => ({
-  useMic: () => ({
-    micState: "idle",
-    startMicRecording: vi.fn(),
-    stopMicRecording: vi.fn(),
-    abortMicRecording: vi.fn(),
-    handleBackendMicStatus: vi.fn(),
-    micButtonLabel: "MIC",
-    micButtonClass: "",
-    micStatusText: "",
-  }),
-}));
+vi.mock("./hooks/useMic", async () => {
+  const { micMock } = await import("./test/appTestHarness");
+  return { useMic: () => micMock };
+});
 
 describe("App code active controls dispatch", () => {
-  let container: HTMLDivElement;
-  let root: Root;
+  let harness: AppHarness;
 
   beforeEach(() => {
-    bridgeMock.sendAction.mockClear();
-    bridgeMock.FakeBridge.lastInstance = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    harness = renderApp();
+    sendAction.mockClear();
+    FakeBridge.lastInstance = null;
   });
 
   afterEach(() => {
-    act(() => {
-      root.unmount();
-    });
-    container.remove();
+    cleanupApp(harness);
   });
 
   it("dispatches code_send on stdin Send and stop on Stop when process is active", async () => {
     await act(async () => {
-      root.render(<App />);
+      harness.root.render(<App />);
     });
 
-    expect(bridgeMock.FakeBridge.lastInstance).toBeTruthy();
+    expect(FakeBridge.lastInstance).toBeTruthy();
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
     });
 
-    const toggle = container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
     expect(toggle).toBeTruthy();
 
     await act(async () => {
@@ -95,7 +51,7 @@ describe("App code active controls dispatch", () => {
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("workspace.files", {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
         path: "C:/Projects/Piper/data/workspace",
         files: [
           { name: "main.py", path: "C:/Projects/Piper/data/workspace/main.py", size: 1024 },
@@ -103,7 +59,7 @@ describe("App code active controls dispatch", () => {
       });
     });
 
-    const mainItem = container.querySelector(".workspace-file-item") as HTMLElement | null;
+    const mainItem = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
     expect(mainItem).toBeTruthy();
     expect(mainItem!.textContent).toContain("main.py");
 
@@ -112,7 +68,7 @@ describe("App code active controls dispatch", () => {
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("file.contents", {
+      FakeBridge.lastInstance!.emitFrame("file.contents", {
         path: "C:/Projects/Piper/data/workspace/main.py",
         name: "main.py",
         content: "print('hello')",
@@ -120,15 +76,15 @@ describe("App code active controls dispatch", () => {
     });
 
     await act(async () => {
-      bridgeMock.FakeBridge.lastInstance!.emitFrame("code.active", { active: true });
+      FakeBridge.lastInstance!.emitFrame("code.active", { active: true });
     });
 
-    const stopBtn = container.querySelector(".code-controls .action-btn.primary") as HTMLButtonElement | null;
+    const stopBtn = harness.container.querySelector(".code-controls .action-btn.primary") as HTMLButtonElement | null;
     expect(stopBtn).toBeTruthy();
     expect(stopBtn!.textContent).toBe("Stop");
     expect(stopBtn!.disabled).toBe(false);
 
-    const stdinInput = container.querySelector(".code-stdin-row .input-text") as HTMLInputElement | null;
+    const stdinInput = harness.container.querySelector(".code-stdin-row .input-text") as HTMLInputElement | null;
     expect(stdinInput).toBeTruthy();
     expect(stdinInput!.disabled).toBe(false);
 
@@ -138,7 +94,7 @@ describe("App code active controls dispatch", () => {
       stdinInput!.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const sendBtn = container.querySelector(".code-stdin-row .action-btn") as HTMLButtonElement | null;
+    const sendBtn = harness.container.querySelector(".code-stdin-row .action-btn") as HTMLButtonElement | null;
     expect(sendBtn).toBeTruthy();
     expect(sendBtn!.textContent).toBe("Send");
     expect(sendBtn!.disabled).toBe(false);
@@ -147,12 +103,12 @@ describe("App code active controls dispatch", () => {
       sendBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("code_send", { text: "hello stdin" });
+    expect(sendAction).toHaveBeenCalledWith("code_send", { text: "hello stdin" });
 
     await act(async () => {
       stopBtn!.click();
     });
 
-    expect(bridgeMock.sendAction).toHaveBeenCalledWith("stop", {});
+    expect(sendAction).toHaveBeenCalledWith("stop", {});
   });
 });
