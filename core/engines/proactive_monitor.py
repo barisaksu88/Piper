@@ -11,15 +11,10 @@ from core.routing.route_dates import extract_date_phrase, resolve_date_phrase
 from core.routing.route_normalizer import register_route_interceptor
 from core.routing.route_patterns import REMINDER_REQUEST_RE
 from core.services.reminders import (
-    PROACTIVE_TRIGGER_CONSUMED_PREFIX,
-    PROACTIVE_TRIGGER_PREFIX,
-    ReminderParseResult,
     ReminderStore,
     _build_task_event_fallback_route,
     _parse_time_of_day,
-    build_proactive_consumed_message,
-    build_proactive_trigger_message,
-    parse_proactive_trigger_message,
+    finalize_proactive_trigger_turn,
     parse_reminder_request,
 )
 
@@ -202,17 +197,8 @@ def _hook_finalize_proactive_trigger(orc, *, reporter_just_ran: bool = False) ->
         return
     if str(getattr(orc, "next_stage", "") or "").strip().upper() != "FINISHED":
         return
-    reminder_id = str(notice.get("id") or "").strip()
-    raw_message = str(notice.get("raw_message") or "").strip()
-    if reminder_id:
-        ReminderStore(CFG.REMINDERS_PATH).mark_fired(reminder_id)
-    if raw_message:
-        consumed = {
-            "role": "system",
-            "content": build_proactive_consumed_message(notice),
-            "hidden": True,
-        }
-        try:
-            orc.chat.replace_last_system_message(raw_message, consumed)
-        except Exception:
-            pass
+    finalize_proactive_trigger_turn(
+        notice=notice,
+        reminders_path=CFG.REMINDERS_PATH,
+        chat=orc.chat,
+    )

@@ -372,3 +372,31 @@ def build_proactive_consumed_message(entry: dict[str, Any]) -> str:
     reminder_id = str(entry.get("id") or "").strip()
     label = reminder_id or "unknown"
     return f"{PROACTIVE_TRIGGER_CONSUMED_PREFIX} {label}"
+
+
+def finalize_proactive_trigger_turn(
+    *,
+    notice: dict[str, Any],
+    reminders_path: Path,
+    chat: Any,
+) -> None:
+    """Mark a proactive reminder as fired and replace its raw trigger message
+    with a consumed marker in chat history.
+
+    This is a service helper so the engine hook does not directly mutate
+    storage or chat state.
+    """
+    reminder_id = str(notice.get("id") or "").strip()
+    raw_message = str(notice.get("raw_message") or "").strip()
+    if reminder_id:
+        ReminderStore(reminders_path).mark_fired(reminder_id)
+    if raw_message:
+        consumed = {
+            "role": "system",
+            "content": build_proactive_consumed_message(notice),
+            "hidden": True,
+        }
+        try:
+            chat.replace_last_system_message(raw_message, consumed)
+        except Exception:
+            pass
