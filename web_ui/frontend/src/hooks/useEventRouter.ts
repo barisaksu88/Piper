@@ -212,7 +212,9 @@ export function useEventRouter({
   const stopStreamingLocally = useCallback(() => {
     suppressStreamRef.current = true;
     settleStreaming();
-  }, [settleStreaming]);
+    setStatusText("Idle");
+    setModeText("");
+  }, [settleStreaming, setStatusText, setModeText]);
 
   const clearStreamSuppression = useCallback(() => {
     suppressStreamRef.current = false;

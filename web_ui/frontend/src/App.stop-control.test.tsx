@@ -155,4 +155,44 @@ describe("App stop control gating", () => {
     expect(harness.container.textContent).toContain("Fresh reply");
     expect(stopButton!.disabled).toBe(false);
   });
+
+  it("clears GENERATING mode pill on stop and ignores late deltas", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("status.mode", { text: "GENERATING" });
+      FakeBridge.lastInstance!.emitFrame("stream.start");
+      FakeBridge.lastInstance!.emitFrame("stream.delta", { text: "Hello " });
+    });
+
+    const modePill = harness.container.querySelector(".mode-pill") as HTMLElement | null;
+    expect(modePill).toBeTruthy();
+    expect(modePill!.textContent).toBe("GENERATING");
+
+    const stopButton = harness.container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton!.disabled).toBe(false);
+
+    await act(async () => {
+      stopButton!.click();
+    });
+
+    expect(harness.container.querySelector(".mode-pill")).toBeFalsy();
+    expect(stopButton!.disabled).toBe(true);
+
+    const bubblesAfterStop = harness.container.querySelectorAll(".chat-bubble.assistant").length;
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("stream.delta", { text: "late" });
+    });
+
+    expect(harness.container.querySelectorAll(".chat-bubble.assistant").length).toBe(bubblesAfterStop);
+    expect(harness.container.textContent).not.toContain("late");
+  });
 });

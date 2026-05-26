@@ -22,6 +22,21 @@ export type { RailPanelId };
 
 const IMAGE_BASE_URL = WS_URL.replace(/^ws:\/\//, "http://").replace(/\/ws$/, "");
 
+export function workspaceImageUrl(filePath: string, workspacePath: string): string {
+  const normalizedFile = filePath.replace(/\\/g, "/");
+  const normalizedWorkspace = workspacePath.replace(/\\/g, "/");
+  if (normalizedWorkspace && normalizedFile.startsWith(normalizedWorkspace + "/")) {
+    const relative = normalizedFile.slice(normalizedWorkspace.length + 1);
+    const encodedRelative = relative
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/");
+    return `${IMAGE_BASE_URL}/workspace/${encodedRelative}`;
+  }
+  const basename = normalizedFile.split("/").pop() || normalizedFile;
+  return `${IMAGE_BASE_URL}/images/${encodeURIComponent(basename)}`;
+}
+
 export default function App() {
   const { steps, bootMessage, handleBootLog, handleBootReady, handleBootProgress, isOperational } =
     useOperationMode();
@@ -448,7 +463,7 @@ export default function App() {
                 sendAction("read_workspace_file", { path });
               } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
                 workspace.openFile(path, "vision");
-                workspace.setVisionImage(`${IMAGE_BASE_URL}/images/${fileName}`);
+                workspace.setVisionImage(workspaceImageUrl(path, workspace.workspacePath));
               }
             }}
             onFileSelected={() => {}}

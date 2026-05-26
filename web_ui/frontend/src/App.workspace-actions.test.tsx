@@ -292,4 +292,78 @@ describe("App workspace action dispatch", () => {
       path: "C:\\Projects\\Piper\\data\\workspace\\src\\main.py",
     });
   });
+
+  it("opens a nested workspace image with workspace-relative URL", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle!.click();
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
+        path: "C:/Projects/Piper/data/workspace",
+        files: [
+          { name: "capture_display.jpg", path: "C:/Projects/Piper/data/workspace/screens/capture_display.jpg", size: 2048 },
+        ],
+      });
+    });
+
+    const item = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
+    expect(item).toBeTruthy();
+
+    await act(async () => {
+      item!.click();
+    });
+
+    const visionImage = harness.container.querySelector(".vision-image") as HTMLImageElement | null;
+    expect(visionImage).toBeTruthy();
+    expect(visionImage!.src).toContain("/workspace/screens/capture_display.jpg");
+  });
+
+  it("opens a nested Windows backslash image with encoded URL", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+    });
+
+    const toggle = harness.container.querySelector(".rail-workspace-toggle") as HTMLDivElement | null;
+    expect(toggle).toBeTruthy();
+
+    await act(async () => {
+      toggle!.click();
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("workspace.files", {
+        path: "C:\\Projects\\Piper\\data\\workspace",
+        files: [
+          { name: "capture display.jpg", path: "C:\\Projects\\Piper\\data\\workspace\\screens\\capture display.jpg", size: 2048 },
+        ],
+      });
+    });
+
+    const item = harness.container.querySelector(".workspace-file-item") as HTMLElement | null;
+    expect(item).toBeTruthy();
+
+    await act(async () => {
+      item!.click();
+    });
+
+    const visionImage = harness.container.querySelector(".vision-image") as HTMLImageElement | null;
+    expect(visionImage).toBeTruthy();
+    expect(visionImage!.src).toContain("/workspace/screens/capture%20display.jpg");
+  });
 });
