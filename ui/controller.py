@@ -1176,6 +1176,32 @@ class PiperController:
         self.runtime_mode = "CODE SESSION"
         self._refresh_top_bar()
 
+    def _workspace_relative_web_path(self, raw_path: str) -> str:
+        """Normalize a web-UI file path to a workspace-relative POSIX string.
+
+        Absolute paths inside the workspace are converted to relative.
+        Relative paths are returned cleaned.
+        Raises ValueError for empty paths, paths outside the workspace,
+        or paths containing '..' components.
+        """
+        path_str = str(raw_path or "").strip().replace("\\", "/")
+        if not path_str:
+            raise ValueError("Path is required.")
+
+        candidate = Path(path_str)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+            workspace_resolved = self.code_session.workspace.resolve()
+            try:
+                rel = resolved.relative_to(workspace_resolved)
+            except ValueError:
+                raise ValueError(f"Path outside workspace: {path_str}")
+            return rel.as_posix()
+
+        if ".." in candidate.parts:
+            raise ValueError(f"Path escapes workspace: {path_str}")
+        return candidate.as_posix()
+
     def send_code_session_input(self, text: str) -> bool:
         return self.code_session.send_input(text)
 
@@ -1524,17 +1550,28 @@ class PiperController:
             if text and self.has_active_code_session():
                 self.send_code_session_input(text)
         elif action_name == "code_run":
-            path = str(payload.get("path", "")).strip()
+            raw_path = str(payload.get("path", "")).strip()
             content = str(payload.get("content", ""))
-            if content and path:
-                from pathlib import Path
-                script_path = CFG.DATA_DIR / "workspace" / path
+            try:
+                rel_path = self._workspace_relative_web_path(raw_path)
+            except ValueError as exc:
+                self.safe_log(f"[Code] Rejected path: {exc}")
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {"role": "system", "content": f"[UI] {exc}"},
+                    )
+                )
+                self.refresh_interaction_state()
+                return
+            if content and rel_path:
+                script_path = self.code_session.workspace / rel_path
                 script_path.parent.mkdir(parents=True, exist_ok=True)
                 script_path.write_text(content, encoding="utf-8")
-                self.safe_log(f"[Code] Saved {path} ({len(content)} chars)")
-            if path:
-                self.start_code_session(path)
-                self.set_code_status(f"Launching: {path}")
+                self.safe_log(f"[Code] Saved {rel_path} ({len(content)} chars)")
+            if rel_path:
+                self.start_code_session(rel_path)
+                self.set_code_status(f"Launching: {rel_path}")
                 self.set_status("CODE SESSION")
             else:
                 self.ui_queue.put(
@@ -1551,7 +1588,7 @@ class PiperController:
             self.on_code_clear()
         elif action_name == "list_workspace_files":
             from pathlib import Path
-            workspace_dir = CFG.DATA_DIR / "workspace"
+            workspace_dir = self.code_session.workspace
             files = []
             if workspace_dir.exists():
                 for f in sorted(workspace_dir.iterdir()):
@@ -1565,7 +1602,7 @@ class PiperController:
         elif action_name == "read_workspace_file":
             from pathlib import Path
             file_path = Path(str(payload.get("path", "")))
-            workspace_dir = CFG.DATA_DIR / "workspace"
+            workspace_dir = self.code_session.workspace
             try:
                 resolved = file_path.resolve()
                 if not str(resolved).startswith(str(workspace_dir.resolve())):
@@ -1586,7 +1623,7 @@ class PiperController:
             from pathlib import Path
             file_path = Path(str(payload.get("path", "")))
             content = str(payload.get("content", ""))
-            workspace_dir = CFG.DATA_DIR / "workspace"
+            workspace_dir = self.code_session.workspace
             try:
                 resolved = file_path.resolve()
                 if not str(resolved).startswith(str(workspace_dir.resolve())):
