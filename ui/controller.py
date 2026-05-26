@@ -1202,6 +1202,18 @@ class PiperController:
             raise ValueError(f"Path escapes workspace: {path_str}")
         return candidate.as_posix()
 
+    def _resolve_web_workspace_file(self, raw_path: str) -> tuple[Path, str]:
+        """Resolve a web-UI file path to a workspace-relative POSIX string and full Path.
+
+        Raises ValueError for paths outside the workspace or containing '..' components.
+        """
+        rel_path = self._workspace_relative_web_path(raw_path)
+        full_path = (self.code_session.workspace / rel_path).resolve()
+        workspace_root = self.code_session.workspace.resolve()
+        # Double-check containment after resolution (symlinks, etc.)
+        full_path.relative_to(workspace_root)
+        return full_path, rel_path
+
     def send_code_session_input(self, text: str) -> bool:
         return self.code_session.send_input(text)
 
@@ -1601,40 +1613,57 @@ class PiperController:
             self.ui_queue.put(("workspace_files", {"files": files, "path": str(workspace_dir)}))
         elif action_name == "read_workspace_file":
             from pathlib import Path
-            file_path = Path(str(payload.get("path", "")))
-            workspace_dir = self.code_session.workspace
+            raw_path = str(payload.get("path", ""))
             try:
-                resolved = file_path.resolve()
-                if not str(resolved).startswith(str(workspace_dir.resolve())):
-                    self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Access denied"}))
-                    return
-            except Exception:
-                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "Invalid path"}))
+                full_path, rel_path = self._resolve_web_workspace_file(raw_path)
+            except ValueError:
+                self.ui_queue.put(
+                    (
+                        "file_contents",
+                        {"path": raw_path, "name": Path(raw_path).name, "content": "", "error": "Access denied"},
+                    )
+                )
                 return
-            if not file_path.exists() or not file_path.is_file():
-                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": "File not found"}))
+            if not full_path.exists() or not full_path.is_file():
+                self.ui_queue.put(
+                    (
+                        "file_contents",
+                        {"path": raw_path, "name": Path(raw_path).name, "content": "", "error": "File not found"},
+                    )
+                )
                 return
             try:
-                content = file_path.read_text(encoding="utf-8")
-                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": content}))
+                content = full_path.read_text(encoding="utf-8")
+                self.ui_queue.put(
+                    (
+                        "file_contents",
+                        {"path": raw_path, "name": Path(raw_path).name, "content": content},
+                    )
+                )
             except Exception as exc:
-                self.ui_queue.put(("file_contents", {"path": str(file_path), "name": file_path.name, "content": "", "error": str(exc)}))
+                self.ui_queue.put(
+                    (
+                        "file_contents",
+                        {"path": raw_path, "name": Path(raw_path).name, "content": "", "error": str(exc)},
+                    )
+                )
         elif action_name == "save_workspace_file":
             from pathlib import Path
-            file_path = Path(str(payload.get("path", "")))
+            raw_path = str(payload.get("path", ""))
             content = str(payload.get("content", ""))
-            workspace_dir = self.code_session.workspace
             try:
-                resolved = file_path.resolve()
-                if not str(resolved).startswith(str(workspace_dir.resolve())):
-                    self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save denied: {file_path.name}"}))
-                    return
-            except Exception:
-                self.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Save invalid path"}))
+                full_path, rel_path = self._resolve_web_workspace_file(raw_path)
+            except ValueError:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {"role": "system", "content": f"[UI] Save denied: {Path(raw_path).name}"},
+                    )
+                )
                 return
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-            self.safe_log(f"[Text] Saved {file_path.name} ({len(content)} chars)")
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content, encoding="utf-8")
+            self.safe_log(f"[Text] Saved {rel_path} ({len(content)} chars)")
         else:
             self.ui_queue.put(("error", f"Unhandled web action: {action_name}"))
 
