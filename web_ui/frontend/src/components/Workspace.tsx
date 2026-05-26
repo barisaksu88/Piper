@@ -120,7 +120,7 @@ export default function Workspace({
             fileName={displayName}
             content={textContent ?? ""}
             onContentChange={onTextContentChange ?? (() => {})}
-            onSave={onTextSave ?? ((_) => {})}
+            onSave={(content, _fileName) => onTextSave?.(content, filePath)}
             connState={connState ?? "disconnected"}
           />
         )}
