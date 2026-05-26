@@ -39,6 +39,11 @@ interface WorkspaceProps {
   onFileFromList?: (path: string) => void;
 }
 
+function getDisplayName(filePath: string, fallback: string): string {
+  if (!filePath) return fallback;
+  return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
+}
+
 export default function Workspace({
   mode,
   filePath,
@@ -67,7 +72,7 @@ export default function Workspace({
   workspacePath,
   onFileFromList,
 }: WorkspaceProps) {
-  const displayName = filePath ? filePath.split("/").pop() || filePath : mode;
+  const displayName = getDisplayName(filePath, mode);
 
   return (
     <div className="workspace" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
