@@ -2662,11 +2662,10 @@ def _run_persona_core(orc) -> None:
 
         # Mid-sentence recall: the model placed [RECALL:…] after visible text,
         # so those first-pass tokens were already streamed to the pipeline.
-        # Send a fresh start event to wipe the partial display before the
+        # Emit a fresh start event to reset the pipeline buffer before the
         # clean second-pass response streams in.  For start-of-response recall
-        # (recall_requested=True) nothing was streamed, so no reset is needed.
-        if not recall_requested:
-            orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
+        # the buffer is already empty, so the reset is harmless.
+        orc.ui.put(("assistant_stream_start", {"tts_voice": orc.ss.tts_voice, "tts_speed": orc.ss.tts_speed}))
 
         orc.ui.put(("agent_log", f"   -> RECALL marker accepted: {recall_query}"))
         orc._log_dashboard(f"Recalling memory: {recall_query}")
