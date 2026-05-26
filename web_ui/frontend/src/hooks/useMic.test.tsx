@@ -103,7 +103,7 @@ function TestHost({
   return null;
 }
 
-describe("useMic browser recording", () => {
+describe("useMic native backend mode (default)", () => {
   let container: HTMLDivElement;
   let root: Root;
   let mic: ReturnType<typeof useMic> | null = null;
@@ -111,6 +111,177 @@ describe("useMic browser recording", () => {
   let bridgeRef: React.RefObject<PiperBridge | null>;
 
   beforeEach(() => {
+    vi.stubEnv("VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD", "false");
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    bridgeSendAction = vi.fn(() => true);
+    bridgeRef = {
+      current: {
+        sendAction: bridgeSendAction,
+      } as unknown as PiperBridge,
+    };
+    mic = null;
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+    mic = null;
+    vi.unstubAllEnvs();
+  });
+
+  async function renderHost() {
+    await act(async () => {
+      root.render(
+        <TestHost
+          bridgeRef={bridgeRef}
+          onReady={(value) => {
+            mic = value;
+          }}
+        />
+      );
+    });
+  }
+
+  it("start sends mic_start and sets listening", async () => {
+    await renderHost();
+
+    expect(mic!.micState).toBe("idle");
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    expect(bridgeSendAction).toHaveBeenCalledWith("mic_start", {});
+    expect(mic!.micState).toBe("listening");
+  });
+
+  it("does not call getUserMedia in native mode", async () => {
+    const getUserMediaSpy = vi.fn();
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      value: { getUserMedia: getUserMediaSpy },
+      writable: true,
+      configurable: true,
+    });
+
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    expect(getUserMediaSpy).not.toHaveBeenCalled();
+  });
+
+  it("stop sends mic_stop and sets transcribing", async () => {
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    expect(mic!.micState).toBe("listening");
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(bridgeSendAction).toHaveBeenCalledWith("mic_stop", {});
+    expect(mic!.micState).toBe("transcribing");
+  });
+
+  it("backend idle acknowledgement clears transcribing state", async () => {
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(mic!.micState).toBe("transcribing");
+
+    act(() => {
+      mic!.handleBackendMicStatus({ state: "idle" });
+    });
+
+    expect(mic!.micState).toBe("idle");
+    expect(mic!.micError).toBe("");
+    expect(mic!.micStageMessage).toBe("");
+  });
+
+  it("backend error acknowledgement shows error", async () => {
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(mic!.micState).toBe("transcribing");
+
+    act(() => {
+      mic!.handleBackendMicStatus({ state: "error", error: "Backend mic failed" });
+    });
+
+    expect(mic!.micState).toBe("error");
+    expect(mic!.micError).toBe("Backend mic failed");
+  });
+
+  it("abort while listening sends mic_stop once and resets to idle", async () => {
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    expect(mic!.micState).toBe("listening");
+
+    await act(async () => {
+      mic!.abortMicRecording();
+    });
+
+    expect(bridgeSendAction).toHaveBeenCalledWith("mic_stop", {});
+    expect(bridgeSendAction).toHaveBeenCalledTimes(2); // mic_start + mic_stop
+    expect(mic!.micState).toBe("idle");
+    expect(mic!.micError).toBe("");
+  });
+
+  it("does not send mic_audio_submit", async () => {
+    await renderHost();
+
+    await act(async () => {
+      mic!.startMicRecording();
+    });
+
+    await act(async () => {
+      mic!.stopMicRecording();
+    });
+
+    expect(bridgeSendAction).not.toHaveBeenCalledWith(
+      "mic_audio_submit",
+      expect.any(Object)
+    );
+  });
+});
+
+describe("useMic experimental upload mode", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let mic: ReturnType<typeof useMic> | null = null;
+  let bridgeSendAction: ReturnType<typeof vi.fn>;
+  let bridgeRef: React.RefObject<PiperBridge | null>;
+
+  beforeEach(() => {
+    vi.stubEnv("VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD", "true");
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -121,6 +292,7 @@ describe("useMic browser recording", () => {
       } as unknown as PiperBridge,
     };
     lastMockRecorder = null;
+    mic = null;
     utilsMock.blobToBase64.mockReset();
     utilsMock.chooseMimeType.mockReset();
     utilsMock.formatFromMimeType.mockReset();
@@ -135,6 +307,7 @@ describe("useMic browser recording", () => {
     });
     container.remove();
     mic = null;
+    vi.unstubAllEnvs();
   });
 
   async function renderHost() {

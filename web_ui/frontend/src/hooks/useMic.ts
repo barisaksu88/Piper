@@ -62,10 +62,7 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
     };
   }, [micState]);
 
-  const abortMicRecording = useCallback((discard = true) => {
-    if (discard) {
-      discardNextMicStopRef.current = true;
-    }
+  const cleanupMediaRecorder = useCallback(() => {
     const recorder = mediaRecorderRef.current;
     const stream = mediaStreamRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -80,26 +77,52 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
     }
     mediaRecorderRef.current = null;
     mediaStreamRef.current = null;
+    audioChunksRef.current = [];
+  }, []);
+
+  const abortMicRecording = useCallback((discard = true) => {
     if (discard) {
-      audioChunksRef.current = [];
+      discardNextMicStopRef.current = true;
     }
-    // If native mic is active, tell backend to stop
+
+    if (experimentalMicUpload) {
+      cleanupMediaRecorder();
+    }
+
+    // In native mode, tell backend to stop if we're still listening
     if (!experimentalMicUpload && micStateRef.current === "listening") {
-      bridgeRef.current?.sendAction("mic_stop");
+      bridgeRef.current?.sendAction("mic_stop", {});
     }
+
     if (micSubmitTimeoutRef.current) {
       clearTimeout(micSubmitTimeoutRef.current);
       micSubmitTimeoutRef.current = null;
     }
-    if (micStateRef.current === "listening" || micStateRef.current === "requesting_permission") {
+
+    const shouldReset =
+      micStateRef.current === "listening" ||
+      micStateRef.current === "requesting_permission" ||
+      micStateRef.current === "transcribing";
+
+    if (shouldReset) {
       setMicState("idle");
       setMicError("");
       setMicStageMessage("");
     }
-  }, [bridgeRef, experimentalMicUpload]);
+  }, [bridgeRef, experimentalMicUpload, cleanupMediaRecorder]);
 
   const startMicRecording = useCallback(async () => {
     if (micStateRef.current !== "idle" && micStateRef.current !== "error") return;
+
+    if (!experimentalMicUpload) {
+      // Native backend mic mode
+      setMicState("listening");
+      setMicError("");
+      bridgeRef.current?.sendAction("mic_start", {});
+      return;
+    }
+
+    // Experimental browser upload mode
     setMicState("requesting_permission");
     setMicError("");
     try {
@@ -180,34 +203,71 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
       setMicState("error");
       setMicError("Microphone permission denied or unavailable");
     }
-  }, [abortMicRecording, appendActivity, bridgeRef]);
+  }, [abortMicRecording, appendActivity, bridgeRef, experimentalMicUpload]);
 
   const handleBackendMicStatus = useCallback((status: MicStatus) => {
-    if (micStateRef.current === "listening") return;
-    if (micStateRef.current === "requesting_permission") return;
-
-    if (micStateRef.current === "transcribing") {
-      if (status.state === "idle") {
-        if (micSubmitTimeoutRef.current) {
-          clearTimeout(micSubmitTimeoutRef.current);
-          micSubmitTimeoutRef.current = null;
+    if (experimentalMicUpload) {
+      // In experimental mode, backend acks are only expected during transcribing
+      // because the frontend manages the recording directly.
+      if (micStateRef.current === "listening") return;
+      if (micStateRef.current === "requesting_permission") return;
+      if (micStateRef.current === "transcribing") {
+        if (status.state === "idle") {
+          if (micSubmitTimeoutRef.current) {
+            clearTimeout(micSubmitTimeoutRef.current);
+            micSubmitTimeoutRef.current = null;
+          }
+          setMicState("idle");
+          setMicError("");
+          setMicStageMessage("");
+        } else if (status.state === "error") {
+          if (micSubmitTimeoutRef.current) {
+            clearTimeout(micSubmitTimeoutRef.current);
+            micSubmitTimeoutRef.current = null;
+          }
+          setMicState("error");
+          setMicError(status.error || status.message || "Mic error");
         }
-        setMicState("idle");
-        setMicError("");
-        setMicStageMessage("");
-      } else if (status.state === "error") {
-        if (micSubmitTimeoutRef.current) {
-          clearTimeout(micSubmitTimeoutRef.current);
-          micSubmitTimeoutRef.current = null;
-        }
-        setMicState("error");
-        setMicError(status.error || status.message || "Mic error");
       }
+      return;
     }
-  }, []);
+
+    // Native backend mic mode: backend drives the lifecycle
+    if (status.state === "idle") {
+      if (micSubmitTimeoutRef.current) {
+        clearTimeout(micSubmitTimeoutRef.current);
+        micSubmitTimeoutRef.current = null;
+      }
+      setMicState("idle");
+      setMicError("");
+      setMicStageMessage("");
+    } else if (status.state === "error") {
+      if (micSubmitTimeoutRef.current) {
+        clearTimeout(micSubmitTimeoutRef.current);
+        micSubmitTimeoutRef.current = null;
+      }
+      setMicState("error");
+      setMicError(status.error || status.message || "Mic error");
+    } else if (status.state === "listening") {
+      setMicState("listening");
+      setMicError("");
+    } else if (status.state === "transcribing") {
+      setMicState("transcribing");
+      setMicStageMessage("Transcribing...");
+    }
+  }, [experimentalMicUpload]);
 
   const stopMicRecording = useCallback(() => {
     if (micStateRef.current !== "listening") return;
+
+    if (!experimentalMicUpload) {
+      // Native backend mic mode
+      bridgeRef.current?.sendAction("mic_stop", {});
+      setMicState("transcribing");
+      return;
+    }
+
+    // Experimental browser upload mode
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state === "recording") {
       try {
@@ -223,7 +283,7 @@ export function useMic({ bridgeRef, appendActivity }: UseMicOptions): UseMicRetu
     mediaStreamRef.current = null;
     mediaRecorderRef.current = null;
     setMicState("transcribing");
-  }, []);
+  }, [bridgeRef, experimentalMicUpload]);
 
   // Computed display values
   const micButtonLabel =
