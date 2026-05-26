@@ -363,3 +363,121 @@ class TestSaveWorkspaceFileDispatch:
             events.append(ctrl.ui_queue.get_nowait())
         chat_events = [e for e in events if e[0] == "chat_append"]
         assert any("Save denied" in str(e[1].get("content", "")) for e in chat_events)
+
+
+class TestListWorkspaceFilesDispatch:
+    """Smoke tests for _dispatch_web_action list_workspace_files handler."""
+
+    def test_includes_top_level_supported_files(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "a.py").write_text("a", encoding="utf-8")
+        (workspace / "b.txt").write_text("b", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        file_events = [e for e in events if e[0] == "workspace_files"]
+        assert len(file_events) == 1
+        payload = file_events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert "a.py" in names
+        assert "b.txt" in names
+
+    def test_includes_nested_supported_files(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        nested = workspace / "subdir"
+        nested.mkdir()
+        (nested / "deep.py").write_text("deep", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        payload = events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert "deep.py" in names
+
+    def test_excludes_unsupported_suffixes(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "good.py").write_text("good", encoding="utf-8")
+        (workspace / "bad.exe").write_text("bad", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        payload = events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert "good.py" in names
+        assert "bad.exe" not in names
+
+    def test_excludes_directories(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "file.py").write_text("file", encoding="utf-8")
+        (workspace / "folder").mkdir()
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        payload = events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert "file.py" in names
+        assert "folder" not in names
+
+    def test_returns_stable_sorted_output(self, tmp_path: Path) -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "z.py").write_text("z", encoding="utf-8")
+        (workspace / "a.py").write_text("a", encoding="utf-8")
+        nested = workspace / "sub"
+        nested.mkdir()
+        (nested / "m.py").write_text("m", encoding="utf-8")
+        ctrl = _make_controller(workspace)
+
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        payload = events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert names == sorted(names)
+
+    def test_symlink_outside_workspace_not_listed(self, tmp_path: Path) -> None:
+        import os
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / " legit.py").write_text("ok", encoding="utf-8")
+        outside = tmp_path / "secret.txt"
+        outside.write_text("secret", encoding="utf-8")
+        link = workspace / "link.txt"
+        try:
+            os.symlink(outside, link)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        ctrl = _make_controller(workspace)
+        ctrl._dispatch_web_action("list_workspace_files", {})
+
+        events = []
+        while not ctrl.ui_queue.empty():
+            events.append(ctrl.ui_queue.get_nowait())
+        payload = events[0][1]
+        names = [f["name"] for f in payload["files"]]
+        assert "link.txt" not in names
+        assert " legit.py" in names
