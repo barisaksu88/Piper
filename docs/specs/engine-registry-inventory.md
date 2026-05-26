@@ -90,12 +90,12 @@ Known tail blocks at time of writing:
 
 ## Registration path
 
-The inventory exercises the normal backend registration path by importing `core.orchestrator`.  This import chain now explicitly includes:
+The inventory exercises the normal backend registration path by calling `core.engines.registration.register_builtin_engines()`.  This triggers side-effect registrations for:
 
-- `core.engines.*` registrations (proactive monitor, change journal, conversation compressor, stats collector, environment query, operational state answer, memory insertion)
-- `core.prompt_context` registration (`on_pre_route` hook)
+- `core.engines.*` modules (proactive monitor, change journal, conversation compressor, stats collector, environment query, operational state answer, memory insertion)
+- `core.prompt_context` (`on_pre_route` hook)
 
-Because all registrations happen through the orchestrator import chain, the inventory does not depend on special one-off imports for completeness.
+`core.orchestrator` also calls `register_builtin_engines()` at import time, so importing the orchestrator triggers the same registrations.  The inventory calls the loader directly to avoid importing the full orchestrator module.
 
 ## Limitations
 

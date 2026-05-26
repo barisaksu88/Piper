@@ -34,14 +34,10 @@ ROOT = Path(__file__).parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Import the normal orchestrator registration path so side-effect registrations happen.
-from core import orchestrator  # noqa: F401
+# Trigger built-in engine registrations without importing the full orchestrator.
+from core.engines.registration import register_builtin_engines
 
-# Import prompt_context explicitly to ensure its on_pre_route hook is captured
-# even if the orchestrator import path ever changes.  This is now redundant
-# because core.orchestrator imports prompt_context, but harmless thanks to
-# registry dedup guards.
-from core import prompt_context  # noqa: F401
+register_builtin_engines()
 
 from core.engines.tail_block_registry import _TAIL_BLOCK_REGISTRY
 from core.feature_hooks import _HOOKS
