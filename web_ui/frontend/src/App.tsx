@@ -103,7 +103,8 @@ export default function App() {
     micStatus,
     handleFrame,
     appendActivity,
-    settleStreaming,
+    stopStreamingLocally,
+    clearStreamSuppression,
     reset: resetRouter,
   } = router;
 
@@ -202,9 +203,10 @@ export default function App() {
   const handleSend = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
+    clearStreamSuppression();
     setInputText("");
     sendAction("send_message", { text });
-  }, [inputText, sendAction]);
+  }, [inputText, clearStreamSuppression, sendAction]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -265,9 +267,9 @@ export default function App() {
 
   const handleStop = useCallback(() => {
     abortMicRecording(true);
-    settleStreaming();
+    stopStreamingLocally();
     sendAction("stop");
-  }, [abortMicRecording, settleStreaming, sendAction]);
+  }, [abortMicRecording, stopStreamingLocally, sendAction]);
 
   const handleNewSession = useCallback(() => {
     abortMicRecording(true);
