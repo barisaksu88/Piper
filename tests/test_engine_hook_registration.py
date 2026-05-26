@@ -85,6 +85,28 @@ class TestEngineHookRegistration:
         task_verified = hooks.get("on_task_verified", [])
         assert task_verified.count("core.engines.change_journal._hook_record_change_journal") == 1
 
+    def test_register_builtin_engines_registers_all_hooks(self) -> None:
+        """Calling register_builtin_engines() directly must register all known hooks."""
+        from core.feature_hooks import list_hooks
+        from core.engines.registration import register_builtin_engines
+
+        register_builtin_engines()
+        hooks = list_hooks()
+        assert "on_pre_route" in hooks
+        assert "on_turn_end" in hooks
+        assert "on_task_verified" in hooks
+
+    def test_register_builtin_engines_is_idempotent(self) -> None:
+        """Calling register_builtin_engines() twice must not duplicate registrations."""
+        from core.feature_hooks import list_hooks
+        from core.engines.registration import register_builtin_engines
+
+        register_builtin_engines()
+        before = {k: len(v) for k, v in list_hooks().items()}
+        register_builtin_engines()
+        after = {k: len(v) for k, v in list_hooks().items()}
+        assert before == after
+
     def test_no_duplicate_hook_registration_anywhere(self) -> None:
         """Every hook must appear exactly once in its respective list."""
         from core.feature_hooks import list_hooks

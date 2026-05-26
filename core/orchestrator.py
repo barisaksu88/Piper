@@ -27,14 +27,9 @@ from core.orchestrator_phases import (
     phase_undo,
 )
 from core.runtime_control import OperationCancelled
-from core.engines import proactive_monitor as _proactive_monitor_registration  # noqa: F401
-from core.engines import change_journal as _change_journal_registration  # noqa: F401
-from core.engines import conversation_compressor as _conversation_compressor_registration  # noqa: F401
-from core.engines import stats_collector as _stats_collector_registration  # noqa: F401
-from core.engines import environment_query as _environment_query_registration  # noqa: F401
-from core.engines import operational_state_answer as _operational_state_answer_registration  # noqa: F401
-from core.engines import memory_insertion as _memory_insertion_registration  # noqa: F401
-from core import prompt_context as _prompt_context_registration  # noqa: F401
+from core.engines.registration import register_builtin_engines
+
+register_builtin_engines()
 
 
 _LOG = logging.getLogger(__name__)

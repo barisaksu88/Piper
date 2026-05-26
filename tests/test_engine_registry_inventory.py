@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 # We import the inventory module directly to test its build_report function.
-# Importing orchestrator triggers side-effect registrations only.
+# The inventory module calls register_builtin_engines() to trigger registrations.
 from scripts import engine_registry_inventory as inventory
 
 
