@@ -61,8 +61,16 @@ describe("useEventRouter top-level error frame", () => {
   let container: HTMLDivElement;
   let root: Root;
   let router: ReturnType<typeof useEventRouter> | null = null;
+  let originalRaf: typeof window.requestAnimationFrame;
+  let originalCancel: typeof window.cancelAnimationFrame;
 
   beforeEach(() => {
+    originalRaf = window.requestAnimationFrame;
+    originalCancel = window.cancelAnimationFrame;
+    // @ts-expect-error intentional override to force setTimeout fallback
+    delete window.requestAnimationFrame;
+    // @ts-expect-error intentional override to force setTimeout fallback
+    delete window.cancelAnimationFrame;
     vi.useFakeTimers();
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -76,6 +84,8 @@ describe("useEventRouter top-level error frame", () => {
     container.remove();
     router = null;
     vi.useRealTimers();
+    window.requestAnimationFrame = originalRaf;
+    window.cancelAnimationFrame = originalCancel;
   });
 
   it("settles an in-flight stream and preserves partial text on error", async () => {
