@@ -308,9 +308,10 @@ export default function App() {
     if (micState === "listening") {
       stopMicRecording();
     } else if (micState === "idle" || micState === "error") {
+      clearStreamSuppression();
       startMicRecording();
     }
-  }, [micState, stopMicRecording, startMicRecording]);
+  }, [micState, stopMicRecording, startMicRecording, clearStreamSuppression]);
 
   const micDisabled =
     connState !== "connected" ||
