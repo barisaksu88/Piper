@@ -195,4 +195,52 @@ describe("App stop control gating", () => {
     expect(harness.container.querySelectorAll(".chat-bubble.assistant").length).toBe(bubblesAfterStop);
     expect(harness.container.textContent).not.toContain("late");
   });
+
+  it("keeps stop enabled while TTS is active after stream ends", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("stream.start");
+      FakeBridge.lastInstance!.emitFrame("stream.delta", { text: "Hello " });
+    });
+
+    const stopButton = harness.container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton!.disabled).toBe(false);
+
+    // Stream ends but TTS is still playing
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("stream.end");
+      FakeBridge.lastInstance!.emitFrame("tts.status", { state: "playing", error: "" });
+    });
+
+    // Stop should still be enabled because TTS is active
+    expect(stopButton!.disabled).toBe(false);
+
+    await act(async () => {
+      stopButton!.click();
+    });
+
+    expect(sendAction).toHaveBeenCalledWith("stop", {});
+  });
+
+  it("disables stop when TTS is idle and generation is complete", async () => {
+    await act(async () => {
+      harness.root.render(<App />);
+    });
+
+    await act(async () => {
+      FakeBridge.lastInstance!.emitFrame("boot.ready");
+      FakeBridge.lastInstance!.emitFrame("stream.start");
+      FakeBridge.lastInstance!.emitFrame("stream.delta", { text: "Hello " });
+      FakeBridge.lastInstance!.emitFrame("stream.end");
+    });
+
+    const stopButton = harness.container.querySelector('button[title="Stop"]') as HTMLButtonElement | null;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton!.disabled).toBe(true);
+  });
 });
