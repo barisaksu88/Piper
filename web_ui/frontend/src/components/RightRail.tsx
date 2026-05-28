@@ -1,9 +1,12 @@
 import RailCard from "./RailCard";
-import type { RailPanelId } from "../types";
+import LiveScreenPanel from "./LiveScreenPanel";
+import StatsPanel from "./StatsPanel";
+import type { LiveScreenState, RailPanelId, RawEventFilter, StatsState } from "../types";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
 const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
+const RAW_EVENT_FILTERS: RawEventFilter[] = ["all", "errors", "system", "streaming"];
 
 interface RightRailProps {
   expandedPanels: Record<RailPanelId, boolean>;
@@ -30,6 +33,10 @@ interface RightRailProps {
     payload: Record<string, unknown>;
     receivedAt: number;
   }>;
+  rawEventFilter: RawEventFilter;
+  onRawEventFilterChange: (filter: RawEventFilter) => void;
+  liveScreen: LiveScreenState;
+  stats: StatsState;
 }
 
 export default function RightRail({
@@ -52,6 +59,10 @@ export default function RightRail({
   activities,
   logs,
   rawEvents,
+  rawEventFilter,
+  onRawEventFilterChange,
+  liveScreen,
+  stats,
 }: RightRailProps) {
   return (
     <aside className="right-rail">
@@ -109,6 +120,29 @@ export default function RightRail({
             </select>
           </label>
         </div>
+      </RailCard>
+
+      <RailCard
+        title="Live Screen"
+        collapsible
+        expanded={expandedPanels.liveScreen}
+        onToggle={() => onTogglePanel("liveScreen")}
+        badge={
+          <span className={`rail-badge ${liveScreen.pending ? "active" : ""}`}>
+            {liveScreen.pending ? "Pending" : "Idle"}
+          </span>
+        }
+      >
+        <LiveScreenPanel liveScreen={liveScreen} />
+      </RailCard>
+
+      <RailCard
+        title="Stats"
+        collapsible
+        expanded={expandedPanels.stats}
+        onToggle={() => onTogglePanel("stats")}
+      >
+        <StatsPanel stats={stats} />
       </RailCard>
 
       <RailCard
@@ -190,6 +224,20 @@ export default function RightRail({
         expanded={expandedPanels.raw}
         onToggle={() => onTogglePanel("raw")}
       >
+        <div className="raw-event-filter">
+          <label>
+            Filter
+            <select
+              value={rawEventFilter}
+              onChange={(e) => onRawEventFilterChange(e.target.value as RawEventFilter)}
+            >
+              {RAW_EVENT_FILTERS.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+          </label>
+          <span className="raw-event-count">{rawEvents.length} events</span>
+        </div>
         <div className="log-box raw">
           {rawEvents.map((e, i) => (
             <details key={`e-${i}`} className="raw-event">

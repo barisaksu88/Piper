@@ -247,6 +247,12 @@ def _normalize_empty_payload(_payload: object) -> dict[str, Any]:
     return {}
 
 
+def _normalize_stats_view_refresh_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
 def _normalize_stop_ack_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
         return {"reason": str(payload.get("reason") or "cancelled")}
@@ -337,7 +343,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "boot_ready": _normalize_generic_string_payload,
     "clear_thinking": _normalize_empty_payload,
     "documents_view": _normalize_generic_string_payload,
-    "stats_view_refresh": _normalize_empty_payload,
+    "stats_view_refresh": _normalize_stats_view_refresh_payload,
     "agent_log": _normalize_generic_string_payload,
 }
 
@@ -457,7 +463,7 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["status", "control"],
     },
     "stats_view_refresh": {
-        "payload_fields": {},
+        "payload_fields": {"summary_text": "str", "record_count": "int", "turn_numbers": "list[float]", "total_ms": "list[float]"},
         "visibility": ["status"],
     },
     "error": {

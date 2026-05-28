@@ -286,6 +286,131 @@ label {
   color: var(--text-dim);
 }
 
+/* Raw event filter bar */
+.raw-event-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.raw-event-filter label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.raw-event-filter select {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.raw-event-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Live Screen panel */
+.live-screen-panel {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.live-screen-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-screen-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  display: inline-block;
+}
+
+.live-screen-dot.pending {
+  background: var(--badge-connected);
+}
+
+.live-screen-dot.idle {
+  background: var(--text-muted);
+}
+
+.live-screen-label {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.live-screen-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.live-screen-meta.empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Stats panel */
+.stats-panel {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stats-summary {
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.stats-value {
+  font-size: 11px;
+  color: var(--text);
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.stats-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.stats-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 4px;
@@ -304,4 +429,3 @@ label {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-light);
 }
-

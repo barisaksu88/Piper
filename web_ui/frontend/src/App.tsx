@@ -101,7 +101,9 @@ export default function App() {
     isGenerating,
     activities,
     logs,
-    rawEvents,
+    filteredRawEvents,
+    rawEventFilter,
+    setRawEventFilter,
     errors,
     codeOutput,
     codeStatus,
@@ -116,6 +118,8 @@ export default function App() {
     selectedDocumentPaths,
     setSelectedDocumentPaths,
     micStatus,
+    liveScreen,
+    stats,
     handleFrame,
     appendActivity,
     stopStreamingLocally,
@@ -159,6 +163,8 @@ export default function App() {
     activity: false,
     raw: false,
     capture: false,
+    liveScreen: false,
+    stats: false,
   });
 
   const [systemDrawerOpen, setSystemDrawerOpen] = useState(false);
@@ -409,7 +415,11 @@ export default function App() {
           onCancelIngest={() => sendAction("document_picker_cancel")}
           activities={activities}
           logs={logs}
-          rawEvents={rawEvents}
+          rawEvents={filteredRawEvents}
+          rawEventFilter={rawEventFilter}
+          onRawEventFilterChange={setRawEventFilter}
+          liveScreen={liveScreen}
+          stats={stats}
         />
 
         {/* Voice strip */}

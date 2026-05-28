@@ -60,7 +60,22 @@ export interface UiError {
 
 export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
 
-export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
+export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture" | "liveScreen" | "stats";
+
+export interface LiveScreenState {
+  pending: boolean;
+  lastRefreshAt: number | null;
+}
+
+export interface StatsState {
+  summaryText: string;
+  recordCount: number;
+  turnNumbers: number[];
+  totalMs: number[];
+  receivedAt: number | null;
+}
+
+export type RawEventFilter = "all" | "errors" | "system" | "streaming";
 
 export type TtsState = "idle" | "synthesizing" | "playing" | "error";
 

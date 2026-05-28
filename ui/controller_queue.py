@@ -364,6 +364,19 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 forward_queue.put((kind, forwarded_payload))
             continue
 
+        if kind == "stats_view_refresh":
+            controller.refresh_stats_view()
+            enriched_payload = payload
+            try:
+                snapshot = controller.stats_collector.build_dashboard_snapshot()
+                if isinstance(snapshot, dict):
+                    enriched_payload = snapshot
+            except Exception:
+                pass
+            if forward_queue is not None:
+                forward_queue.put((kind, enriched_payload))
+            continue
+
         if forward_queue is not None:
             forward_queue.put((kind, payload))
 
@@ -505,10 +518,6 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             if not controller.has_active_code_session():
                 controller.replace_code_output(str(payload))
                 controller.refresh_interaction_state()
-            continue
-
-        if kind == "stats_view_refresh":
-            controller.refresh_stats_view()
             continue
 
         if kind == "config_reloaded":

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { BackendFrame, ChatMessage, MicStatus, RawEvent, UiError } from "../types";
+import type { BackendFrame, ChatMessage, MicStatus, RawEvent, UiError, LiveScreenState, StatsState, RawEventFilter } from "../types";
 import type { TtsState } from "../types";
 import { generateId, isThinkingPlaceholder, sanitizeOperationalText } from "../utils";
 
@@ -72,6 +72,16 @@ export function useEventRouter({
   const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
   const [micStatus, setMicStatus] = useState<MicStatus>({ state: "idle" });
 
+  const [liveScreen, setLiveScreen] = useState<LiveScreenState>({ pending: false, lastRefreshAt: null });
+  const [stats, setStats] = useState<StatsState>({
+    summaryText: "",
+    recordCount: 0,
+    turnNumbers: [],
+    totalMs: [],
+    receivedAt: null,
+  });
+  const [rawEventFilter, setRawEventFilter] = useState<RawEventFilter>("all");
+
   const streamingRef = useRef(false);
   const pendingDeltasRef = useRef("");
   const deltaFlushHandleRef = useRef<DeltaFlushHandle | null>(null);
@@ -97,6 +107,40 @@ export function useEventRouter({
       },
     ]);
   }, []);
+
+  const getEventCategory = useCallback((kind: string): "streaming" | "error" | "system" | "other" => {
+    if (kind.startsWith("stream.")) return "streaming";
+    if (kind === "error") return "error";
+    if (
+      kind.startsWith("boot.") ||
+      kind.startsWith("config.") ||
+      kind.startsWith("user.") ||
+      kind.startsWith("auth.") ||
+      kind.startsWith("style.") ||
+      kind.startsWith("controls.") ||
+      kind.startsWith("log.") ||
+      kind.startsWith("status.") ||
+      kind.startsWith("mic.") ||
+      kind.startsWith("tts.") ||
+      kind.startsWith("stop.") ||
+      kind.startsWith("stats.") ||
+      kind.startsWith("screen.") ||
+      kind === "activity.append"
+    ) {
+      return "system";
+    }
+    return "other";
+  }, []);
+
+  const filteredRawEvents = rawEventFilter === "all"
+    ? rawEvents
+    : rawEvents.filter((e) => {
+        const cat = getEventCategory(e.kind);
+        if (rawEventFilter === "errors") return cat === "error";
+        if (rawEventFilter === "system") return cat === "system";
+        if (rawEventFilter === "streaming") return cat === "streaming";
+        return true;
+      });
 
   const addError = useCallback((message: string, sourceKind: string, kind: string) => {
     setErrors((prev) => [
@@ -253,6 +297,9 @@ export function useEventRouter({
     setActivities([]);
     setLogs([]);
     setRawEvents([]);
+    setRawEventFilter("all");
+    setLiveScreen({ pending: false, lastRefreshAt: null });
+    setStats({ summaryText: "", recordCount: 0, turnNumbers: [], totalMs: [], receivedAt: null });
     setCodeOutput([]);
     setCodeStatus("idle");
     setCodeActive(false);
@@ -438,6 +485,37 @@ export function useEventRouter({
           break;
         }
 
+        case "screen.refresh": {
+          const p = payload as { pending?: boolean };
+          setLiveScreen({ pending: Boolean(p.pending), lastRefreshAt: Date.now() });
+          appendActivity(`Screen refresh: ${p.pending ? "pending" : "idle"}`);
+          break;
+        }
+
+        case "stats.refresh": {
+          const p = payload as {
+            summary_text?: string;
+            record_count?: number;
+            turn_numbers?: number[];
+            total_ms?: number[];
+          };
+          setStats({
+            summaryText: String(p.summary_text || ""),
+            recordCount: Number(p.record_count || 0),
+            turnNumbers: Array.isArray(p.turn_numbers) ? p.turn_numbers : [],
+            totalMs: Array.isArray(p.total_ms) ? p.total_ms : [],
+            receivedAt: Date.now(),
+          });
+          break;
+        }
+
+        case "config.reloaded": {
+          const p = payload as { changed_keys?: string[] };
+          const keys = Array.isArray(p.changed_keys) ? p.changed_keys : [];
+          appendLog(`[Config] Reloaded keys: ${keys.join(", ") || "none"}`);
+          break;
+        }
+
         case "error": {
           const message = getErrorMessage(frame, payload);
           streamingRef.current = false;
@@ -598,7 +676,7 @@ export function useEventRouter({
           break;
       }
     },
-    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, addError, clearThinkingPlaceholders, ensureAssistantStreamMessage, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen]
+    [setStatusText, setModeText, setUserName, setStyleLabel, setAuthWaiting, setTtsState, appendActivity, appendLog, addRawEvent, addError, clearThinkingPlaceholders, ensureAssistantStreamMessage, flushPendingDeltas, queueDelta, appendCodeOutput, onBootLog, onBootReady, onBootProgress, isOperational, workspace, setWorkspaceOpen, setLiveScreen, setStats]
   );
 
   return {
@@ -608,6 +686,9 @@ export function useEventRouter({
     activities,
     logs,
     rawEvents,
+    filteredRawEvents,
+    rawEventFilter,
+    setRawEventFilter,
     errors,
     codeOutput,
     codeStatus,
@@ -622,6 +703,8 @@ export function useEventRouter({
     selectedDocumentPaths,
     setSelectedDocumentPaths,
     micStatus,
+    liveScreen,
+    stats,
     handleFrame,
     appendActivity,
     appendLog,
