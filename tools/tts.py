@@ -1272,7 +1272,7 @@ finally {
 class _StreamChunker:
     """Implements 3-phase streaming chunking:
     - Phase 0 (first chunk): Fast start, complete short sentences, force split at ~80.
-    - Phase 1 (second chunk): Medium-fast refill, force split at ~210.
+    - Phase 1 (second chunk): Medium-fast refill, force split at ~150.
     - Phase 2+ (later chunks): Quality mode, longer emotional phrasing, force split at ~320.
     - Treats newlines as sentence endings (pauses).
     """
