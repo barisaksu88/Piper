@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import threading
 import time
@@ -13,6 +14,8 @@ from typing import Any, Dict, Iterator, List, Optional
 import urllib.request
 
 from core.runtime_control import CancellationToken, OperationCancelled
+
+_LOG = logging.getLogger(__name__)
 
 
 class LLMClientError(Exception):
@@ -318,8 +321,10 @@ class LlamaServerClient:
             detail = str(e)
             if body:
                 detail += f" | body: {body[:500]}"
-            raise LLMClientError(f"llama-server request failed: {detail}")
+            _LOG.error("LLM server returned HTTP error: %s", detail)
+            raise LLMClientError(f"LLM_HTTP_{e.code}: {detail}") from e
         except Exception as e:
-            raise LLMClientError(f"llama-server request failed: {e}")
+            _LOG.error("LLM request failed: %s", e)
+            raise LLMClientError(f"LLM_REQUEST_FAILED: {e}") from e
         finally:
             self._request_lock.release()

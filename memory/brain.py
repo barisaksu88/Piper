@@ -11,6 +11,7 @@ import math
 import threading
 import datetime
 import hashlib
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -92,6 +93,10 @@ class PiperBrain:
         self._vector_init_failed = False
         self._vector_init_error = ""
         self._vector_ready = False
+        self._last_vector_retry_time: float = 0.0
+        self._vector_retry_interval: float = 60.0
+        self._vector_retry_max_interval: float = 300.0
+        self._vector_retry_lock = threading.Lock()
 
         _LOG.info("[Brain] Initializing Long-Term Memory...")
 
@@ -180,6 +185,26 @@ class PiperBrain:
                 self._vector_init_error = str(exc)
             _LOG.warning("[Brain] Vector warm-up failed. Staying on lightweight fallback memory.")
             _LOG.warning("[Brain] Vector init error: %s", exc)
+
+    def _maybe_retry_vector_backend(self) -> None:
+        """Attempt to re-initialize the vector backend if in fallback mode."""
+        if self._vector_memory_available and self.vector_ready:
+            return
+        if not self._vector_backend_dependencies_available():
+            return
+        now = time.time()
+        with self._vector_retry_lock:
+            if now - self._last_vector_retry_time < self._vector_retry_interval:
+                return
+            self._last_vector_retry_time = now
+            self._vector_retry_interval = min(
+                self._vector_retry_interval * 2.0,
+                self._vector_retry_max_interval,
+            )
+        _LOG.info("[Brain] Attempting vector backend retry (interval=%.0fs)...", self._vector_retry_interval)
+        self._vector_init_failed = False
+        self._vector_memory_available = True
+        self.start_vector_warmup()
 
     def _sync_fallback_to_vector(self) -> None:
         if self.collection is None:
@@ -314,6 +339,7 @@ class PiperBrain:
         meta = metadata or {}
         self._fallback_remember(text, metadata=meta, doc_id=doc_id)
 
+        self._maybe_retry_vector_backend()
         if not self._vector_memory_available:
             return
         if self.collection is None:
@@ -362,6 +388,7 @@ class PiperBrain:
         if not query:
             return []
 
+        self._maybe_retry_vector_backend()
         if not self._vector_memory_available:
             return self._fallback_recall(query, n_results=n_results)
         if self.collection is None:

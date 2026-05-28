@@ -100,6 +100,14 @@ JSON only. No extra text. Keep `thought` short and concrete.
     # _scratchpad_exact_read_paths → removed; use FileWorkEngine.exact_read_paths_from_scratchpad
 
     @staticmethod
+    def _resolve_field(stage: dict, planner_input: Any | None, field_name: str, default: Any = "") -> Any:
+        if planner_input is not None:
+            value = getattr(planner_input, field_name, None)
+            if value is not None:
+                return value
+        return stage.get(field_name, default)
+
+    @staticmethod
     def _format_memory_age_label(metadata: Dict[str, Any]) -> str:
         date_str = str((metadata or {}).get("date") or "").strip()
         if not date_str:
@@ -149,69 +157,15 @@ JSON only. No extra text. Keep `thought` short and concrete.
 
     @staticmethod
     def _render_planner_boundary_block(stage: Dict[str, Any], planner_input: Any | None = None) -> str:
-        objective = str(
-            getattr(planner_input, "objective", None)
-            if planner_input is not None
-            else stage.get("objective", "")
-            or stage.get("objective", "")
-            or ""
-        ).strip()
-        stage_goal = str(
-            getattr(planner_input, "stage_goal", None)
-            if planner_input is not None
-            else stage.get("stage_goal", "")
-            or stage.get("stage_goal", "")
-            or ""
-        ).strip()
-        stage_type = str(
-            getattr(planner_input, "stage_type", None)
-            if planner_input is not None
-            else stage.get("stage_type", "")
-            or stage.get("stage_type", "")
-            or ""
-        ).strip()
-        success_condition = str(
-            getattr(planner_input, "success_condition", None)
-            if planner_input is not None
-            else stage.get("success_condition", "")
-            or stage.get("success_condition", "")
-            or ""
-        ).strip()
-        allowed_tools = list(
-            getattr(planner_input, "allowed_tools", None)
-            if planner_input is not None
-            else stage.get("allowed_tools", [])
-            or stage.get("allowed_tools", [])
-            or []
-        )
-        active_targets = list(
-            getattr(planner_input, "active_targets", None)
-            if planner_input is not None
-            else stage.get("active_targets", [])
-            or stage.get("active_targets", [])
-            or []
-        )
-        declared_scope_root = str(
-            getattr(planner_input, "declared_scope_root", None)
-            if planner_input is not None
-            else stage.get("declared_scope_root", "")
-            or stage.get("declared_scope_root", "")
-            or ""
-        ).strip()
-        declared_exact_targets = list(
-            getattr(planner_input, "declared_exact_targets", None)
-            if planner_input is not None
-            else stage.get("declared_exact_targets", [])
-            or stage.get("declared_exact_targets", [])
-            or []
-        )
-        evidence_required = str(
-            getattr(planner_input, "evidence_required", None)
-            if planner_input is not None
-            else stage.get("evidence_required", "")
-            or stage.get("evidence_required", "")
-            or ""
-        ).strip()
+        objective = str(PromptBuilder._resolve_field(stage, planner_input, "objective", "")).strip()
+        stage_goal = str(PromptBuilder._resolve_field(stage, planner_input, "stage_goal", "")).strip()
+        stage_type = str(PromptBuilder._resolve_field(stage, planner_input, "stage_type", "")).strip()
+        success_condition = str(PromptBuilder._resolve_field(stage, planner_input, "success_condition", "")).strip()
+        allowed_tools = list(PromptBuilder._resolve_field(stage, planner_input, "allowed_tools", []))
+        active_targets = list(PromptBuilder._resolve_field(stage, planner_input, "active_targets", []))
+        declared_scope_root = str(PromptBuilder._resolve_field(stage, planner_input, "declared_scope_root", "")).strip()
+        declared_exact_targets = list(PromptBuilder._resolve_field(stage, planner_input, "declared_exact_targets", []))
+        evidence_required = str(PromptBuilder._resolve_field(stage, planner_input, "evidence_required", "")).strip()
         lines = ["[PLANNER_BOUNDARY]"]
         lines.append(f"objective: {objective or '(none)'}")
         lines.append(f"stage_goal: {stage_goal or '(missing)'}")
@@ -283,86 +237,32 @@ JSON only. No extra text. Keep `thought` short and concrete.
             return json.dumps(stage, indent=2, ensure_ascii=False)
 
         card: Dict[str, Any] = {
-            "stage_goal": str(
-                getattr(planner_input, "stage_goal", None)
-                if planner_input is not None
-                else stage.get("stage_goal", "")
-                or stage.get("stage_goal", "")
-                or ""
-            ).strip(),
-            "stage_type": str(
-                getattr(planner_input, "stage_type", None)
-                if planner_input is not None
-                else stage.get("stage_type", "")
-                or stage.get("stage_type", "")
-                or ""
-            ).strip(),
-            "success_condition": str(
-                getattr(planner_input, "success_condition", None)
-                if planner_input is not None
-                else stage.get("success_condition", "")
-                or stage.get("success_condition", "")
-                or ""
-            ).strip(),
+            "stage_goal": str(PromptBuilder._resolve_field(stage, planner_input, "stage_goal", "")).strip(),
+            "stage_type": str(PromptBuilder._resolve_field(stage, planner_input, "stage_type", "")).strip(),
+            "success_condition": str(PromptBuilder._resolve_field(stage, planner_input, "success_condition", "")).strip(),
         }
 
-        allowed_tools = list(
-            getattr(planner_input, "allowed_tools", None)
-            if planner_input is not None
-            else stage.get("allowed_tools", [])
-            or stage.get("allowed_tools", [])
-            or []
-        )
+        allowed_tools = list(PromptBuilder._resolve_field(stage, planner_input, "allowed_tools", []))
         if allowed_tools:
             card["allowed_tools"] = allowed_tools
 
-        objective = str(
-            getattr(planner_input, "objective", None)
-            if planner_input is not None
-            else stage.get("objective", "")
-            or stage.get("objective", "")
-            or ""
-        ).strip()
+        objective = str(PromptBuilder._resolve_field(stage, planner_input, "objective", "")).strip()
         if objective:
             card["objective"] = objective
 
-        active_targets = list(
-            getattr(planner_input, "active_targets", None)
-            if planner_input is not None
-            else stage.get("active_targets", [])
-            or stage.get("active_targets", [])
-            or []
-        )
+        active_targets = list(PromptBuilder._resolve_field(stage, planner_input, "active_targets", []))
         if active_targets:
             card["active_targets"] = active_targets
 
-        declared_scope_root = str(
-            getattr(planner_input, "declared_scope_root", None)
-            if planner_input is not None
-            else stage.get("declared_scope_root", "")
-            or stage.get("declared_scope_root", "")
-            or ""
-        ).strip()
+        declared_scope_root = str(PromptBuilder._resolve_field(stage, planner_input, "declared_scope_root", "")).strip()
         if declared_scope_root:
             card["declared_scope_root"] = declared_scope_root
 
-        declared_exact_targets = list(
-            getattr(planner_input, "declared_exact_targets", None)
-            if planner_input is not None
-            else stage.get("declared_exact_targets", [])
-            or stage.get("declared_exact_targets", [])
-            or []
-        )
+        declared_exact_targets = list(PromptBuilder._resolve_field(stage, planner_input, "declared_exact_targets", []))
         if declared_exact_targets:
             card["declared_exact_targets"] = declared_exact_targets
 
-        evidence_required = str(
-            getattr(planner_input, "evidence_required", None)
-            if planner_input is not None
-            else stage.get("evidence_required", "")
-            or stage.get("evidence_required", "")
-            or ""
-        ).strip()
+        evidence_required = str(PromptBuilder._resolve_field(stage, planner_input, "evidence_required", "")).strip()
         if evidence_required:
             card["evidence_required"] = evidence_required
 

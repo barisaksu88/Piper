@@ -25,14 +25,26 @@ from core.search.backends.searxng import SearXNGBackend
 # Import lazily/fault-tolerantly so test harnesses can patch perform_search/DDGS
 # without requiring the live DuckDuckGo backend in every environment.
 _DDGS_IMPORT_ERROR = ""
-try:
-    from ddgs import DDGS
-except ImportError:
+_DDGS_AVAILABLE = False
+
+
+def _ensure_ddgs():
+    global _DDGS_AVAILABLE, _DDGS_IMPORT_ERROR, DDGS
+    if _DDGS_AVAILABLE:
+        return
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS as _DDGS
+        DDGS = _DDGS
     except ImportError:
-        DDGS = None
-        _DDGS_IMPORT_ERROR = "Please install: pip install ddgs"
+        try:
+            from duckduckgo_search import DDGS as _DDGS
+            DDGS = _DDGS
+        except ImportError:
+            DDGS = None
+            _DDGS_IMPORT_ERROR = "Please install: pip install ddgs"
+    if DDGS is not None:
+        _DDGS_AVAILABLE = True
+
 
 from config import CFG, Config
 # Daily facts removed
@@ -419,6 +431,7 @@ def _run_ddgs_query(
     mode: str,
     cancel_token: CancellationToken | None = None,
 ) -> list[dict]:
+    _ensure_ddgs()
     _raise_if_cancelled(cancel_token)
     if DDGS is None:
         raise RuntimeError(_DDGS_IMPORT_ERROR or "DuckDuckGo search backend is unavailable.")

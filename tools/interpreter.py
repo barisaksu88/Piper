@@ -9,6 +9,7 @@ import sys
 import os
 import re
 import time
+import ast
 from pathlib import Path
 
 from core.runtime_control import CancellationToken, OperationCancelled
@@ -34,31 +35,109 @@ class Interpreter:
         if not code or not code.strip():
             return ExecutionReport(status="failed", summary="Error: No code provided.")
 
-        # --- SECURITY JAIL V3 (SMARTER) ---
-        BLOCKED_IMPORTS = [
+        # --- SECURITY JAIL V4 (AST-BASED) ---
+        BLOCKED_IMPORTS = {
             "shutil", "subprocess", "multiprocessing",
-            "socket", "ctypes", "importlib", "__import__", "sys"
-        ]
-        for mod in BLOCKED_IMPORTS:
-            if f"import {mod}" in code or f"from {mod}" in code:
-                return ExecutionReport(
-                    status="blocked",
-                    summary=f"SECURITY VIOLATION: Importing '{mod}' is blocked.",
-                )
+            "socket", "ctypes", "importlib", "os", "sys",
+            "pathlib",
+        }
+        BLOCKED_CALLS = {
+            "__import__", "eval", "exec", "compile", "open", "getattr"
+        }
+        BLOCKED_ATTR_ROOTS = {
+            "__builtins__", "os", "subprocess", "shutil",
+            "multiprocessing", "socket", "ctypes", "importlib", "sys",
+            "pathlib",
+        }
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return ExecutionReport(status="failed", summary=f"Syntax Error: {e}")
+
+        for node in ast.walk(tree):
+            # Block imports of forbidden modules
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    if root in BLOCKED_IMPORTS:
+                        return ExecutionReport(
+                            status="blocked",
+                            summary=f"SECURITY VIOLATION: Importing '{alias.name}' is blocked.",
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".")[0]
+                if root in BLOCKED_IMPORTS:
+                    return ExecutionReport(
+                        status="blocked",
+                        summary=f"SECURITY VIOLATION: Importing from '{node.module}' is blocked.",
+                    )
+            # Block calls to dangerous functions
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in BLOCKED_CALLS:
+                        return ExecutionReport(
+                            status="blocked",
+                            summary=f"SECURITY VIOLATION: Call to '{node.func.id}' is blocked.",
+                        )
+                elif isinstance(node.func, ast.Attribute):
+                    # Block attribute access on dangerous modules (e.g., os.system)
+                    parts = []
+                    attr_node = node.func
+                    while isinstance(attr_node, ast.Attribute):
+                        parts.append(attr_node.attr)
+                        attr_node = attr_node.value
+                    if isinstance(attr_node, ast.Name):
+                        parts.append(attr_node.id)
+                        root = parts[-1]
+                        if root in BLOCKED_ATTR_ROOTS:
+                            return ExecutionReport(
+                                status="blocked",
+                                summary=f"SECURITY VIOLATION: Attribute access on '{root}' is blocked.",
+                            )
+                        # Block __builtins__.* access
+                        full = ".".join(reversed(parts))
+                        if full.startswith("__builtins__"):
+                            return ExecutionReport(
+                                status="blocked",
+                                summary=f"SECURITY VIOLATION: __builtins__ access is blocked.",
+                            )
+            # Block subscript access on forbidden roots (e.g., __builtins__["__import__"])
+            elif isinstance(node, ast.Subscript):
+                root_node = node.value
+                while isinstance(root_node, (ast.Attribute, ast.Subscript)):
+                    root_node = root_node.value
+                if isinstance(root_node, ast.Name) and root_node.id in BLOCKED_ATTR_ROOTS:
+                    return ExecutionReport(
+                        status="blocked",
+                        summary=f"SECURITY VIOLATION: Subscript access on '{root_node.id}' is blocked.",
+                    )
+            # Block direct attribute access on forbidden roots (e.g., os.system without call)
+            elif isinstance(node, ast.Attribute):
+                root = None
+                attr_node = node
+                while isinstance(attr_node, ast.Attribute):
+                    attr_node = attr_node.value
+                if isinstance(attr_node, ast.Name):
+                    root = attr_node.id
+                if root in BLOCKED_ATTR_ROOTS:
+                    return ExecutionReport(
+                        status="blocked",
+                        summary=f"SECURITY VIOLATION: Attribute access on '{root}' is blocked.",
+                    )
+            # Block direct use of forbidden names as expressions (e.g., eval)
+            elif isinstance(node, ast.Name):
+                if node.id in BLOCKED_CALLS:
+                    return ExecutionReport(
+                        status="blocked",
+                        summary=f"SECURITY VIOLATION: Usage of '{node.id}' is blocked.",
+                    )
 
         if re.search(r'["\']([A-Za-z]:|/|\.\.)', code):
             return ExecutionReport(
                 status="blocked",
                 summary="SECURITY VIOLATION: Absolute paths (C:\\) or parent folders (../) are blocked. Stay in the current folder.",
             )
-
-        BLOCKED_CALLS = ["os.system", "os.popen", "subprocess", "exec(", "eval("]
-        for call in BLOCKED_CALLS:
-            if call in code:
-                return ExecutionReport(
-                    status="blocked",
-                    summary=f"SECURITY VIOLATION: Usage of '{call}' is blocked for safety.",
-                )
         # --- END SECURITY ---
 
         temp_path = self.workspace / "temp_exec.py"

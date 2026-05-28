@@ -77,14 +77,14 @@ class AgentBrain:
             if self._computer_use_engine is not None:
                 self._computer_use_engine.shutdown()
         except Exception:
-            pass
+            _LOG.debug("Computer-use engine shutdown failed", exc_info=True)
 
     def suspend_runtime_sessions(self) -> None:
         try:
             if self._computer_use_engine is not None:
                 self._computer_use_engine.suspend()
         except Exception:
-            pass
+            _LOG.debug("Computer-use engine suspend failed", exc_info=True)
 
     @staticmethod
     def _normalize_lookup(text: str) -> str:
@@ -353,36 +353,6 @@ class AgentBrain:
                 execute_result=result,
             )
 
-        browser_op_match = re.search(r'\[BROWSER_OP\](.*?)\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
-        if browser_op_match:
-            payload_text = browser_op_match.group(1).strip()
-            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
-            return AgentAction(
-                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
-            )
-        if re.search(r'\[BROWSER_OP\]', text, re.IGNORECASE):
-            parts = re.split(r'\[BROWSER_OP\]', text, maxsplit=1, flags=re.IGNORECASE)
-            if len(parts) == 2 and parts[1].strip():
-                payload_text = parts[1].replace("[/BROWSER_OP]", "").strip()
-                result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
-                return AgentAction(
-                    action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
-                )
-        malformed_browser_op_match = re.search(r'\[BROWSER_OP\s+(.*?)\s*\[/BROWSER_OP\]', text, re.DOTALL | re.IGNORECASE)
-        if malformed_browser_op_match:
-            payload_text = malformed_browser_op_match.group(1).strip()
-            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
-            return AgentAction(
-                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
-            )
-        malformed_browser_op_inline = re.search(r'\[BROWSER_OP\s+(.+)\]\s*$', text, re.DOTALL | re.IGNORECASE)
-        if malformed_browser_op_inline:
-            payload_text = malformed_browser_op_inline.group(1).strip()
-            result = self.exec_browser_op(payload_text, cancel_token=cancel_token)
-            return AgentAction(
-                action_type="TOOL", tag="BROWSER_OP", payload=payload_text, content=llm_output, execute_result=result
-            )
-
         # 2. CHECK SINGLE TAGS
         # FIX: Added re.DOTALL to allow matching tags that contain newlines (like code blocks)
         match = re.search(r'\[([A-Za-z_]+)(?::\s*(.*?))?\]', text, re.DOTALL)
@@ -426,7 +396,7 @@ class AgentBrain:
             clean = re.sub(r'\[ANSWER\]', '', text, flags=re.IGNORECASE).strip()
             return AgentAction(action_type="ANSWER", tag="ANSWER", content=clean)
 
-        return AgentAction(action_type="ANSWER", tag="ANSWER", content=llm_output)
+        return AgentAction(action_type="CHAT", tag="ANSWER", content=llm_output)
 
     def _build_extension_inventory(
         self,

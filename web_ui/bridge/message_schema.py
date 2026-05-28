@@ -73,6 +73,8 @@ KNOWN_EVENT_KINDS: dict[str, str] = {
     # Workspace
     "workspace_files": "workspace.files",
     "file_contents": "file.contents",
+    # Stop acknowledgement
+    "stop_ack": "stop.ack",
 }
 
 # Set for O(1) membership checks.

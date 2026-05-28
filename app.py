@@ -58,6 +58,38 @@ def _should_restart() -> bool:
     os.environ["PIPER_RESTART_FIRST_TIME"] = str(first)
     return count <= _MAX_RESTARTS
 
+
+class _ShutdownDispatcher:
+    """Singleton dispatcher that runs registered shutdown callbacks at process exit.
+
+    Guarantees exactly one atexit handler is registered regardless of how many
+    times build_controller() is called.
+    """
+
+    def __init__(self) -> None:
+        self._funcs: list[callable] = []
+        self._registered = False
+        self._called = False
+
+    def add(self, fn: callable) -> None:
+        self._funcs.append(fn)
+        if not self._registered:
+            atexit.register(self._run)
+            self._registered = True
+
+    def _run(self) -> None:
+        if self._called:
+            return
+        self._called = True
+        for fn in self._funcs:
+            try:
+                fn()
+            except Exception as e:
+                logging.getLogger(__name__).debug("Shutdown failed: %s", e)
+
+
+_shutdown_dispatcher = _ShutdownDispatcher()
+
 from core.agent import AgentBrain
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
@@ -193,11 +225,26 @@ def build_controller() -> PiperController:
 
     searxng_service = SearXNGService()
     searxng_service.ensure_available()
-    atexit.register(searxng_service.shutdown)
 
-    atexit.register(boot_mgr.shutdown)
-    atexit.register(live_screen.stop)
-    atexit.register(agent_brain.shutdown)
+    def _shutdown_all():
+        try:
+            agent_brain.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Brain shutdown failed: %s", e)
+        try:
+            live_screen.stop()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Live screen stop failed: %s", e)
+        try:
+            boot_mgr.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Boot manager shutdown failed: %s", e)
+        try:
+            searxng_service.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("SearXNG shutdown failed: %s", e)
+
+    _shutdown_dispatcher.add(_shutdown_all)
 
     return PiperController(
         searxng_service=searxng_service,

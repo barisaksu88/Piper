@@ -1944,11 +1944,14 @@ class TTS:
         return [c1, c2, c3]
 
 
+_tts_lock = threading.Lock()
 _tts_singleton: Optional[TTS] = None
 
 
 def get_tts(cfg: Optional[TTSConfig] = None) -> TTS:
     global _tts_singleton
     if _tts_singleton is None:
-        _tts_singleton = TTS(cfg)
+        with _tts_lock:
+            if _tts_singleton is None:
+                _tts_singleton = TTS(cfg)
     return _tts_singleton

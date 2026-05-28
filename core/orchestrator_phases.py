@@ -206,7 +206,8 @@ def _apply_non_admin_route_guard(orc) -> None:
         return
     try:
         profile = user_runtime.active_profile()
-    except Exception:
+    except Exception as e:
+        _LOG.debug("Non-admin route guard: active_profile failed: %s", e, exc_info=True)
         return
     if getattr(profile, "is_admin", False):
         return
@@ -376,7 +377,8 @@ def _current_live_screen_path(orc):
         return None
     try:
         return orc.live_screen.current_image_path(require_fresh=True)
-    except Exception:
+    except Exception as e:
+        _LOG.debug("live_screen.current_image_path failed: %s", e, exc_info=True)
         return None
 
 
@@ -410,8 +412,8 @@ def _resolve_live_screen_turn_image(orc):
         try:
             if Path(existing).exists():
                 return existing
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("turn_screen_image_path exists check failed: %s", e, exc_info=True)
 
     live_screen_path = _current_live_screen_path(orc)
     if live_screen_path is None:
@@ -515,7 +517,8 @@ def _extract_latest_stage_outcome_entry(scratchpad: list[str]) -> str:
 def _consume_pipeline_stream_metrics(orc) -> list[dict[str, float | str]]:
     try:
         return list(getattr(orc.pipeline, "consume_completed_stream_metrics", lambda: [])() or [])
-    except Exception:
+    except Exception as e:
+        _LOG.debug("consume_pipeline_stream_metrics failed: %s", e, exc_info=True)
         return []
 
 
@@ -923,7 +926,8 @@ def _run_route_core(orc) -> None:
     orc.ingested_document_chat = False
     try:
         ingested_documents = orc.prompt_context.document_memory.list_documents()
-    except Exception:
+    except Exception as e:
+        _LOG.debug("list_documents failed: %s", e, exc_info=True)
         ingested_documents = []
     if (
         not looks_like_explicit_browser_request(orc.user_msg)
@@ -1019,7 +1023,8 @@ def _run_route_core(orc) -> None:
         if not identity_intent and user_runtime is not None and hasattr(user_runtime, "extract_spelled_identity_name"):
             try:
                 spelled_identity = str(user_runtime.extract_spelled_identity_name(orc.user_msg) or "").strip()
-            except Exception:
+            except Exception as e:
+                _LOG.debug("extract_spelled_identity_name failed: %s", e, exc_info=True)
                 spelled_identity = ""
             if spelled_identity:
                 identity_intent = {
@@ -1047,7 +1052,8 @@ def _run_route_core(orc) -> None:
                         role_label = ""
                         try:
                             role_label = str(user_runtime.profile_role_label(switched_profile) or "").strip()
-                        except Exception:
+                        except Exception as e:
+                            _LOG.debug("profile_role_label failed: %s", e, exc_info=True)
                             role_label = ""
                         notice_parts = [
                             "[VOICE IDENTITY EVENT]",
@@ -1369,8 +1375,8 @@ def phase_search(orc) -> None:
             _search_trace_path.parent.mkdir(parents=True, exist_ok=True)
             with open(_search_trace_path, "a", encoding="utf-8") as f:
                 f.write(line)
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("search trace write failed: %s", e, exc_info=True)
         orc._log_dashboard(msg)
 
     def _do_search() -> None:
@@ -2082,8 +2088,8 @@ def _persona_recall_allowed(
         try:
             if getattr(user_runtime.active_profile(), "is_unknown", False):
                 return False
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("_should_include_voice_identity_state active_profile failed: %s", e, exc_info=True)
     return True
 
 
@@ -2107,8 +2113,8 @@ def _build_voice_identity_state_block(orc) -> str:
                 access_tier = "admin" if user_runtime.is_admin_unlocked() else "public"
                 if recognition_status == "unknown":
                     recognition_status = "confirmed"
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("_build_voice_identity_state_block profile resolution failed: %s", e, exc_info=True)
     if recognition_status not in {"confirmed", "tentative", "unknown"}:
         recognition_status = "unknown" if current_speaker.lower() == "unknown" else "confirmed"
     if access_tier not in {"admin", "public", "unknown"}:
@@ -2197,8 +2203,8 @@ def _stream_or_capture_persona_answer(orc, messages, *, allow_recall: bool) -> t
         if stream is not None:
             try:
                 stream.close()
-            except Exception:
-                pass
+            except Exception as e:
+                _LOG.debug("stream.close() failed: %s", e, exc_info=True)
 
 
 def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: bool) -> tuple[str, bool]:
@@ -2254,8 +2260,8 @@ def _stream_or_capture_persona_answer_text_only(orc, messages, *, allow_recall: 
         if stream is not None:
             try:
                 stream.close()
-            except Exception:
-                pass
+            except Exception as e:
+                _LOG.debug("stream.close() failed: %s", e, exc_info=True)
 
 
 def _run_persona_core(orc) -> None:
@@ -2573,8 +2579,8 @@ def _run_persona_core(orc) -> None:
         if readonly_state_answer:
             try:
                 orc._cached_readonly_state_answer = ""
-            except Exception:
-                pass
+            except Exception as e:
+                _LOG.debug("cached_readonly_state_answer clear failed: %s", e, exc_info=True)
         else:
             readonly_state_answer = orc.prompt_context.build_readonly_state_answer(readonly_query)
         if readonly_state_answer:
