@@ -194,7 +194,12 @@ def build_controller() -> PiperController:
     searxng_service = SearXNGService()
     searxng_service.ensure_available()
 
+    _shutdown_called = False
     def _shutdown_all():
+        nonlocal _shutdown_called
+        if _shutdown_called:
+            return
+        _shutdown_called = True
         try:
             agent_brain.shutdown()
         except Exception as e:
@@ -212,7 +217,12 @@ def build_controller() -> PiperController:
         except Exception as e:
             logging.getLogger(__name__).debug("SearXNG shutdown failed: %s", e)
 
-    atexit.register(_shutdown_all)
+    registered_ids = getattr(build_controller, "_registered_shutdown_ids", set())
+    if id(_shutdown_all) not in registered_ids:
+        atexit.register(_shutdown_all)
+        if not hasattr(build_controller, "_registered_shutdown_ids"):
+            build_controller._registered_shutdown_ids = set()
+        build_controller._registered_shutdown_ids.add(id(_shutdown_all))
 
     return PiperController(
         searxng_service=searxng_service,

@@ -581,6 +581,7 @@ def do_generate_stream(controller, cancel_token: CancellationToken | None = None
         run_agent_loop(controller.build_orchestrator_config(cancel_token=token))
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "Stop completed."))
+        controller.ui_queue.put(("stop_ack", {"reason": "cancelled"}))
     except Exception as exc:
         import traceback
 
@@ -613,6 +614,7 @@ def do_resume_langgraph_recovery(controller, recovery: dict[str, object], cancel
         )
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "LangGraph recovery canceled."))
+        controller.ui_queue.put(("stop_ack", {"reason": "cancelled"}))
     except Exception as exc:
         import traceback
 
@@ -651,6 +653,7 @@ def do_resume_langgraph_interrupt(
         )
     except OperationCancelled:
         controller.ui_queue.put(("status_widget_dashboard_activity", "LangGraph interrupt resume canceled."))
+        controller.ui_queue.put(("stop_ack", {"reason": "cancelled"}))
     except Exception as exc:
         import traceback
 
@@ -813,6 +816,7 @@ def do_vision_query(
             tts_speed=style_state.tts_speed,
         )
         controller.ui_queue.put(("status_widget_dashboard_activity", "Vision query canceled."))
+        controller.ui_queue.put(("stop_ack", {"reason": "cancelled"}))
     except VisionError as exc:
         controller.clear_thinking_placeholder()
         controller.pipeline.handle_event("error", f"[UI] {exc}", tts_voice=None, tts_speed=None)

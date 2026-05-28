@@ -351,6 +351,8 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             _LOG.info("[SEARCH WEB] Handling search_result event.")
             controller.maybe_speak_ui_event(kind, payload)
             handle_search_result(controller, payload)
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
             continue
 
         if kind == "status_widget_mode":
@@ -395,8 +397,6 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
 
         if kind == "document_ingest_active":
             controller.document_ingest_active = bool(payload)
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "live_screen_refresh":
@@ -447,6 +447,7 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
         if kind == "assistant_stream_end":
             controller.pipeline.handle_event("end", "", tts_voice=None, tts_speed=None)
             if forward_queue is not None:
+                # Intentional extra status events so the frontend settles to idle.
                 forward_queue.put(("status_widget_mode", "IDLE"))
                 forward_queue.put(("status", "IDLE"))
             continue
@@ -454,6 +455,7 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
         if kind == "error":
             controller.pipeline.handle_event("error", str(payload), tts_voice=None, tts_speed=None)
             if forward_queue is not None:
+                # Intentional extra status events so the frontend shows error state.
                 forward_queue.put(("status_widget_mode", "ERROR"))
                 forward_queue.put(("status", "Error"))
             controller.maybe_speak_ui_event(kind, payload)
@@ -471,8 +473,6 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 controller.code_session_meta = ""
                 if controller.runtime_mode == "CODE SESSION":
                     controller.runtime_mode = "IDLE"
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "code_session_launch":
@@ -486,46 +486,32 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 controller.set_code_status(f"Launch failed: {exc}")
                 controller.append_code_output(f"\n[Embedded code launch failed: {exc}]\n")
             controller.maybe_speak_ui_event(kind, payload)
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "code_session_output":
             controller.append_code_output(str(payload))
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "code_session_status":
             controller.set_code_status(str(payload))
             controller.maybe_speak_ui_event(kind, payload)
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "code_session_focus":
             controller.focus_code_input()
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "code_view":
             if not controller.has_active_code_session():
                 controller.replace_code_output(str(payload))
                 controller.refresh_interaction_state()
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "stats_view_refresh":
             controller.refresh_stats_view()
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "config_reloaded":
-            if forward_queue is not None:
-                forward_queue.put((kind, payload))
             continue
 
         if kind == "vision_snapshot_note":

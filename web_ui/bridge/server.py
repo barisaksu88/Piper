@@ -20,10 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import os
 import queue
+import re
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import websockets
 from websockets.exceptions import ConnectionClosedOK
@@ -58,6 +61,30 @@ _SAFE_IMAGE_EXTENSIONS: set[str] = {
     ".webp",
     ".bmp",
 }
+
+
+# Hostnames allowed as WebSocket / CORS origins.
+_DEFAULT_ALLOWED_ORIGIN_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _get_allowed_origin_hosts() -> set[str]:
+    """Return allowed origin hostnames from defaults + env override."""
+    hosts = set(_DEFAULT_ALLOWED_ORIGIN_HOSTS)
+    raw = os.environ.get("PIPER_WEB_UI_ALLOWED_ORIGINS", "")
+    for token in re.split(r"[,\s;]+", raw):
+        token = token.strip().lower()
+        if token:
+            hosts.add(token)
+    return hosts
+
+
+def _is_allowed_origin(origin: str) -> bool:
+    """Validate that *origin* parses to an allowed hostname."""
+    if not origin:
+        return False
+    parsed = urlparse(origin if "://" in origin else f"http://{origin}")
+    hostname = (parsed.hostname or "").strip().lower()
+    return hostname in _get_allowed_origin_hosts()
 
 
 class BridgeServer:
@@ -96,18 +123,16 @@ class BridgeServer:
     def _cors_origin(self, request: Any) -> str | None:
         """Return the allowed CORS origin for a request.
 
-        Only localhost origins (127.0.0.1, localhost) are allowed.
-        Returns the request origin if it is localhost, otherwise None.
+        Only exact localhost hostnames (127.0.0.1, localhost, ::1) are allowed.
+        Returns the request origin if it is allowed, otherwise None.
         """
         origin = getattr(request, "headers", {})
         if hasattr(origin, "get"):
             origin = origin.get("Origin", "")
         else:
             origin = ""
-        if origin:
-            lower = origin.lower()
-            if "localhost" in lower or "127.0.0.1" in lower:
-                return origin
+        if origin and _is_allowed_origin(origin):
+            return origin
         # If no Origin header, allow if the server binds to localhost
         if self._host in ("127.0.0.1", "localhost", "::1"):
             return None  # No CORS header needed for same-origin
@@ -233,11 +258,9 @@ class BridgeServer:
                     origin = origin.get("Origin", "")
                 else:
                     origin = ""
-                if origin:
-                    lower = origin.lower()
-                    if "localhost" not in lower and "127.0.0.1" not in lower:
-                        _LOG.warning("WebSocket connection rejected: invalid origin '%s'", origin)
-                        return connection.respond(403, "Forbidden: invalid origin")
+                if origin and not _is_allowed_origin(origin):
+                    _LOG.warning("WebSocket connection rejected: invalid origin '%s'", origin)
+                    return connection.respond(403, "Forbidden: invalid origin")
                 return None
 
             # Image file serving (GET only, safe image extensions)

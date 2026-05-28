@@ -363,7 +363,28 @@ class TestStaticFileServing:
                 assert resp.status == 200
                 assert resp.read() == img.read_bytes()
                 assert resp.headers.get("Content-Type") == "image/png"
-                assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+                # No Origin header was sent; CORS header is omitted for same-origin.
+                assert resp.headers.get("Access-Control-Allow-Origin") is None
+        finally:
+            server.stop()
+
+    def test_serves_safe_image_file_with_allowed_origin(self, tmp_path) -> None:
+        port = get_free_port()
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+
+        server = BridgeServer(ui_queue=queue.Queue(), port=port, static_dir=str(tmp_path))
+        server.start()
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/workspace/test.png",
+                headers={"Origin": "http://localhost:3000"},
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                assert resp.status == 200
+                assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
         finally:
             server.stop()
 
@@ -590,6 +611,107 @@ class TestFrontendServing:
             assert exc_info.value.code == 404
         finally:
             server.stop()
+
+
+class TestOriginValidation:
+    def test_rejects_evil_origin(self) -> None:
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
+        server.start()
+        try:
+            import websockets
+
+            with pytest.raises(websockets.InvalidStatus):
+                asyncio.run(
+                    _ws_connect_with_origin(_ws_uri(port), origin="http://evil.com")
+                )
+        finally:
+            server.stop()
+
+    def test_rejects_localhost_substring_spoof(self) -> None:
+        """Substring matching is not enough; only exact hostnames are allowed."""
+        port = get_free_port()
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
+        server.start()
+        try:
+            import websockets
+
+            with pytest.raises(websockets.InvalidStatus):
+                asyncio.run(
+                    _ws_connect_with_origin(_ws_uri(port), origin="http://not-localhost.evil.com")
+                )
+        finally:
+            server.stop()
+
+    def test_accepts_localhost_origin(self) -> None:
+        port = get_free_port()
+        ui_q = queue.Queue()
+        server = BridgeServer(ui_queue=ui_q, port=port)
+        server.start()
+        try:
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
+            raw = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="http://localhost:3000")
+            )
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.append"
+        finally:
+            server.stop()
+
+    def test_accepts_127_0_0_1_origin(self) -> None:
+        port = get_free_port()
+        ui_q = queue.Queue()
+        server = BridgeServer(ui_queue=ui_q, port=port)
+        server.start()
+        try:
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
+            raw = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="http://127.0.0.1:3000")
+            )
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.append"
+        finally:
+            server.stop()
+
+    def test_allows_env_origin_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        port = get_free_port()
+        monkeypatch.setenv("PIPER_WEB_UI_ALLOWED_ORIGINS", "myhost.local")
+        ui_q = queue.Queue()
+        server = BridgeServer(ui_queue=ui_q, port=port)
+        server.start()
+        try:
+            import websockets
+
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
+            # Default localhost should still work
+            raw = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="http://localhost:3000")
+            )
+            frame = json.loads(raw)
+            assert frame["frame"] == "event"
+
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello2"}))
+            # Custom env host should also work
+            raw2 = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="http://myhost.local")
+            )
+            frame2 = json.loads(raw2)
+            assert frame2["frame"] == "event"
+
+            # Evil host should still fail
+            with pytest.raises(websockets.InvalidStatus):
+                asyncio.run(
+                    _ws_connect_with_origin(_ws_uri(port), origin="http://evil.com")
+                )
+        finally:
+            server.stop()
+
+
+async def _ws_connect_with_origin(uri: str, origin: str) -> str:
+    import websockets
+
+    async with websockets.connect(uri, origin=origin) as ws:
+        return await asyncio.wait_for(ws.recv(), timeout=_DEFAULT_TIMEOUT)
 
 
 class TestHandleConnectionErrors:

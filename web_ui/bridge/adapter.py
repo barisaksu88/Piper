@@ -247,6 +247,12 @@ def _normalize_empty_payload(_payload: object) -> dict[str, Any]:
     return {}
 
 
+def _normalize_stop_ack_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return {"reason": str(payload.get("reason") or "cancelled")}
+    return {"reason": "cancelled"}
+
+
 def _normalize_auth_status_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
         return {"waiting": bool(payload.get("waiting"))}
@@ -326,6 +332,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "status_widget_step": _normalize_generic_string_payload,
     "status_widget_dashboard_activity": _normalize_generic_string_payload,
     "ui_controls_refresh": _normalize_empty_payload,
+    "stop_ack": _normalize_stop_ack_payload,
     "boot_log": _normalize_generic_string_payload,
     "boot_ready": _normalize_generic_string_payload,
     "clear_thinking": _normalize_empty_payload,

@@ -38,14 +38,16 @@ class Interpreter:
         # --- SECURITY JAIL V4 (AST-BASED) ---
         BLOCKED_IMPORTS = {
             "shutil", "subprocess", "multiprocessing",
-            "socket", "ctypes", "importlib", "os", "sys"
+            "socket", "ctypes", "importlib", "os", "sys",
+            "pathlib",
         }
         BLOCKED_CALLS = {
             "__import__", "eval", "exec", "compile", "open", "getattr"
         }
         BLOCKED_ATTR_ROOTS = {
             "__builtins__", "os", "subprocess", "shutil",
-            "multiprocessing", "socket", "ctypes", "importlib", "sys"
+            "multiprocessing", "socket", "ctypes", "importlib", "sys",
+            "pathlib",
         }
 
         try:
@@ -100,6 +102,16 @@ class Interpreter:
                                 status="blocked",
                                 summary=f"SECURITY VIOLATION: __builtins__ access is blocked.",
                             )
+            # Block subscript access on forbidden roots (e.g., __builtins__["__import__"])
+            elif isinstance(node, ast.Subscript):
+                root_node = node.value
+                while isinstance(root_node, (ast.Attribute, ast.Subscript)):
+                    root_node = root_node.value
+                if isinstance(root_node, ast.Name) and root_node.id in BLOCKED_ATTR_ROOTS:
+                    return ExecutionReport(
+                        status="blocked",
+                        summary=f"SECURITY VIOLATION: Subscript access on '{root_node.id}' is blocked.",
+                    )
             # Block direct attribute access on forbidden roots (e.g., os.system without call)
             elif isinstance(node, ast.Attribute):
                 root = None

@@ -322,9 +322,9 @@ class LlamaServerClient:
             if body:
                 detail += f" | body: {body[:500]}"
             _LOG.error("LLM server returned HTTP error: %s", detail)
-            yield json.dumps({"error": f"LLM_HTTP_{e.code}", "detail": detail})
+            raise LLMClientError(f"LLM_HTTP_{e.code}: {detail}") from e
         except Exception as e:
             _LOG.error("LLM request failed: %s", e)
-            yield json.dumps({"error": "LLM_REQUEST_FAILED", "detail": str(e)})
+            raise LLMClientError(f"LLM_REQUEST_FAILED: {e}") from e
         finally:
             self._request_lock.release()

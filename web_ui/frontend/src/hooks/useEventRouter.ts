@@ -378,6 +378,14 @@ export function useEventRouter({
           break;
         }
 
+        case "stop.ack": {
+          suppressStreamRef.current = false;
+          settleStreaming();
+          setStatusText("Idle");
+          setModeText("");
+          break;
+        }
+
         case "chat.append": {
           const p = payload as { role?: string; content?: string };
           const role = String(p.role || "system") as ChatMessage["role"];
