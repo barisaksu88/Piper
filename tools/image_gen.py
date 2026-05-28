@@ -97,7 +97,8 @@ class ImageGenerator:
 
         if psutil is not None:
             for conn in psutil.net_connections(kind="inet"):
-                if conn.status == psutil.CONN_LISTENING and conn.laddr.port == port:
+                _listen_status = getattr(psutil, "CONN_LISTENING", psutil.CONN_LISTEN)
+                if conn.status == _listen_status and conn.laddr.port == port:
                     if conn.pid is not None:
                         pids.add(conn.pid)
             for pid in pids:
