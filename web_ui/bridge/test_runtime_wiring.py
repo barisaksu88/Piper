@@ -1269,6 +1269,72 @@ class TestBootReadyWebState:
         assert bridge_q.qsize() == 1
 
 
+class TestStatsViewRefreshWebMode:
+    def test_stats_view_refresh_does_not_call_refresh_stats_view(self) -> None:
+        """pump_ui_queue_web must NOT call controller.refresh_stats_view()
+        because that method touches DearPyGui widgets and can hard-exit
+        when no DPG context is active."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.stats_collector = MagicMock()
+        ctrl.stats_collector.build_dashboard_snapshot.return_value = {
+            "summary_text": "2 turns",
+            "record_count": 2,
+        }
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("stats_view_refresh", ""))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        ctrl.refresh_stats_view.assert_not_called()
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "stats_view_refresh"
+        assert payload == {"summary_text": "2 turns", "record_count": 2}
+
+    def test_stats_view_refresh_forwards_original_dict_on_snapshot_failure(self) -> None:
+        """If build_dashboard_snapshot raises, the original dict payload
+        should still be forwarded."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.stats_collector = MagicMock()
+        ctrl.stats_collector.build_dashboard_snapshot.side_effect = RuntimeError("boom")
+
+        bridge_q: queue.Queue = queue.Queue()
+        original = {"summary_text": "fallback"}
+        ctrl.ui_queue.put(("stats_view_refresh", original))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        ctrl.refresh_stats_view.assert_not_called()
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "stats_view_refresh"
+        assert payload == original
+
+    def test_stats_view_refresh_forwards_empty_dict_for_non_dict_payload(self) -> None:
+        """If payload is not a dict and snapshot also fails, forward {}."""
+        from ui.controller_queue import pump_ui_queue_web
+
+        ctrl = MagicMock()
+        ctrl.ui_queue = queue.Queue()
+        ctrl.stats_collector = MagicMock()
+        ctrl.stats_collector.build_dashboard_snapshot.side_effect = RuntimeError("boom")
+
+        bridge_q: queue.Queue = queue.Queue()
+        ctrl.ui_queue.put(("stats_view_refresh", "not a dict"))
+        pump_ui_queue_web(ctrl, forward_queue=bridge_q)
+
+        ctrl.refresh_stats_view.assert_not_called()
+        assert bridge_q.qsize() == 1
+        kind, payload = bridge_q.get_nowait()
+        assert kind == "stats_view_refresh"
+        assert payload == {}
+
+
 class TestStateSyncedDuplicatePrevention:
     def test_state_synced_chat_append_not_re_appended(self) -> None:
         """_state_synced chat_append must be forwarded but NOT duplicate chat_state."""

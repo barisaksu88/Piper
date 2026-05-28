@@ -365,8 +365,7 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
             continue
 
         if kind == "stats_view_refresh":
-            controller.refresh_stats_view()
-            enriched_payload = payload
+            enriched_payload = payload if isinstance(payload, dict) else {}
             try:
                 snapshot = controller.stats_collector.build_dashboard_snapshot()
                 if isinstance(snapshot, dict):
