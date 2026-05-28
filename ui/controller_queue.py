@@ -395,6 +395,8 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
 
         if kind == "document_ingest_active":
             controller.document_ingest_active = bool(payload)
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
             continue
 
         if kind == "live_screen_refresh":
@@ -469,6 +471,61 @@ def pump_ui_queue_web(controller, forward_queue: queue.Queue | None = None) -> N
                 controller.code_session_meta = ""
                 if controller.runtime_mode == "CODE SESSION":
                     controller.runtime_mode = "IDLE"
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "code_session_launch":
+            try:
+                controller.set_code_status("Launching embedded process...")
+                path = str((payload or {}).get("path") or "").strip()
+                if path:
+                    controller.start_code_session(path)
+            except Exception as exc:
+                controller.set_code_session_active(False)
+                controller.set_code_status(f"Launch failed: {exc}")
+                controller.append_code_output(f"\n[Embedded code launch failed: {exc}]\n")
+            controller.maybe_speak_ui_event(kind, payload)
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "code_session_output":
+            controller.append_code_output(str(payload))
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "code_session_status":
+            controller.set_code_status(str(payload))
+            controller.maybe_speak_ui_event(kind, payload)
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "code_session_focus":
+            controller.focus_code_input()
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "code_view":
+            if not controller.has_active_code_session():
+                controller.replace_code_output(str(payload))
+                controller.refresh_interaction_state()
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "stats_view_refresh":
+            controller.refresh_stats_view()
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
+            continue
+
+        if kind == "config_reloaded":
+            if forward_queue is not None:
+                forward_queue.put((kind, payload))
             continue
 
         if kind == "vision_snapshot_note":

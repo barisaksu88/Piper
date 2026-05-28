@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
+
+_LOG = logging.getLogger(__name__)
 
 import dearpygui.dearpygui as dpg
 
@@ -56,8 +59,8 @@ def _log_voice_identity_ui(message: str) -> None:
         CFG.DEBUG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CFG.DEBUG_DIR / "voice_identity_debug.txt", "a", encoding="utf-8") as f:
             f.write("[ui] " + str(message).rstrip() + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("voice identity ui log failed: %s", e, exc_info=True)
 
 
 def _voice_drift_confirmation_turns() -> int:
@@ -132,8 +135,8 @@ def _announce_voice_identity_event(controller, text: str) -> None:
     _set_voice_identity_notice(controller, clean)
     try:
         controller.safe_log(clean)
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("safe_log failed: %s", e, exc_info=True)
 
 
 def _clear_conversation_summary_file() -> None:
@@ -149,8 +152,8 @@ def _clear_conversation_summary_file_at(path: Path | None = None) -> None:
     target = Path(path) if path is not None else CFG.CONVERSATION_SUMMARY_PATH
     try:
         target.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("conversation summary file unlink failed: %s", e, exc_info=True)
 
 
 def _refresh_active_user_style(controller) -> None:
@@ -173,8 +176,8 @@ def _set_runtime_default_style_filename(controller, style_filename: str) -> None
         registry = getattr(controller.user_runtime, "registry", None)
         if registry is not None:
             registry.default_style_filename = filename
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("set default style filename failed: %s", e, exc_info=True)
 
 
 def _current_style_status_payload(controller) -> dict[str, str]:
@@ -197,15 +200,15 @@ def _current_style_status_payload(controller) -> dict[str, str]:
 def _queue_style_status(controller) -> None:
     try:
         controller.ui_queue.put(("style_status", _current_style_status_payload(controller)))
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("queue style status failed: %s", e, exc_info=True)
 
 
 def _queue_active_user_changed(controller, *, preserve_transcript: bool = False) -> None:
     try:
         controller.ui_queue.put(("active_user_changed", {"preserve_transcript": bool(preserve_transcript)}))
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("queue active user changed failed: %s", e, exc_info=True)
 
 
 def _render_user_list_message(controller) -> str:
@@ -249,12 +252,12 @@ def _apply_active_user_switch(
 ) -> None:
     try:
         controller.tts.stop()
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("tts.stop() failed: %s", e, exc_info=True)
     try:
         controller.agent_brain.suspend_runtime_sessions()
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("suspend_runtime_sessions failed: %s", e, exc_info=True)
     # Privacy model: when switching from unknown to identified, preserve the
     # unknown-phase conversation as the new user's current transcript. Do not
     # insert a new-session marker; the conversation did not restart, ownership
@@ -267,15 +270,15 @@ def _apply_active_user_switch(
                 for m in controller.chat_state.get_messages_snapshot()
                 if str(m.get("role") or "").lower() in ("user", "assistant")
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("get_messages_snapshot failed: %s", e, exc_info=True)
     controller.chat_state.bind_memory_path(controller.user_runtime.current_memory_path())
     if _captured_messages:
         try:
             for msg in _captured_messages:
                 controller.chat_state.persist_turn(msg["role"], msg["content"])
-        except Exception:
-            pass
+        except Exception as e:
+            _LOG.debug("persist_turn failed: %s", e, exc_info=True)
     elif not previous_was_unknown and not preserve_current_session:
         controller.chat_state.begin_fresh_session(wipe_persistent=False)
     controller.session_meta = "Session: active" if (previous_was_unknown or preserve_current_session) else "Session: fresh"
@@ -501,8 +504,8 @@ def _apply_voice_identity_match(controller, engine) -> None:
         )
     try:
         controller.safe_log(f"Voice identity match: {matched_user} score={float(similarity or 0.0):.3f}")
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("safe_log voice identity match failed: %s", e, exc_info=True)
 
 
 def reset_mic_ui(controller) -> None:

@@ -79,13 +79,80 @@ class ImageGenerator:
             except:
                 pass
             self.process = None
-        
-        # Safe kill command using a raw string to avoid syntax errors
-        kill_cmd = f'for /f "tokens=5" %a in (\'netstat -aon ^| find ":{COMFY_PORT}" ^| find "LISTENING"\') do taskkill /f /pid %a >nul 2>&1'
+
+        self._kill_processes_on_port(COMFY_PORT)
+
+    def _kill_processes_on_port(self, port: int) -> None:
+        """Kill any processes listening on the given port.
+
+        Uses psutil if available, otherwise falls back to platform-specific
+        subprocess commands (taskkill on Windows, kill on Unix).
+        """
         try:
-            os.system(kill_cmd)
-        except:
-            pass
+            import psutil
+        except ImportError:  # pragma: no cover
+            psutil = None  # type: ignore[assignment]
+
+        pids = set()
+
+        if psutil is not None:
+            for conn in psutil.net_connections(kind="inet"):
+                if conn.status == psutil.CONN_LISTENING and conn.laddr.port == port:
+                    if conn.pid is not None:
+                        pids.add(conn.pid)
+            for pid in pids:
+                try:
+                    proc = psutil.Process(pid)
+                    proc.kill()
+                    _LOG.info("[ImageGen] Killed process %s on port %s", pid, port)
+                except Exception:
+                    pass
+            return
+
+        # Fallback without psutil
+        import platform
+        if platform.system() == "Windows":
+            try:
+                result = subprocess.run(
+                    ["netstat", "-aon"],
+                    capture_output=True, text=True, timeout=10
+                )
+                for line in result.stdout.splitlines():
+                    if f":{port}" in line and "LISTENING" in line:
+                        parts = line.strip().split()
+                        if parts:
+                            try:
+                                pid = int(parts[-1])
+                                pids.add(pid)
+                            except ValueError:
+                                continue
+                for pid in pids:
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(pid)],
+                        capture_output=True, timeout=10
+                    )
+                    _LOG.info("[ImageGen] Killed process %s on port %s", pid, port)
+            except Exception:
+                pass
+        else:
+            try:
+                result = subprocess.run(
+                    ["lsof", "-i", f":{port}", "-t"],
+                    capture_output=True, text=True, timeout=10
+                )
+                for line in result.stdout.strip().splitlines():
+                    try:
+                        pids.add(int(line.strip()))
+                    except ValueError:
+                        continue
+                for pid in pids:
+                    subprocess.run(
+                        ["kill", "-9", str(pid)],
+                        capture_output=True, timeout=10
+                    )
+                    _LOG.info("[ImageGen] Killed process %s on port %s", pid, port)
+            except Exception:
+                pass
 
     def generate(self, prompt: str, *, cancel_token: CancellationToken | None = None) -> str:
         """Generates an image using Z-Image (1248x1248)."""

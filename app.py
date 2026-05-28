@@ -193,11 +193,26 @@ def build_controller() -> PiperController:
 
     searxng_service = SearXNGService()
     searxng_service.ensure_available()
-    atexit.register(searxng_service.shutdown)
 
-    atexit.register(boot_mgr.shutdown)
-    atexit.register(live_screen.stop)
-    atexit.register(agent_brain.shutdown)
+    def _shutdown_all():
+        try:
+            agent_brain.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Brain shutdown failed: %s", e)
+        try:
+            live_screen.stop()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Live screen stop failed: %s", e)
+        try:
+            boot_mgr.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("Boot manager shutdown failed: %s", e)
+        try:
+            searxng_service.shutdown()
+        except Exception as e:
+            logging.getLogger(__name__).debug("SearXNG shutdown failed: %s", e)
+
+    atexit.register(_shutdown_all)
 
     return PiperController(
         searxng_service=searxng_service,

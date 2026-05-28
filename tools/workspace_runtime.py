@@ -404,6 +404,8 @@ class WorkspaceToolRuntime:
                 result.update(evidence)
                 return result
             interpreter = Interpreter(self.workspace)
+            if cancel_token and cancel_token.cancelled:
+                return {"status": "CANCELLED"}
             report = interpreter.run_report(clean_code, cancel_token=cancel_token)
             after = self._workspace_snapshot()
             evidence = self._workspace_diff(before, after)

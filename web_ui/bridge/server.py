@@ -93,6 +93,26 @@ class BridgeServer:
         self._shutdown_event = threading.Event()
         self._ws_server: websockets.WebSocketServer | None = None
 
+    def _cors_origin(self, request: Any) -> str | None:
+        """Return the allowed CORS origin for a request.
+
+        Only localhost origins (127.0.0.1, localhost) are allowed.
+        Returns the request origin if it is localhost, otherwise None.
+        """
+        origin = getattr(request, "headers", {})
+        if hasattr(origin, "get"):
+            origin = origin.get("Origin", "")
+        else:
+            origin = ""
+        if origin:
+            lower = origin.lower()
+            if "localhost" in lower or "127.0.0.1" in lower:
+                return origin
+        # If no Origin header, allow if the server binds to localhost
+        if self._host in ("127.0.0.1", "localhost", "::1"):
+            return None  # No CORS header needed for same-origin
+        return None
+
     # ------------------------------------------------------------------
     # Public lifecycle API
     # ------------------------------------------------------------------
@@ -206,27 +226,37 @@ class BridgeServer:
             path = getattr(request, "path", "")
             method = getattr(request, "method", "GET")
 
-            # WebSocket upgrade path
+            # WebSocket upgrade path — validate origin before allowing upgrade
             if path == self._ws_path:
+                origin = getattr(request, "headers", {})
+                if hasattr(origin, "get"):
+                    origin = origin.get("Origin", "")
+                else:
+                    origin = ""
+                if origin:
+                    lower = origin.lower()
+                    if "localhost" not in lower and "127.0.0.1" not in lower:
+                        _LOG.warning("WebSocket connection rejected: invalid origin '%s'", origin)
+                        return connection.respond(403, "Forbidden: invalid origin")
                 return None
 
             # Image file serving (GET only, safe image extensions)
             if method == "GET" and path.startswith("/images/"):
-                response = await self._serve_image_file(path)
+                response = await self._serve_image_file(path, request)
                 if response is not None:
                     return response
                 return connection.respond(404, "Not Found")
 
             # Static file serving (GET only, safe image extensions)
             if method == "GET" and path.startswith("/workspace/"):
-                response = await self._serve_static_file(path)
+                response = await self._serve_static_file(path, request)
                 if response is not None:
                     return response
                 return connection.respond(404, "Not Found")
 
             # Frontend static file serving
             if method == "GET":
-                response = await self._serve_frontend_file(path)
+                response = await self._serve_frontend_file(path, request)
                 if response is not None:
                     return response
 
@@ -277,7 +307,7 @@ class BridgeServer:
             self._ws_server = None
 
     async def _serve_static_file(
-        self, path: str
+        self, path: str, request: Any
     ) -> websockets.Response | None:
         """Serve a safe static file from ``self._static_dir``.
 
@@ -323,13 +353,15 @@ class BridgeServer:
 
         headers = websockets.Headers()
         headers["Content-Type"] = content_type
-        headers["Access-Control-Allow-Origin"] = "*"
+        cors = self._cors_origin(request)
+        if cors:
+            headers["Access-Control-Allow-Origin"] = cors
         headers["Cache-Control"] = "no-cache"
 
         return websockets.Response(200, "OK", headers, body=data)
 
     async def _serve_image_file(
-        self, path: str
+        self, path: str, request: Any
     ) -> websockets.Response | None:
         """Serve a safe image file from ``self._static_dir`` at ``/images/{filename}``.
 
@@ -375,13 +407,15 @@ class BridgeServer:
 
         headers = websockets.Headers()
         headers["Content-Type"] = content_type
-        headers["Access-Control-Allow-Origin"] = "*"
+        cors = self._cors_origin(request)
+        if cors:
+            headers["Access-Control-Allow-Origin"] = cors
         headers["Cache-Control"] = "no-cache"
 
         return websockets.Response(200, "OK", headers, body=data)
 
     async def _serve_frontend_file(
-        self, path: str
+        self, path: str, request: Any
     ) -> websockets.Response | None:
         """Serve a safe static file from ``self._frontend_dist_dir``.
 
@@ -431,7 +465,9 @@ class BridgeServer:
 
         headers = websockets.Headers()
         headers["Content-Type"] = content_type
-        headers["Access-Control-Allow-Origin"] = "*"
+        cors = self._cors_origin(request)
+        if cors:
+            headers["Access-Control-Allow-Origin"] = cors
         headers["Cache-Control"] = "no-cache"
 
         return websockets.Response(200, "OK", headers, body=data)
