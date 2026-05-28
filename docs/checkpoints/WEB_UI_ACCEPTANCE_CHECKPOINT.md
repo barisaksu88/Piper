@@ -66,6 +66,8 @@ These features are verified working and accepted for daily use:
 - [x] Voice identity drift is 3-strike confirmed (admin not revoked on one sample)
 - [x] New Session clears chat and resets context
 - [x] Stop button interrupts generation
+- [x] Stop button stays enabled while TTS is synthesizing/playing (after stream ends)
+- [x] Stop clears top GENERATING pill and prevents late delta second bubbles
 - [x] Restart button restarts Piper cleanly
 - [x] Restart closes the pywebview window before re-exec
 - [x] Code Session panel exists and functions
@@ -92,6 +94,7 @@ These items are explicitly out of scope for default readiness:
 |---|---|---|
 | Browser MediaRecorder mic upload | Quarantined | Available only behind `VITE_PIPER_EXPERIMENTAL_MIC_UPLOAD=true`. Native MIC is the accepted path. |
 | TTS in browser/window | Not implemented | TTS still plays through native OS audio. No browser TTS integration. |
+| TTS streaming chunker | Implemented | 3-phase chunker: fast first chunk (8/80), aggressive second refill (100/150), quality later chunks (280/320). |
 | Native OS packaging / installer | Not implemented | No `.exe` installer or Start Menu shortcut yet. |
 | Web UI as default | Accepted | Desktop window mode is now the default. |
 | DearPyGui retirement | Deferred | Fallback must remain until Web UI parity is proven over time. |
@@ -158,12 +161,27 @@ python app.py
 - [ ] System/Identity panel shows stats
 - [ ] Raw Events inspector shows backend frames
 
-### 6.5 Cleanup
+### 6.5 Workspace Images
+- [ ] Nested workspace files are listed (including images)
+- [ ] Image files open via workspace-relative `/workspace/...` URLs
+- [ ] Paths with backslashes/spaces work correctly
+
+### 6.6 Search / Route Regressions
+- [ ] Conversational prompts like "show me the planets" route to CHAT, not FILE_WORK
+- [ ] Workspace followups like "Read it back" after file context still route to FILE_WORK
+- [ ] No `looks_like_live_environment_query` NameError in logs
+
+### 6.7 TTS Streaming
+- [ ] TTS starts speaking quickly (first chunk fast-start)
+- [ ] Minimal pause between first and second spoken chunk
+- [ ] Later chunks sound natural (larger, preserving emotional continuity)
+
+### 6.8 Cleanup
 - [ ] Close desktop window
 - [ ] Backend exits without traceback
 - [ ] No lingering `python.exe` or `llama-server.exe` processes
 
-### 6.6 Fallback Verification
+### 6.9 Fallback Verification
 - [ ] Unset `PIPER_WEB_UI_ENABLED`
 - [ ] `python app.py` opens DearPyGui as before
 - [ ] DearPyGui chat, MIC, and panels work normally

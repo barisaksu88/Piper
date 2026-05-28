@@ -348,7 +348,7 @@ export default function App() {
         connState={connState}
         statusText={primaryStatusText}
         modeText={detailModeText}
-        canStop={isGenerating}
+        canStop={isGenerating || ttsState === "synthesizing" || ttsState === "playing"}
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}

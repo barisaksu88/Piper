@@ -1270,28 +1270,40 @@ finally {
 
 
 class _StreamChunker:
-    """Implements: 
-    - First chunk: Fast start (~20 chars).
-    - Remaining chunks: Normal flow (~100 chars) to preserve emotion.
+    """Implements 3-phase streaming chunking:
+    - Phase 0 (first chunk): Fast start, complete short sentences, force split at ~80.
+    - Phase 1 (second chunk): Medium-fast refill, force split at ~210.
+    - Phase 2+ (later chunks): Quality mode, longer emotional phrasing, force split at ~320.
     - Treats newlines as sentence endings (pauses).
     """
 
     # Added \n to detect line breaks as pauses
     _SENT_END_RE = re.compile(r"(?:(?<!\d)[.!?]|\n)")
 
-    def __init__(self, first_min_chars: int = 20, next_min_chars: int = 100, max_chars: int = 300):
-        self.first_min_chars = int(first_min_chars)
-        self.next_min_chars = int(next_min_chars)
+    def __init__(
+        self,
+        first_complete_min_chars: int = 8,
+        first_force_chars: int = 80,
+        second_min_chars: int = 100,
+        second_force_chars: int = 150,
+        later_min_chars: int = 280,
+        max_chars: int = 320,
+    ):
+        self.first_complete_min_chars = int(first_complete_min_chars)
+        self.first_force_chars = int(first_force_chars)
+        self.second_min_chars = int(second_min_chars)
+        self.second_force_chars = int(second_force_chars)
+        self.later_min_chars = int(later_min_chars)
         self.max_chars = int(max_chars)
-        
+
         self.buf = ""
         self.emitted = 0
-        self._first_chunk_sent = False
+        self._chunks_sent = 0
 
     def reset(self) -> None:
         self.buf = ""
         self.emitted = 0
-        self._first_chunk_sent = False
+        self._chunks_sent = 0
 
     def push(self, delta: str) -> List[str]:
         if not delta:
@@ -1316,64 +1328,68 @@ class _StreamChunker:
         self.reset()
         return out
 
+    def _phase_settings(self) -> tuple[int, int]:
+        if self._chunks_sent == 0:
+            return self.first_complete_min_chars, self.first_force_chars
+        if self._chunks_sent == 1:
+            return self.second_min_chars, self.second_force_chars
+        return self.later_min_chars, self.max_chars
+
+    def _find_safe_split(self, limit: int) -> int:
+        """Return absolute index of a safe split point at or before `limit` chars
+        from current emitted position. Prefers spaces, then commas, then the limit.
+        """
+        end = self.emitted + limit
+        # Prefer space
+        space_pos = self.buf.rfind(" ", self.emitted, end)
+        if space_pos != -1 and space_pos > self.emitted:
+            return space_pos
+        # Fallback: comma
+        comma_pos = self.buf.rfind(",", self.emitted, end)
+        if comma_pos != -1 and comma_pos > self.emitted:
+            return comma_pos
+        return end
+
     def _emit_ready(self, *, intermediate: bool) -> List[str]:
         out: List[str] = []
 
         while True:
             remaining = self.buf[self.emitted :]
-            
-            # SAFETY VALVE: Force split if huge
-            if len(remaining) >= self.max_chars:
-                cut_pos = remaining.rfind(' ', 0, self.max_chars)
-                if cut_pos == -1:
-                    cut_pos = self.max_chars
-                
-                chunk = self.buf[self.emitted : self.emitted + cut_pos].strip()
-                self.emitted += cut_pos
-                if chunk:
-                    out.append(chunk)
-                    self._first_chunk_sent = True # Ensure we switch mode if we force split
-                continue
 
-            # Determine threshold
-            current_min_chars = self.first_min_chars
-            if self._first_chunk_sent:
-                current_min_chars = self.next_min_chars
+            min_chars, force_chars = self._phase_settings()
 
-            # --- NEW: NEWLINE HANDLING ---
-            # If we have a minimum amount of text AND a newline appears, treat it as a hard stop.
-            # This fixes reading lists: "1. Apple\n" will trigger immediately.
-            if '\n' in remaining and len(remaining) >= self.first_min_chars:
-                # Find the first newline in the current remaining buffer
-                nl_pos = remaining.find('\n')
-                # Cut the chunk there
+            # Newline handling: treat as hard stop if enough chars
+            if "\n" in remaining and len(remaining) >= self.first_complete_min_chars:
+                nl_pos = remaining.find("\n")
                 chunk = remaining[:nl_pos].strip()
                 if chunk:
                     out.append(chunk)
-                    self.emitted += nl_pos + 1 # +1 to skip the newline itself
-                    self._first_chunk_sent = True
-                    continue # Loop again to process the next part
-            # ------------------------------
+                    self.emitted += nl_pos + 1
+                    self._chunks_sent += 1
+                    continue
 
             # Normal logic
-            if len(remaining) < current_min_chars:
+            if len(remaining) < min_chars:
                 break
 
-            search_from = self.emitted + current_min_chars
+            search_from = self.emitted
             m = self._SENT_END_RE.search(self.buf, pos=search_from)
-            
-            if not m:
-                if intermediate:
-                    break
-                cut = len(self.buf)
-            else:
+
+            if m:
                 cut = m.end()
+            else:
+                if intermediate and len(remaining) < force_chars:
+                    break
+                if intermediate:
+                    cut = self._find_safe_split(force_chars)
+                else:
+                    cut = len(self.buf)
 
             chunk = self.buf[self.emitted : cut].strip()
             self.emitted = cut
             if chunk:
                 out.append(chunk)
-                self._first_chunk_sent = True # Switch to relaxed mode
+                self._chunks_sent += 1
 
         return out
     
@@ -1414,7 +1430,14 @@ class TTS:
         self._stream_utterance: Optional[int] = None
         self._stream_voice: Optional[str] = None
         self._stream_speed: Optional[float] = None
-        self._stream_chunker = _StreamChunker(first_min_chars=20, next_min_chars=300)
+        self._stream_chunker = _StreamChunker(
+            first_complete_min_chars=8,
+            first_force_chars=80,
+            second_min_chars=100,
+            second_force_chars=150,
+            later_min_chars=280,
+            max_chars=320,
+        )
         self._warm_lock = threading.Lock()
         self._warmed = False
 

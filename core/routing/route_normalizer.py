@@ -1932,7 +1932,7 @@ def _normalize_workspace_document_lookup(
         or _extract_runtime_relevant_file_targets(recent_history)
     )
     if (
-        str((decision or {}).get("decision") or "").strip().upper() == "SEARCH"
+        str((decision or {}).get("decision") or "").strip().upper() in {"SEARCH", "CHAT"}
         and not workspace_scoped
         and not recent_workspace_context
     ):
