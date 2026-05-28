@@ -63,28 +63,56 @@ _SAFE_IMAGE_EXTENSIONS: set[str] = {
 }
 
 
-# Hostnames allowed as WebSocket / CORS origins.
+# Default hostnames allowed as WebSocket / CORS origins with any scheme/port.
 _DEFAULT_ALLOWED_ORIGIN_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
-def _get_allowed_origin_hosts() -> set[str]:
-    """Return allowed origin hostnames from defaults + env override."""
-    hosts = set(_DEFAULT_ALLOWED_ORIGIN_HOSTS)
+def _normalize_origin(origin: str) -> tuple[str, str, int]:
+    """Parse an origin string into (scheme, hostname, port).
+
+    Ports are normalized so that missing ports default to 80 for http and
+    443 for https, allowing consistent comparison.
+    """
+    parsed = urlparse(origin if "://" in origin else f"http://{origin}")
+    scheme = (parsed.scheme or "http").lower()
+    hostname = (parsed.hostname or "").strip().lower()
+    port = parsed.port
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, hostname, port
+
+
+def _get_env_allowed_origins() -> set[tuple[str, str, int]]:
+    """Return full origins from the PIPER_WEB_UI_ALLOWED_ORIGINS env var."""
+    allowed: set[tuple[str, str, int]] = set()
     raw = os.environ.get("PIPER_WEB_UI_ALLOWED_ORIGINS", "")
     for token in re.split(r"[,\s;]+", raw):
-        token = token.strip().lower()
-        if token:
-            hosts.add(token)
-    return hosts
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            allowed.add(_normalize_origin(token))
+        except ValueError:
+            continue
+    return allowed
 
 
 def _is_allowed_origin(origin: str) -> bool:
-    """Validate that *origin* parses to an allowed hostname."""
+    """Validate that *origin* is allowed.
+
+    localhost / 127.0.0.1 / ::1 are always allowed (any scheme/port).
+    Custom origins must match PIPER_WEB_UI_ALLOWED_ORIGINS exactly on
+    scheme, hostname, and port.
+    """
     if not origin:
         return False
-    parsed = urlparse(origin if "://" in origin else f"http://{origin}")
-    hostname = (parsed.hostname or "").strip().lower()
-    return hostname in _get_allowed_origin_hosts()
+    try:
+        scheme, hostname, port = _normalize_origin(origin)
+    except ValueError:
+        return False
+    if hostname in _DEFAULT_ALLOWED_ORIGIN_HOSTS:
+        return True
+    return (scheme, hostname, port) in _get_env_allowed_origins()
 
 
 class BridgeServer:

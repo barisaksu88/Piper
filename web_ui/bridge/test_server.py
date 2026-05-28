@@ -691,7 +691,7 @@ class TestOriginValidation:
             assert frame["frame"] == "event"
 
             ui_q.put(("chat_append", {"role": "assistant", "content": "hello2"}))
-            # Custom env host should also work
+            # Custom env host should also work (hostname-only entry matches any port)
             raw2 = asyncio.run(
                 _ws_connect_with_origin(_ws_uri(port), origin="http://myhost.local")
             )
@@ -703,6 +703,54 @@ class TestOriginValidation:
                 asyncio.run(
                     _ws_connect_with_origin(_ws_uri(port), origin="http://evil.com")
                 )
+        finally:
+            server.stop()
+
+    def test_rejects_env_origin_port_mismatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        port = get_free_port()
+        monkeypatch.setenv("PIPER_WEB_UI_ALLOWED_ORIGINS", "http://myhost.local:8080")
+        server = BridgeServer(ui_queue=queue.Queue(), port=port)
+        server.start()
+        try:
+            import websockets
+
+            # Same host, wrong port → rejected
+            with pytest.raises(websockets.InvalidStatus):
+                asyncio.run(
+                    _ws_connect_with_origin(_ws_uri(port), origin="http://myhost.local:9090")
+                )
+        finally:
+            server.stop()
+
+    def test_accepts_env_origin_with_exact_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        port = get_free_port()
+        monkeypatch.setenv("PIPER_WEB_UI_ALLOWED_ORIGINS", "http://myhost.local:8080")
+        ui_q = queue.Queue()
+        server = BridgeServer(ui_queue=ui_q, port=port)
+        server.start()
+        try:
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
+            raw = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="http://myhost.local:8080")
+            )
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.append"
+        finally:
+            server.stop()
+
+    def test_accepts_https_origin_default_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        port = get_free_port()
+        monkeypatch.setenv("PIPER_WEB_UI_ALLOWED_ORIGINS", "https://myhost.local")
+        ui_q = queue.Queue()
+        server = BridgeServer(ui_queue=ui_q, port=port)
+        server.start()
+        try:
+            ui_q.put(("chat_append", {"role": "assistant", "content": "hello"}))
+            raw = asyncio.run(
+                _ws_connect_with_origin(_ws_uri(port), origin="https://myhost.local")
+            )
+            frame = json.loads(raw)
+            assert frame["kind"] == "chat.append"
         finally:
             server.stop()
 

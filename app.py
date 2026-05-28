@@ -58,6 +58,38 @@ def _should_restart() -> bool:
     os.environ["PIPER_RESTART_FIRST_TIME"] = str(first)
     return count <= _MAX_RESTARTS
 
+
+class _ShutdownDispatcher:
+    """Singleton dispatcher that runs registered shutdown callbacks at process exit.
+
+    Guarantees exactly one atexit handler is registered regardless of how many
+    times build_controller() is called.
+    """
+
+    def __init__(self) -> None:
+        self._funcs: list[callable] = []
+        self._registered = False
+        self._called = False
+
+    def add(self, fn: callable) -> None:
+        self._funcs.append(fn)
+        if not self._registered:
+            atexit.register(self._run)
+            self._registered = True
+
+    def _run(self) -> None:
+        if self._called:
+            return
+        self._called = True
+        for fn in self._funcs:
+            try:
+                fn()
+            except Exception as e:
+                logging.getLogger(__name__).debug("Shutdown failed: %s", e)
+
+
+_shutdown_dispatcher = _ShutdownDispatcher()
+
 from core.agent import AgentBrain
 from core.environment_service import EnvironmentService
 from core.instructions_loader import InstructionLoader
@@ -194,12 +226,7 @@ def build_controller() -> PiperController:
     searxng_service = SearXNGService()
     searxng_service.ensure_available()
 
-    _shutdown_called = False
     def _shutdown_all():
-        nonlocal _shutdown_called
-        if _shutdown_called:
-            return
-        _shutdown_called = True
         try:
             agent_brain.shutdown()
         except Exception as e:
@@ -217,12 +244,7 @@ def build_controller() -> PiperController:
         except Exception as e:
             logging.getLogger(__name__).debug("SearXNG shutdown failed: %s", e)
 
-    registered_ids = getattr(build_controller, "_registered_shutdown_ids", set())
-    if id(_shutdown_all) not in registered_ids:
-        atexit.register(_shutdown_all)
-        if not hasattr(build_controller, "_registered_shutdown_ids"):
-            build_controller._registered_shutdown_ids = set()
-        build_controller._registered_shutdown_ids.add(id(_shutdown_all))
+    _shutdown_dispatcher.add(_shutdown_all)
 
     return PiperController(
         searxng_service=searxng_service,
