@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PiperBridge, WS_URL } from "./bridge";
-import type { ConnectionState, RailPanelId } from "./types";
+import type { AppView, ConnectionState, RailPanelId } from "./types";
 import TopBar from "./components/TopBar";
 import ChatPanel from "./components/ChatPanel";
 import AvatarStage from "./components/AvatarStage";
@@ -10,6 +10,7 @@ import StatusFooter from "./components/StatusFooter";
 import OperationScreen from "./components/OperationScreen";
 import SystemDrawer from "./components/SystemDrawer";
 import RightRail from "./components/RightRail";
+import StatsPanel from "./components/StatsPanel";
 import WorkspaceOverlay from "./components/WorkspaceOverlay";
 import { useOperationMode } from "./hooks/useOperationMode";
 import { usePiperUI } from "./hooks/usePiperUI";
@@ -101,7 +102,9 @@ export default function App() {
     isGenerating,
     activities,
     logs,
-    rawEvents,
+    filteredRawEvents,
+    rawEventFilter,
+    setRawEventFilter,
     errors,
     codeOutput,
     codeStatus,
@@ -116,6 +119,8 @@ export default function App() {
     selectedDocumentPaths,
     setSelectedDocumentPaths,
     micStatus,
+    liveScreen,
+    stats,
     handleFrame,
     appendActivity,
     stopStreamingLocally,
@@ -160,6 +165,8 @@ export default function App() {
     raw: false,
     capture: false,
   });
+
+  const [activeView, setActiveView] = useState<AppView>("chat");
 
   const [systemDrawerOpen, setSystemDrawerOpen] = useState(false);
 
@@ -207,6 +214,13 @@ export default function App() {
     },
     []
   );
+
+  // Request persisted stats when switching to Stats view
+  useEffect(() => {
+    if (activeView === "stats" && connState === "connected") {
+      sendAction("stats_refresh");
+    }
+  }, [activeView, connState, sendAction]);
 
   // Request workspace file list when empty workspace is shown
   useEffect(() => {
@@ -349,132 +363,145 @@ export default function App() {
         statusText={primaryStatusText}
         modeText={detailModeText}
         canStop={isGenerating || ttsState === "synthesizing" || ttsState === "playing"}
+        activeView={activeView}
+        onViewChange={setActiveView}
         onNewSession={handleNewSession}
         onRestart={handleRestart}
         onStop={handleStop}
         onOpenSystem={() => setSystemDrawerOpen(true)}
       />
 
-      <div className="app-body">
-        {/* Column 1: Chat */}
-        <div className="chat-col">
-          {authWaiting && (
-            <div className="auth-banner">
-              <span className="auth-icon">🔒</span>
-              <span className="auth-text">
-                Password required. Type the password below or /cancel.
-              </span>
-            </div>
-          )}
-          {isOperational ? (
-            <ChatPanel
-              messages={messages}
-              inputText={inputText}
-              setInputText={setInputText}
-              onSend={handleSend}
-              onKeyDown={handleKeyDown}
-              chatBoxRef={chatBoxRef}
-              connState={connState}
-              userName={userName}
-              authWaiting={authWaiting}
-            />
-          ) : (
-            <OperationScreen steps={steps} message={bootMessage} title="Booting" />
-          )}
+      {activeView === "stats" ? (
+        <div className="app-body stats-view">
+          <div className="stats-view-content">
+            <StatsPanel stats={stats} />
+          </div>
         </div>
+      ) : (
+        <div className="app-body">
+          {/* Column 1: Chat */}
+          <div className="chat-col">
+            {authWaiting && (
+              <div className="auth-banner">
+                <span className="auth-icon">🔒</span>
+                <span className="auth-text">
+                  Password required. Type the password below or /cancel.
+                </span>
+              </div>
+            )}
+            {isOperational ? (
+              <ChatPanel
+                messages={messages}
+                inputText={inputText}
+                setInputText={setInputText}
+                onSend={handleSend}
+                onKeyDown={handleKeyDown}
+                chatBoxRef={chatBoxRef}
+                connState={connState}
+                userName={userName}
+                authWaiting={authWaiting}
+              />
+            ) : (
+              <OperationScreen steps={steps} message={bootMessage} title="Booting" />
+            )}
+          </div>
 
-        {/* Column 2, Row 1: Center stage */}
-        <div className="center-stage">
-          <AvatarStage state={avatarState} />
-          <ModeSelector styleLabel={styleLabel} userName={userName} />
-        </div>
+          {/* Column 2, Row 1: Center stage */}
+          <div className="center-stage">
+            <AvatarStage state={avatarState} />
+            <ModeSelector styleLabel={styleLabel} userName={userName} />
+          </div>
 
-        {/* Column 3: Right rail */}
-        <RightRail
-          expandedPanels={expandedRailPanels}
-          onTogglePanel={toggleRailPanel}
-          workspaceOpen={workspaceOpen}
-          onToggleWorkspace={() => setWorkspaceOpen(!workspaceOpen)}
-          connState={connState}
-          sendAction={sendAction}
-          documentIngestActive={documentIngestActive}
-          documentsView={documentsView}
-          documentsViewRef={documentsViewRef}
-          selectedDocumentPaths={selectedDocumentPaths}
-          documentPathInput={documentPathInput}
-          onDocumentPathChange={setDocumentPathInput}
-          onAddDocumentPaths={handleAddDocumentPaths}
-          onIngestSelected={handleIngestSelected}
-          onClearDocumentSelection={handleClearDocumentSelection}
-          onCancelIngest={() => sendAction("document_picker_cancel")}
-          activities={activities}
-          logs={logs}
-          rawEvents={rawEvents}
-        />
-
-        {/* Voice strip */}
-        <div className="voice-strip-col">
-          <VoiceStrip
-            micState={micState}
-            micButtonLabel={micButtonLabel}
-            micButtonClass={micButtonClass}
-            micDisabled={micDisabled}
-            micStatusText={micStatusText}
-            backendMicStatus={micStatus}
-            onMicClick={handleMicClick}
+          {/* Column 3: Right rail */}
+          <RightRail
+            expandedPanels={expandedRailPanels}
+            onTogglePanel={toggleRailPanel}
+            workspaceOpen={workspaceOpen}
+            onToggleWorkspace={() => setWorkspaceOpen(!workspaceOpen)}
             connState={connState}
-            isGenerating={isGenerating}
-            isSpeaking={isSpeaking}
-          />
-        </div>
-
-        {/* Workspace overlay */}
-        {workspaceOpen && (
-          <WorkspaceOverlay
-            workspace={workspace}
-            codePreview={codePreview}
-            onCodeChange={setCodePreview}
-            codeOutput={codeOutput}
-            codeRunning={codeActive}
-            codeStatus={codeStatus}
-            codePath={codePathInput}
-            onCodePathChange={setCodePathInput}
-            onCodeRun={handleCodeRun}
-            onCodeStop={handleCodeStop}
-            onCodeClear={() => setCodeOutput([])}
-            connState={connState}
-            stdinText={codeInputText}
-            onStdinChange={setCodeInputText}
-            onStdinSend={handleCodeSend}
-            onTextContentChange={workspace.setTextContent}
-            onTextSave={handleTextSave}
-            imageUrl={workspace.imageUrl}
-            visionText={workspace.visionText}
-            workspaceFiles={workspace.workspaceFiles}
-            workspacePath={workspace.workspacePath}
-            onFileFromList={(path: string) => {
-              const fileName = path.split(/[\\/]/).pop() || path;
-              const name = fileName.toLowerCase();
-              if (name.endsWith(".py")) {
-                workspace.openFile(path, "code");
-                setCodePathInput(path);
-                sendAction("read_workspace_file", { path });
-              } else if (name.endsWith(".txt") || name.endsWith(".md")) {
-                workspace.openFile(path, "text");
-                sendAction("read_workspace_file", { path });
-              } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
-                workspace.openFile(path, "vision");
-                workspace.setVisionImage(workspaceImageUrl(path, workspace.workspacePath));
-              }
-            }}
-            onFileSelected={() => {}}
-            onCloseWorkspace={() => setWorkspaceOpen(false)}
-            onCloseFile={() => workspace.closeFile()}
             sendAction={sendAction}
-            setCodePathInput={setCodePathInput}
+            documentIngestActive={documentIngestActive}
+            documentsView={documentsView}
+            documentsViewRef={documentsViewRef}
+            selectedDocumentPaths={selectedDocumentPaths}
+            documentPathInput={documentPathInput}
+            onDocumentPathChange={setDocumentPathInput}
+            onAddDocumentPaths={handleAddDocumentPaths}
+            onIngestSelected={handleIngestSelected}
+            onClearDocumentSelection={handleClearDocumentSelection}
+            onCancelIngest={() => sendAction("document_picker_cancel")}
+            activities={activities}
+            logs={logs}
+            rawEvents={filteredRawEvents}
+            rawEventFilter={rawEventFilter}
+            onRawEventFilterChange={setRawEventFilter}
+            liveScreen={liveScreen}
           />
-        )}
-      </div>
+
+          {/* Voice strip */}
+          <div className="voice-strip-col">
+            <VoiceStrip
+              micState={micState}
+              micButtonLabel={micButtonLabel}
+              micButtonClass={micButtonClass}
+              micDisabled={micDisabled}
+              micStatusText={micStatusText}
+              backendMicStatus={micStatus}
+              onMicClick={handleMicClick}
+              connState={connState}
+              isGenerating={isGenerating}
+              isSpeaking={isSpeaking}
+            />
+          </div>
+
+          {/* Workspace overlay */}
+          {workspaceOpen && (
+            <WorkspaceOverlay
+              workspace={workspace}
+              codePreview={codePreview}
+              onCodeChange={setCodePreview}
+              codeOutput={codeOutput}
+              codeRunning={codeActive}
+              codeStatus={codeStatus}
+              codePath={codePathInput}
+              onCodePathChange={setCodePathInput}
+              onCodeRun={handleCodeRun}
+              onCodeStop={handleCodeStop}
+              onCodeClear={() => setCodeOutput([])}
+              connState={connState}
+              stdinText={codeInputText}
+              onStdinChange={setCodeInputText}
+              onStdinSend={handleCodeSend}
+              onTextContentChange={workspace.setTextContent}
+              onTextSave={handleTextSave}
+              imageUrl={workspace.imageUrl}
+              visionText={workspace.visionText}
+              workspaceFiles={workspace.workspaceFiles}
+              workspacePath={workspace.workspacePath}
+              onFileFromList={(path: string) => {
+                const fileName = path.split(/[\\/]/).pop() || path;
+                const name = fileName.toLowerCase();
+                if (name.endsWith(".py")) {
+                  workspace.openFile(path, "code");
+                  setCodePathInput(path);
+                  sendAction("read_workspace_file", { path });
+                } else if (name.endsWith(".txt") || name.endsWith(".md")) {
+                  workspace.openFile(path, "text");
+                  sendAction("read_workspace_file", { path });
+                } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
+                  workspace.openFile(path, "vision");
+                  workspace.setVisionImage(workspaceImageUrl(path, workspace.workspacePath));
+                }
+              }}
+              onFileSelected={() => {}}
+              onCloseWorkspace={() => setWorkspaceOpen(false)}
+              onCloseFile={() => workspace.closeFile()}
+              sendAction={sendAction}
+              setCodePathInput={setCodePathInput}
+            />
+          )}
+        </div>
+      )}
 
       <StatusFooter statsText="" />
 

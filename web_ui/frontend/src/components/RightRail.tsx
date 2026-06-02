@@ -1,9 +1,10 @@
 import RailCard from "./RailCard";
-import type { RailPanelId } from "../types";
+import type { LiveScreenState, RailPanelId, RawEventFilter } from "../types";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
 const LIVE_SCREEN_INTERVALS = [2, 5, 10, 15];
+const RAW_EVENT_FILTERS: RawEventFilter[] = ["all", "errors", "system", "streaming"];
 
 interface RightRailProps {
   expandedPanels: Record<RailPanelId, boolean>;
@@ -30,6 +31,9 @@ interface RightRailProps {
     payload: Record<string, unknown>;
     receivedAt: number;
   }>;
+  rawEventFilter: RawEventFilter;
+  onRawEventFilterChange: (filter: RawEventFilter) => void;
+  liveScreen: LiveScreenState;
 }
 
 export default function RightRail({
@@ -52,6 +56,9 @@ export default function RightRail({
   activities,
   logs,
   rawEvents,
+  rawEventFilter,
+  onRawEventFilterChange,
+  liveScreen,
 }: RightRailProps) {
   return (
     <aside className="right-rail">
@@ -70,7 +77,24 @@ export default function RightRail({
         collapsible
         expanded={expandedPanels.capture}
         onToggle={() => onTogglePanel("capture")}
+        badge={
+          <span className={`rail-badge ${liveScreen.enabled ? "active" : liveScreen.pending ? "active" : ""}`}>
+            {liveScreen.enabled ? "Live" : liveScreen.pending ? "Pending" : "Idle"}
+          </span>
+        }
       >
+        <div className="capture-actions">
+          <button
+            className={`capture-toggle ${liveScreen.enabled ? "stop" : "start"}`}
+            onClick={() => sendAction("snapshot_toggle")}
+            disabled={connState !== "connected" || liveScreen.pending}
+          >
+            {liveScreen.pending ? "Starting..." : liveScreen.enabled ? "Stop Capture" : "Start Capture"}
+          </button>
+          {liveScreen.lastError && (
+            <div className="capture-error">{liveScreen.lastError}</div>
+          )}
+        </div>
         <div className="settings-row">
           <label className="setting-label">
             Event Speech
@@ -108,6 +132,26 @@ export default function RightRail({
               ))}
             </select>
           </label>
+        </div>
+        <div className="capture-status">
+          <div className="capture-status-row">
+            <span className={`live-screen-dot ${liveScreen.pending ? "pending" : liveScreen.enabled ? "pending" : "idle"}`} />
+            <span className="capture-status-label">
+              {liveScreen.pending ? "Starting..." : liveScreen.enabled ? "Live" : "Idle"}
+            </span>
+          </div>
+          {liveScreen.lastCaptureTs ? (
+            <>
+              <div className="capture-status-meta">
+                Last capture: {new Date(liveScreen.lastCaptureTs * 1000).toLocaleTimeString()}
+              </div>
+              {liveScreen.lastCapturePath && (
+                <div className="capture-status-meta">{liveScreen.lastCapturePath.replace(/^.*[\\/]/, "")}</div>
+              )}
+            </>
+          ) : (
+            <div className="capture-status-meta empty">No capture yet</div>
+          )}
         </div>
       </RailCard>
 
@@ -190,6 +234,20 @@ export default function RightRail({
         expanded={expandedPanels.raw}
         onToggle={() => onTogglePanel("raw")}
       >
+        <div className="raw-event-filter">
+          <label>
+            Filter
+            <select
+              value={rawEventFilter}
+              onChange={(e) => onRawEventFilterChange(e.target.value as RawEventFilter)}
+            >
+              {RAW_EVENT_FILTERS.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+          </label>
+          <span className="raw-event-count">{rawEvents.length} events</span>
+        </div>
         <div className="log-box raw">
           {rawEvents.map((e, i) => (
             <details key={`e-${i}`} className="raw-event">

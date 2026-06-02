@@ -361,10 +361,16 @@ class TestStyleEvents:
 
 
 class TestStatsEvents:
-    def test_stats_view_refresh(self):
+    def test_stats_view_refresh_empty(self):
         frame = _decode_frame(adapter.ui_tuple_to_ws_frame("stats_view_refresh", ""))
         assert frame["kind"] == "stats.refresh"
         assert frame["payload"] == {}
+
+    def test_stats_view_refresh_dict(self):
+        payload = {"summary_text": "2 turns", "record_count": 2, "turn_numbers": [1, 2], "total_ms": [100, 200]}
+        frame = _decode_frame(adapter.ui_tuple_to_ws_frame("stats_view_refresh", payload))
+        assert frame["kind"] == "stats.refresh"
+        assert frame["payload"] == payload
 
 
 class TestErrorEvents:

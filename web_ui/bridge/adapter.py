@@ -190,8 +190,16 @@ def _normalize_active_user_changed_payload(payload: object) -> dict[str, Any]:
 
 def _normalize_live_screen_refresh_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
-        return {"pending": bool(payload.get("pending"))}
-    return {}
+        return {
+            "pending": bool(payload.get("pending")),
+            "enabled": bool(payload.get("enabled")),
+            "mode": str(payload.get("mode") or ""),
+            "interval_s": float(payload.get("interval_s") or 10.0),
+            "last_capture_ts": float(payload.get("last_capture_ts") or 0.0),
+            "last_error": str(payload.get("last_error") or ""),
+            "last_capture_path": str(payload.get("last_capture_path") or ""),
+        }
+    return {"pending": False, "enabled": False, "mode": "", "interval_s": 10.0, "last_capture_ts": 0.0, "last_error": "", "last_capture_path": ""}
 
 
 def _normalize_document_ingest_payload(payload: object) -> dict[str, Any]:
@@ -244,6 +252,12 @@ def _normalize_error_payload(payload: object) -> dict[str, Any]:
 
 
 def _normalize_empty_payload(_payload: object) -> dict[str, Any]:
+    return {}
+
+
+def _normalize_stats_view_refresh_payload(payload: object) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return payload
     return {}
 
 
@@ -337,7 +351,7 @@ _EVENT_NORMALIZERS: dict[str, callable] = {
     "boot_ready": _normalize_generic_string_payload,
     "clear_thinking": _normalize_empty_payload,
     "documents_view": _normalize_generic_string_payload,
-    "stats_view_refresh": _normalize_empty_payload,
+    "stats_view_refresh": _normalize_stats_view_refresh_payload,
     "agent_log": _normalize_generic_string_payload,
 }
 
@@ -457,7 +471,7 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["status", "control"],
     },
     "stats_view_refresh": {
-        "payload_fields": {},
+        "payload_fields": {"summary_text": "str", "record_count": "int", "turn_numbers": "list[float]", "total_ms": "list[float]"},
         "visibility": ["status"],
     },
     "error": {
@@ -469,7 +483,15 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["log"],
     },
     "live_screen_refresh": {
-        "payload_fields": {"pending": "bool"},
+        "payload_fields": {
+            "pending": "bool",
+            "enabled": "bool",
+            "mode": "str",
+            "interval_s": "float",
+            "last_capture_ts": "float",
+            "last_error": "str",
+            "last_capture_path": "str",
+        },
         "visibility": ["status", "control"],
     },
     "config_reloaded": {

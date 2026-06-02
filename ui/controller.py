@@ -41,6 +41,7 @@ from ui.controller_actions import (
     on_new_session as on_new_session_action,
     on_restart as on_restart_action,
     on_event_speech_mode_changed as on_event_speech_mode_changed_action,
+    _emit_live_screen_state as _emit_live_screen_state_action,
     on_live_screen_interval_changed as on_live_screen_interval_changed_action,
     on_live_screen_mode_changed as on_live_screen_mode_changed_action,
     on_snapshot as on_snapshot_action,
@@ -1482,6 +1483,16 @@ class PiperController:
         elif action_name == "mic_audio_submit":
             _LOG.info("Web mic: action received")
             self._handle_web_mic_audio_submit(payload)
+        elif action_name == "stats_refresh":
+            try:
+                snapshot = self.stats_collector.build_dashboard_snapshot()
+                if isinstance(snapshot, dict):
+                    self.ui_queue.put(("stats_view_refresh", snapshot))
+                else:
+                    self.ui_queue.put(("stats_view_refresh", {}))
+            except Exception as exc:
+                _LOG.warning("stats_refresh failed: %s", exc)
+                self.ui_queue.put(("stats_view_refresh", {}))
         elif action_name == "snapshot_toggle":
             self.on_snapshot()
         elif action_name == "live_screen_mode":
@@ -1494,6 +1505,7 @@ class PiperController:
                 pass
             self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {mode}"
             self.set_vision_session_active(enabled)
+            _emit_live_screen_state_action(self)
             self.ui_queue.put(
                 ("status_widget_dashboard_activity", f"Live screen source set to {mode}.")
             )
@@ -1506,6 +1518,7 @@ class PiperController:
             except Exception:
                 pass
             self.screen_meta = f"Screen: {'LIVE' if enabled else 'OFF'} {interval_s}s"
+            _emit_live_screen_state_action(self)
             self.ui_queue.put(
                 (
                     "status_widget_dashboard_activity",

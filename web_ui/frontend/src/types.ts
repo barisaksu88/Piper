@@ -62,6 +62,39 @@ export type MicState = "idle" | "requesting_permission" | "listening" | "transcr
 
 export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
 
+export type AppView = "chat" | "stats";
+
+export interface LiveScreenState {
+  pending: boolean;
+  enabled: boolean;
+  mode: string;
+  intervalS: number;
+  lastCaptureTs: number;
+  lastError: string;
+  lastCapturePath: string;
+  lastRefreshAt: number | null;
+}
+
+export interface StatsState {
+  summaryText: string;
+  recordCount: number;
+  turnNumbers: number[];
+  turnLabels: string[];
+  totalMs: number[];
+  routeMs: number[];
+  managerMs: number[];
+  reporterMs: number[];
+  personaMs: number[];
+  ttsMs: number[];
+  plannerTotalMs: number[];
+  executorTotalMs: number[];
+  alerts: string[];
+  recentTurns: Array<{ timestamp: string; decision: string; outcome: string; totalMs: number }>;
+  receivedAt: number | null;
+}
+
+export type RawEventFilter = "all" | "errors" | "system" | "streaming";
+
 export type TtsState = "idle" | "synthesizing" | "playing" | "error";
 
 export interface MicStatus {

@@ -1,10 +1,12 @@
-import type { ConnectionState } from "../types";
+import type { AppView, ConnectionState } from "../types";
 
 interface TopBarProps {
   connState: ConnectionState;
   statusText: string;
   modeText: string;
   canStop: boolean;
+  activeView: AppView;
+  onViewChange: (view: AppView) => void;
   onNewSession: () => void;
   onRestart: () => void;
   onStop: () => void;
@@ -16,6 +18,8 @@ export default function TopBar({
   statusText,
   modeText,
   canStop,
+  activeView,
+  onViewChange,
   onNewSession,
   onRestart,
   onStop,
@@ -63,7 +67,18 @@ export default function TopBar({
       </div>
 
       <nav className="top-bar-nav">
-        <button className="nav-tab active">Chat</button>
+        <button
+          className={`nav-tab ${activeView === "chat" ? "active" : ""}`}
+          onClick={() => onViewChange("chat")}
+        >
+          Chat
+        </button>
+        <button
+          className={`nav-tab ${activeView === "stats" ? "active" : ""}`}
+          onClick={() => onViewChange("stats")}
+        >
+          Stats
+        </button>
       </nav>
 
       <div className="top-bar-actions">
