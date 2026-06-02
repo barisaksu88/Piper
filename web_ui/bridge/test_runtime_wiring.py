@@ -16,6 +16,7 @@ import queue
 import socket
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
 from unittest.mock import MagicMock, patch
@@ -564,6 +565,39 @@ class TestWebActionDispatch:
         ctrl = _make_mock_controller()
         ctrl._dispatch_web_action("snapshot_toggle", {})
         ctrl.on_snapshot.assert_called_once_with()
+
+    def test_screen_analyze_with_fresh_frame_submits_prompt(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.live_screen.current_image_path.return_value = Path("/tmp/workspace/images/live_screen.jpg")
+        ctrl._dispatch_web_action("screen_analyze", {"prompt": "What is on my screen?"})
+        ctrl.submit_user_text.assert_called_once_with("What is on my screen?")
+
+    def test_screen_analyze_empty_prompt_uses_default(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.live_screen.current_image_path.return_value = Path("/tmp/workspace/images/live_screen.jpg")
+        ctrl._dispatch_web_action("screen_analyze", {})
+        ctrl.submit_user_text.assert_called_once_with("Describe what you see on my screen.")
+
+    def test_screen_analyze_without_frame_queues_assistant_message(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.live_screen.current_image_path.return_value = None
+        ctrl.live_screen.is_enabled.return_value = False
+        ctrl._dispatch_web_action("screen_analyze", {})
+        ctrl.submit_user_text.assert_not_called()
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "chat_append"
+        assert payload["role"] == "assistant"
+        assert "Start Capture first" in payload["content"]
+
+    def test_screen_analyze_without_live_screen_queues_assistant_message(self) -> None:
+        ctrl = _make_mock_controller()
+        del ctrl.live_screen
+        ctrl._dispatch_web_action("screen_analyze", {})
+        ctrl.submit_user_text.assert_not_called()
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "chat_append"
+        assert payload["role"] == "assistant"
+        assert "Start Capture first" in payload["content"]
 
     def test_mic_toggle_starts_native_mic_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         ctrl = _make_mock_controller()

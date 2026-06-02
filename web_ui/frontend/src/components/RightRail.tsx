@@ -1,3 +1,4 @@
+import { useState } from "react";
 import RailCard from "./RailCard";
 import type { LiveScreenState, RailPanelId, RawEventFilter } from "../types";
 
@@ -34,6 +35,48 @@ interface RightRailProps {
   rawEventFilter: RawEventFilter;
   onRawEventFilterChange: (filter: RawEventFilter) => void;
   liveScreen: LiveScreenState;
+}
+
+function CaptureAnalyze({
+  sendAction,
+  connState,
+  liveScreen,
+}: {
+  sendAction: (action: string, payload?: Record<string, unknown>) => boolean;
+  connState: string;
+  liveScreen: LiveScreenState;
+}) {
+  const [prompt, setPrompt] = useState("");
+  const canAnalyze = connState === "connected" && (liveScreen.enabled || liveScreen.lastCaptureTs > 0);
+  return (
+    <div className="capture-analyze">
+      <input
+        className="input-text capture-analyze-input"
+        type="text"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && canAnalyze) {
+            e.preventDefault();
+            sendAction("screen_analyze", { prompt: prompt.trim() || undefined });
+            setPrompt("");
+          }
+        }}
+        placeholder="Ask about current screen..."
+        disabled={connState !== "connected"}
+      />
+      <button
+        className="capture-analyze-button"
+        onClick={() => {
+          sendAction("screen_analyze", { prompt: prompt.trim() || undefined });
+          setPrompt("");
+        }}
+        disabled={!canAnalyze}
+      >
+        Analyze Current Frame
+      </button>
+    </div>
+  );
 }
 
 export default function RightRail({
@@ -95,6 +138,7 @@ export default function RightRail({
             <div className="capture-error">{liveScreen.lastError}</div>
           )}
         </div>
+        <CaptureAnalyze sendAction={sendAction} connState={connState} liveScreen={liveScreen} />
         <div className="settings-row">
           <label className="setting-label">
             Event Speech

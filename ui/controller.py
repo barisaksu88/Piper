@@ -1495,6 +1495,39 @@ class PiperController:
                 self.ui_queue.put(("stats_view_refresh", {}))
         elif action_name == "snapshot_toggle":
             self.on_snapshot()
+        elif action_name == "screen_analyze":
+            prompt = str(payload.get("prompt", "") or "").strip()
+            if not prompt:
+                prompt = "Describe what you see on my screen."
+            has_frame = False
+            if getattr(self, "live_screen", None) is not None:
+                try:
+                    has_frame = self.live_screen.current_image_path(require_fresh=True) is not None
+                except Exception:
+                    pass
+                if not has_frame:
+                    try:
+                        enabled = self.live_screen.is_enabled()
+                    except Exception:
+                        enabled = False
+                    if enabled:
+                        try:
+                            self.live_screen.capture_once()
+                            has_frame = self.live_screen.current_image_path(require_fresh=True) is not None
+                        except Exception:
+                            pass
+            if has_frame:
+                submit_text_input_action(self, prompt, emit_bridge_events=True)
+            else:
+                self.ui_queue.put(
+                    (
+                        "chat_append",
+                        {
+                            "role": "assistant",
+                            "content": "Start Capture first to analyze the current screen.",
+                        },
+                    )
+                )
         elif action_name == "live_screen_mode":
             mode = str(payload.get("mode", "display")).strip().lower()
             self.live_screen.set_mode(mode)

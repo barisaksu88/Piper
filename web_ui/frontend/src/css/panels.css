@@ -420,6 +420,42 @@ label {
   border-bottom: 1px solid var(--border);
 }
 
+.capture-analyze {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.capture-analyze-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.capture-analyze-button {
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: center;
+}
+
+.capture-analyze-button:hover:not(:disabled) {
+  background: var(--border-light);
+  border-color: var(--text-dim);
+}
+
+.capture-analyze-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .capture-toggle {
   padding: 6px 10px;
   border-radius: 6px;
