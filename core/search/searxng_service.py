@@ -299,11 +299,33 @@ class SearXNGService:
 
     @staticmethod
     def _run_docker(args: list[str], timeout: float = 10.0) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            ["docker", *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-        )
+        cmd = ["docker", *args]
+        try:
+            return subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            return subprocess.CompletedProcess(
+                cmd,
+                returncode=124,
+                stdout=stdout,
+                stderr=f"docker command timed out after {timeout:.1f}s: {' '.join(cmd)}\n{stderr}".strip(),
+            )
+        except OSError as exc:
+            return subprocess.CompletedProcess(
+                cmd,
+                returncode=127,
+                stdout="",
+                stderr=f"docker command failed: {exc}",
+            )
