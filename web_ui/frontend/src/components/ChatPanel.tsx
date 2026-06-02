@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ChatMessage } from "../types";
 
 interface ChatPanelProps {
@@ -25,7 +26,7 @@ function displayRole(role: string, userName: string): string {
   return role;
 }
 
-export default function ChatPanel({
+function ChatPanel({
   messages,
   inputText,
   setInputText,
@@ -115,3 +116,5 @@ export default function ChatPanel({
     </div>
   );
 }
+
+export default memo(ChatPanel);

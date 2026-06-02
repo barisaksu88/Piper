@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { StatsState } from "../types";
 
 interface StatsPanelProps {
@@ -94,7 +95,7 @@ function BarSeries({
   );
 }
 
-export default function StatsPanel({ stats }: StatsPanelProps) {
+function StatsPanel({ stats }: StatsPanelProps) {
   const hasData = stats.recordCount > 0;
   const avgLatency =
     stats.totalMs.length > 0
@@ -209,3 +210,5 @@ export default function StatsPanel({ stats }: StatsPanelProps) {
     </div>
   );
 }
+
+export default memo(StatsPanel);

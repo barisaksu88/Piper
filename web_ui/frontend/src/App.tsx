@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PiperBridge, WS_URL } from "./bridge";
 import type { AppView, ConnectionState, RailPanelId } from "./types";
 import TopBar from "./components/TopBar";
@@ -327,26 +327,35 @@ export default function App() {
     }
   }, [micState, stopMicRecording, startMicRecording, clearStreamSuppression]);
 
-  const micDisabled =
-    connState !== "connected" ||
-    isGenerating ||
-    micState === "requesting_permission" ||
-    micState === "transcribing";
+  const micDisabled = useMemo(
+    () =>
+      connState !== "connected" ||
+      isGenerating ||
+      micState === "requesting_permission" ||
+      micState === "transcribing",
+    [connState, isGenerating, micState]
+  );
 
   const isSpeaking = ttsState === "playing";
-  const primaryStatusText =
-    micState === "listening"
-      ? "Listening"
-      : micState === "transcribing"
-        ? "Transcribing"
-        : isSpeaking
-          ? "Speaking"
-          : isGenerating
-            ? "Generating"
-            : statusText || "Idle";
-  const detailModeText = isSpeaking ? "TTS playing" : sanitizeOperationalText(modeText);
+  const primaryStatusText = useMemo(
+    () =>
+      micState === "listening"
+        ? "Listening"
+        : micState === "transcribing"
+          ? "Transcribing"
+          : isSpeaking
+            ? "Speaking"
+            : isGenerating
+              ? "Generating"
+              : statusText || "Idle",
+    [micState, isSpeaking, isGenerating, statusText]
+  );
+  const detailModeText = useMemo(
+    () => (isSpeaking ? "TTS playing" : sanitizeOperationalText(modeText)),
+    [isSpeaking, modeText]
+  );
 
-  const avatarState = (() => {
+  const avatarState = useMemo(() => {
     if (micState === "listening") return "listening";
     if (micState === "transcribing") return "transcribing";
     if (isSpeaking) return "speaking";
@@ -354,7 +363,13 @@ export default function App() {
     const st = statusText.toLowerCase();
     if (st.includes("thinking") || st.includes("planning")) return "thinking";
     return "idle";
-  })() as "idle" | "listening" | "transcribing" | "thinking" | "generating" | "speaking";
+  }, [micState, isSpeaking, isGenerating, statusText]) as
+    | "idle"
+    | "listening"
+    | "transcribing"
+    | "thinking"
+    | "generating"
+    | "speaking";
 
   return (
     <div className="app">
