@@ -916,6 +916,7 @@ def _emit_live_screen_state(controller) -> None:
         "interval_s": 10.0,
         "last_capture_ts": 0.0,
         "last_error": "",
+        "last_capture_path": "",
     }
     if getattr(controller, "live_screen", None) is not None:
         try:
@@ -925,6 +926,10 @@ def _emit_live_screen_state(controller) -> None:
             state["interval_s"] = ls_state.interval_s
             state["last_capture_ts"] = ls_state.last_capture_ts
             state["last_error"] = ls_state.last_error
+            try:
+                state["last_capture_path"] = str(ls_state.image_path or "")
+            except Exception:
+                pass
         except Exception:
             pass
     state["pending"] = bool(getattr(controller, "live_screen_pending", False))
@@ -969,14 +974,8 @@ def refresh_live_screen_ui(controller) -> None:
 
 
 def _start_live_screen(controller) -> None:
-    def on_capture(path: Path) -> None:
-        rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", {
-            "path": str(rel_path),
-            "url": f"/images/{path.name}",
-            "filename": path.name,
-            "caption": f"Image saved to: {rel_path}",
-        }))
+    def on_capture(_path: Path) -> None:
+        _emit_live_screen_state(controller)
 
     def on_error(message: str) -> None:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen capture error: {message}"))
@@ -985,43 +984,26 @@ def _start_live_screen(controller) -> None:
         path = controller.live_screen.start(on_capture=on_capture, on_error=on_error)
         rel_path = _workspace_relative_image_path(path)
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen mode enabled: {rel_path}"))
-        controller.ui_queue.put(
-            (
-                "chat_append",
-                {
-                    "role": "system",
-                    "content": "[UI] Live screen mode enabled. Piper will use the current screen image on new turns.",
-                },
-            )
-        )
     except ScreenCaptureError as exc:
         try:
             controller.live_screen.stop()
         except Exception:
             pass
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen error: {exc}"))
-        controller.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Live screen error: {exc}"}))
     except Exception as exc:
         try:
             controller.live_screen.stop()
         except Exception:
             pass
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen error: {exc}"))
-        controller.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Live screen error: {exc}"}))
     finally:
         _emit_live_screen_state(controller)
 
 
 def _recapture_live_screen(controller) -> None:
     try:
-        path = controller.live_screen.capture_once()
-        rel_path = _workspace_relative_image_path(path)
-        controller.ui_queue.put(("show_image", {
-            "path": str(rel_path),
-            "url": f"/images/{path.name}",
-            "filename": path.name,
-            "caption": f"Image saved to: {rel_path}",
-        }))
+        controller.live_screen.capture_once()
+        _emit_live_screen_state(controller)
     except Exception as exc:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen refresh error: {exc}"))
 
@@ -1037,7 +1019,6 @@ def on_snapshot(controller) -> None:
         refresh_live_screen_ui(controller)
         controller.refresh_interaction_state()
         controller.ui_queue.put(("status_widget_dashboard_activity", "Live screen mode disabled."))
-        controller.chat_append("system", "[UI] Live screen mode disabled.")
         _emit_live_screen_state(controller)
         return
 

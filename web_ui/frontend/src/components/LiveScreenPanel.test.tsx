@@ -22,7 +22,7 @@ describe("LiveScreenPanel", () => {
 
   it("shows pending state with timestamp", () => {
     act(() => {
-      root.render(<LiveScreenPanel liveScreen={{ pending: true, enabled: false, mode: "display", intervalS: 10, lastCaptureTs: 0, lastError: "", lastRefreshAt: Date.now() }} />);
+      root.render(<LiveScreenPanel liveScreen={{ pending: true, enabled: false, mode: "display", intervalS: 10, lastCaptureTs: 0, lastError: "", lastCapturePath: "", lastRefreshAt: Date.now() }} />);
     });
     expect(container.textContent).toContain("Capture pending");
     expect(container.textContent).toContain("Last refresh:");
@@ -30,7 +30,7 @@ describe("LiveScreenPanel", () => {
 
   it("shows idle state when not pending and no refresh", () => {
     act(() => {
-      root.render(<LiveScreenPanel liveScreen={{ pending: false, enabled: false, mode: "", intervalS: 10, lastCaptureTs: 0, lastError: "", lastRefreshAt: null }} />);
+      root.render(<LiveScreenPanel liveScreen={{ pending: false, enabled: false, mode: "", intervalS: 10, lastCaptureTs: 0, lastError: "", lastCapturePath: "", lastRefreshAt: null }} />);
     });
     expect(container.textContent).toContain("Idle");
     expect(container.textContent).toContain("No refresh yet");

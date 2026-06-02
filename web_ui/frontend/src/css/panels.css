@@ -571,6 +571,116 @@ label {
   text-align: center;
 }
 
+/* Stats sections */
+.stats-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stats-section-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.stats-chart-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.stats-sparkline {
+  display: block;
+}
+
+.stats-bar-series {
+  display: block;
+}
+
+/* Alerts */
+.stats-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-alert-item {
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.4;
+}
+
+/* Recent turns table */
+.stats-turns-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stats-turns-header {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 0.8fr 0.7fr;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-turns-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 0.8fr 0.7fr;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text);
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.stats-turns-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Raw summary details */
+.stats-raw-details {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.stats-raw-details summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+
+.stats-raw-pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-dim);
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 4px;

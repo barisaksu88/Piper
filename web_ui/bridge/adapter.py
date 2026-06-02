@@ -197,8 +197,9 @@ def _normalize_live_screen_refresh_payload(payload: object) -> dict[str, Any]:
             "interval_s": float(payload.get("interval_s") or 10.0),
             "last_capture_ts": float(payload.get("last_capture_ts") or 0.0),
             "last_error": str(payload.get("last_error") or ""),
+            "last_capture_path": str(payload.get("last_capture_path") or ""),
         }
-    return {"pending": False, "enabled": False, "mode": "", "interval_s": 10.0, "last_capture_ts": 0.0, "last_error": ""}
+    return {"pending": False, "enabled": False, "mode": "", "interval_s": 10.0, "last_capture_ts": 0.0, "last_error": "", "last_capture_path": ""}
 
 
 def _normalize_document_ingest_payload(payload: object) -> dict[str, Any]:
@@ -489,6 +490,7 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
             "interval_s": "float",
             "last_capture_ts": "float",
             "last_error": "str",
+            "last_capture_path": "str",
         },
         "visibility": ["status", "control"],
     },

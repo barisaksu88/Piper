@@ -79,13 +79,24 @@ export function useEventRouter({
     intervalS: 10,
     lastCaptureTs: 0,
     lastError: "",
+    lastCapturePath: "",
     lastRefreshAt: null,
   });
   const [stats, setStats] = useState<StatsState>({
     summaryText: "",
     recordCount: 0,
     turnNumbers: [],
+    turnLabels: [],
     totalMs: [],
+    routeMs: [],
+    managerMs: [],
+    reporterMs: [],
+    personaMs: [],
+    ttsMs: [],
+    plannerTotalMs: [],
+    executorTotalMs: [],
+    alerts: [],
+    recentTurns: [],
     receivedAt: null,
   });
   const [rawEventFilter, setRawEventFilter] = useState<RawEventFilter>("all");
@@ -313,9 +324,26 @@ export function useEventRouter({
       intervalS: 10,
       lastCaptureTs: 0,
       lastError: "",
+      lastCapturePath: "",
       lastRefreshAt: null,
     });
-    setStats({ summaryText: "", recordCount: 0, turnNumbers: [], totalMs: [], receivedAt: null });
+    setStats({
+      summaryText: "",
+      recordCount: 0,
+      turnNumbers: [],
+      turnLabels: [],
+      totalMs: [],
+      routeMs: [],
+      managerMs: [],
+      reporterMs: [],
+      personaMs: [],
+      ttsMs: [],
+      plannerTotalMs: [],
+      executorTotalMs: [],
+      alerts: [],
+      recentTurns: [],
+      receivedAt: null,
+    });
     setCodeOutput([]);
     setCodeStatus("idle");
     setCodeActive(false);
@@ -509,6 +537,7 @@ export function useEventRouter({
             interval_s?: number;
             last_capture_ts?: number;
             last_error?: string;
+            last_capture_path?: string;
           };
           setLiveScreen({
             pending: Boolean(p.pending),
@@ -517,6 +546,7 @@ export function useEventRouter({
             intervalS: Number(p.interval_s || 10),
             lastCaptureTs: Number(p.last_capture_ts || 0),
             lastError: String(p.last_error || ""),
+            lastCapturePath: String(p.last_capture_path || ""),
             lastRefreshAt: Date.now(),
           });
           appendActivity(`Screen refresh: ${p.pending ? "pending" : p.enabled ? "live" : "idle"}`);
@@ -528,13 +558,40 @@ export function useEventRouter({
             summary_text?: string;
             record_count?: number;
             turn_numbers?: number[];
+            turn_labels?: string[];
             total_ms?: number[];
+            route_ms?: number[];
+            manager_ms?: number[];
+            reporter_ms?: number[];
+            persona_ms?: number[];
+            tts_ms?: number[];
+            planner_total_ms?: number[];
+            executor_total_ms?: number[];
+            alerts?: string[];
+            recent_turns?: Array<{ timestamp?: string; decision?: string; outcome?: string; total_ms?: number }>;
           };
           setStats({
             summaryText: String(p.summary_text || ""),
             recordCount: Number(p.record_count || 0),
             turnNumbers: Array.isArray(p.turn_numbers) ? p.turn_numbers : [],
+            turnLabels: Array.isArray(p.turn_labels) ? p.turn_labels : [],
             totalMs: Array.isArray(p.total_ms) ? p.total_ms : [],
+            routeMs: Array.isArray(p.route_ms) ? p.route_ms : [],
+            managerMs: Array.isArray(p.manager_ms) ? p.manager_ms : [],
+            reporterMs: Array.isArray(p.reporter_ms) ? p.reporter_ms : [],
+            personaMs: Array.isArray(p.persona_ms) ? p.persona_ms : [],
+            ttsMs: Array.isArray(p.tts_ms) ? p.tts_ms : [],
+            plannerTotalMs: Array.isArray(p.planner_total_ms) ? p.planner_total_ms : [],
+            executorTotalMs: Array.isArray(p.executor_total_ms) ? p.executor_total_ms : [],
+            alerts: Array.isArray(p.alerts) ? p.alerts : [],
+            recentTurns: Array.isArray(p.recent_turns)
+              ? p.recent_turns.map((t) => ({
+                  timestamp: String(t.timestamp || ""),
+                  decision: String(t.decision || ""),
+                  outcome: String(t.outcome || ""),
+                  totalMs: Number(t.total_ms || 0),
+                }))
+              : [],
             receivedAt: Date.now(),
           });
           break;

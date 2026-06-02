@@ -71,6 +71,7 @@ export interface LiveScreenState {
   intervalS: number;
   lastCaptureTs: number;
   lastError: string;
+  lastCapturePath: string;
   lastRefreshAt: number | null;
 }
 
@@ -78,7 +79,17 @@ export interface StatsState {
   summaryText: string;
   recordCount: number;
   turnNumbers: number[];
+  turnLabels: string[];
   totalMs: number[];
+  routeMs: number[];
+  managerMs: number[];
+  reporterMs: number[];
+  personaMs: number[];
+  ttsMs: number[];
+  plannerTotalMs: number[];
+  executorTotalMs: number[];
+  alerts: string[];
+  recentTurns: Array<{ timestamp: string; decision: string; outcome: string; totalMs: number }>;
   receivedAt: number | null;
 }
 

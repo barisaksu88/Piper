@@ -17,7 +17,7 @@ import socket
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -633,6 +633,60 @@ class TestWebActionDispatch:
         monkeypatch.setattr("tools.stt.get_stt_engine", lambda: mock_engine)
         ctrl._dispatch_web_action("mic_stop", {})
         mock_engine.stop_recording.assert_not_called()
+
+
+class TestLiveScreenSilence:
+    """Live screen capture must not pollute chat with system messages or images."""
+
+    def test_start_live_screen_does_not_queue_chat_append_or_show_image(self) -> None:
+        from ui.controller_actions import _start_live_screen
+        from pathlib import Path
+
+        ctrl = _make_mock_controller()
+        ctrl.live_screen_pending = False
+        captured_callbacks: dict[str, Callable] = {}
+
+        def _fake_start(*, on_capture=None, on_error=None):
+            captured_callbacks["on_capture"] = on_capture
+            captured_callbacks["on_error"] = on_error
+            return Path("/tmp/workspace/images/live_screen.jpg")
+
+        ctrl.live_screen.start = _fake_start
+        _start_live_screen(ctrl)
+        # Simulate a background capture callback.
+        if captured_callbacks.get("on_capture"):
+            captured_callbacks["on_capture"](Path("/tmp/workspace/images/live_screen.jpg"))
+        events = _drain_queue(ctrl.ui_queue)
+        kinds = {kind for kind, _payload in events}
+        assert "chat_append" not in kinds, "live screen start must not append chat messages"
+        assert "show_image" not in kinds, "live screen capture must not show images in chat"
+        assert any(kind == "live_screen_refresh" for kind, _payload in events)
+
+    def test_recapture_live_screen_does_not_queue_show_image(self) -> None:
+        from ui.controller_actions import _recapture_live_screen
+        from pathlib import Path
+
+        ctrl = _make_mock_controller()
+        ctrl.live_screen_pending = False
+        ctrl.live_screen.capture_once.return_value = Path("/tmp/workspace/images/live_screen.jpg")
+        _recapture_live_screen(ctrl)
+        events = _drain_queue(ctrl.ui_queue)
+        kinds = {kind for kind, _payload in events}
+        assert "show_image" not in kinds, "recapture must not show images in chat"
+        assert any(kind == "live_screen_refresh" for kind, _payload in events)
+
+    def test_on_snapshot_stop_does_not_chat_append(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from ui.controller_actions import on_snapshot
+
+        ctrl = _make_mock_controller()
+        ctrl.live_screen.is_enabled.return_value = True
+        ctrl.live_screen_pending = False
+        monkeypatch.setattr("ui.controller_actions.refresh_live_screen_ui", lambda c: None)
+        on_snapshot(ctrl)
+        events = _drain_queue(ctrl.ui_queue)
+        kinds = {kind for kind, _payload in events}
+        assert "chat_append" not in kinds, "stopping live screen must not append system chat messages"
+        assert any(kind == "live_screen_refresh" for kind, _payload in events)
 
 
 # ---------------------------------------------------------------------------

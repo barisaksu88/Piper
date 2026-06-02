@@ -404,6 +404,20 @@ class StatsCollector:
         alerts = self.load_alert_lines(limit=alert_limit)
         return self._build_readonly_report_from_records(records, alerts)
 
+    def _recent_turns(self, records: list[dict[str, Any]], limit: int = 12) -> list[dict[str, Any]]:
+        turns: list[dict[str, Any]] = []
+        for record in records[-max(1, int(limit)) :]:
+            phase_ms = dict(record.get("phase_ms") or {})
+            turns.append(
+                {
+                    "timestamp": str(record.get("timestamp") or ""),
+                    "decision": str(record.get("decision") or "CHAT"),
+                    "outcome": str(record.get("outcome") or ""),
+                    "total_ms": round(float(phase_ms.get("total") or 0.0), 3),
+                }
+            )
+        return turns
+
     def build_dashboard_snapshot(
         self,
         *,
@@ -414,6 +428,7 @@ class StatsCollector:
         records = self.load_records(limit=limit or self.history_limit)
         alerts = self.load_alert_lines(limit=alert_limit)
         summary_text = self._build_readonly_report_from_records(records, alerts)
+        recent_turns = self._recent_turns(records, limit=graph_limit)
         if not records:
             return {
                 "summary_text": summary_text,
@@ -433,6 +448,7 @@ class StatsCollector:
                 "tts_ms": [],
                 "planner_total_ms": [],
                 "executor_total_ms": [],
+                "recent_turns": [],
             }
 
         recent_records = records[-max(12, int(graph_limit or 60)) :]
@@ -465,6 +481,7 @@ class StatsCollector:
             "tts_ms": [self._record_field_value(record, "tts") for record in recent_records],
             "planner_total_ms": [self._record_field_value(record, "planner_total") for record in recent_records],
             "executor_total_ms": [self._record_field_value(record, "executor_total") for record in recent_records],
+            "recent_turns": recent_turns,
         }
 
     def _build_readonly_report_from_records(self, records: list[dict[str, Any]], alerts: list[str]) -> str:

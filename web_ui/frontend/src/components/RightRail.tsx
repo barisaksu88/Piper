@@ -141,9 +141,14 @@ export default function RightRail({
             </span>
           </div>
           {liveScreen.lastCaptureTs ? (
-            <div className="capture-status-meta">
-              Last capture: {new Date(liveScreen.lastCaptureTs * 1000).toLocaleTimeString()}
-            </div>
+            <>
+              <div className="capture-status-meta">
+                Last capture: {new Date(liveScreen.lastCaptureTs * 1000).toLocaleTimeString()}
+              </div>
+              {liveScreen.lastCapturePath && (
+                <div className="capture-status-meta">{liveScreen.lastCapturePath.replace(/^.*[\\/]/, "")}</div>
+              )}
+            </>
           ) : (
             <div className="capture-status-meta empty">No capture yet</div>
           )}
