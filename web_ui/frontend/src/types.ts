@@ -66,6 +66,11 @@ export type AppView = "chat" | "stats";
 
 export interface LiveScreenState {
   pending: boolean;
+  enabled: boolean;
+  mode: string;
+  intervalS: number;
+  lastCaptureTs: number;
+  lastError: string;
   lastRefreshAt: number | null;
 }
 

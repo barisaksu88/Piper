@@ -904,6 +904,33 @@ def _get_live_screen_theme(controller):
     return theme
 
 
+def _emit_live_screen_state(controller) -> None:
+    """Build the current live-screen state dict and queue it for web UI consumers.
+
+    Safe to call from any thread; the state snapshot is taken under lock.
+    """
+    state: dict[str, object] = {
+        "enabled": False,
+        "pending": False,
+        "mode": "display",
+        "interval_s": 10.0,
+        "last_capture_ts": 0.0,
+        "last_error": "",
+    }
+    if getattr(controller, "live_screen", None) is not None:
+        try:
+            ls_state = controller.live_screen.state()
+            state["enabled"] = ls_state.enabled
+            state["mode"] = ls_state.mode
+            state["interval_s"] = ls_state.interval_s
+            state["last_capture_ts"] = ls_state.last_capture_ts
+            state["last_error"] = ls_state.last_error
+        except Exception:
+            pass
+    state["pending"] = bool(getattr(controller, "live_screen_pending", False))
+    controller.ui_queue.put(("live_screen_refresh", state))
+
+
 def refresh_live_screen_ui(controller) -> None:
     enabled = False
     mode = "display"
@@ -982,7 +1009,7 @@ def _start_live_screen(controller) -> None:
         controller.ui_queue.put(("status_widget_dashboard_activity", f"Live screen error: {exc}"))
         controller.ui_queue.put(("chat_append", {"role": "system", "content": f"[UI] Live screen error: {exc}"}))
     finally:
-        controller.ui_queue.put(("live_screen_refresh", {"pending": False}))
+        _emit_live_screen_state(controller)
 
 
 def _recapture_live_screen(controller) -> None:
@@ -1011,12 +1038,14 @@ def on_snapshot(controller) -> None:
         controller.refresh_interaction_state()
         controller.ui_queue.put(("status_widget_dashboard_activity", "Live screen mode disabled."))
         controller.chat_append("system", "[UI] Live screen mode disabled.")
+        _emit_live_screen_state(controller)
         return
 
     controller.live_screen_pending = True
     refresh_live_screen_ui(controller)
     controller.refresh_interaction_state()
     controller.ui_queue.put(("status_widget_dashboard_activity", "Starting live screen mode..."))
+    _emit_live_screen_state(controller)
     threading.Thread(target=_start_live_screen, args=(controller,), daemon=True).start()
 
 
@@ -1026,6 +1055,7 @@ def on_live_screen_mode_changed(controller, sender=None, app_data=None, user_dat
     mode = _parse_live_screen_mode_label(app_data)
     controller.live_screen.set_mode(mode)
     refresh_live_screen_ui(controller)
+    _emit_live_screen_state(controller)
     controller.ui_queue.put(
         ("status_widget_dashboard_activity", f"Live screen source set to {_format_live_screen_mode_label(mode)}.")
     )
@@ -1039,6 +1069,7 @@ def on_live_screen_interval_changed(controller, sender=None, app_data=None, user
     interval_s = _parse_live_screen_interval_label(app_data)
     controller.live_screen.set_interval(interval_s)
     refresh_live_screen_ui(controller)
+    _emit_live_screen_state(controller)
     controller.ui_queue.put(
         ("status_widget_dashboard_activity", f"Live screen interval set to {_format_live_screen_interval_label(interval_s)}.")
     )

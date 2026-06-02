@@ -215,6 +215,13 @@ export default function App() {
     []
   );
 
+  // Request persisted stats when switching to Stats view
+  useEffect(() => {
+    if (activeView === "stats" && connState === "connected") {
+      sendAction("stats_refresh");
+    }
+  }, [activeView, connState, sendAction]);
+
   // Request workspace file list when empty workspace is shown
   useEffect(() => {
     if (workspaceOpen && workspace.mode === "empty") {
@@ -428,8 +435,7 @@ export default function App() {
             rawEvents={filteredRawEvents}
             rawEventFilter={rawEventFilter}
             onRawEventFilterChange={setRawEventFilter}
-            liveScreenPending={liveScreen.pending}
-            liveScreenLastRefreshAt={liveScreen.lastRefreshAt}
+            liveScreen={liveScreen}
           />
 
           {/* Voice strip */}

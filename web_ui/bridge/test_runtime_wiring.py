@@ -540,6 +540,31 @@ class TestWebActionDispatch:
         ctrl._dispatch_web_action("live_screen_interval", {"interval_s": 5.0})
         ctrl.live_screen.set_interval.assert_called_once_with(5.0)
 
+    def test_stats_refresh_queues_stats_view_refresh(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.stats_collector.build_dashboard_snapshot.return_value = {
+            "summary_text": "3 turns",
+            "record_count": 3,
+        }
+        ctrl._dispatch_web_action("stats_refresh", {})
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "stats_view_refresh"
+        assert payload["summary_text"] == "3 turns"
+        assert payload["record_count"] == 3
+
+    def test_stats_refresh_queues_empty_on_error(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl.stats_collector.build_dashboard_snapshot.side_effect = RuntimeError("boom")
+        ctrl._dispatch_web_action("stats_refresh", {})
+        kind, payload = ctrl.ui_queue.get_nowait()
+        assert kind == "stats_view_refresh"
+        assert payload == {}
+
+    def test_snapshot_toggle_calls_on_snapshot(self) -> None:
+        ctrl = _make_mock_controller()
+        ctrl._dispatch_web_action("snapshot_toggle", {})
+        ctrl.on_snapshot.assert_called_once_with()
+
     def test_mic_toggle_starts_native_mic_when_idle(self, monkeypatch: pytest.MonkeyPatch) -> None:
         ctrl = _make_mock_controller()
         mock_engine = MagicMock()

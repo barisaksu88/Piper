@@ -101,6 +101,7 @@ KNOWN_ACTION_NAMES: set[str] = {
     "open_document_picker",
     "document_picker_selected",
     "document_picker_cancel",
+    "stats_refresh",
     "code_send",
     "code_run",
     "code_clear",

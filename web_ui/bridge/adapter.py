@@ -190,8 +190,15 @@ def _normalize_active_user_changed_payload(payload: object) -> dict[str, Any]:
 
 def _normalize_live_screen_refresh_payload(payload: object) -> dict[str, Any]:
     if isinstance(payload, dict):
-        return {"pending": bool(payload.get("pending"))}
-    return {}
+        return {
+            "pending": bool(payload.get("pending")),
+            "enabled": bool(payload.get("enabled")),
+            "mode": str(payload.get("mode") or ""),
+            "interval_s": float(payload.get("interval_s") or 10.0),
+            "last_capture_ts": float(payload.get("last_capture_ts") or 0.0),
+            "last_error": str(payload.get("last_error") or ""),
+        }
+    return {"pending": False, "enabled": False, "mode": "", "interval_s": 10.0, "last_capture_ts": 0.0, "last_error": ""}
 
 
 def _normalize_document_ingest_payload(payload: object) -> dict[str, Any]:
@@ -475,7 +482,14 @@ _EVENT_SCHEMAS: dict[str, dict[str, Any]] = {
         "visibility": ["log"],
     },
     "live_screen_refresh": {
-        "payload_fields": {"pending": "bool"},
+        "payload_fields": {
+            "pending": "bool",
+            "enabled": "bool",
+            "mode": "str",
+            "interval_s": "float",
+            "last_capture_ts": "float",
+            "last_error": "str",
+        },
         "visibility": ["status", "control"],
     },
     "config_reloaded": {

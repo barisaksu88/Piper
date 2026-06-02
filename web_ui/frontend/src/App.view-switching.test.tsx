@@ -135,6 +135,6 @@ describe("App view switching", () => {
       captureHeader!.click();
     });
 
-    expect(harness.container.textContent).toContain("Capture pending");
+    expect(harness.container.textContent).toContain("Starting...");
   });
 });

@@ -72,7 +72,15 @@ export function useEventRouter({
   const [selectedDocumentPaths, setSelectedDocumentPaths] = useState<string[]>([]);
   const [micStatus, setMicStatus] = useState<MicStatus>({ state: "idle" });
 
-  const [liveScreen, setLiveScreen] = useState<LiveScreenState>({ pending: false, lastRefreshAt: null });
+  const [liveScreen, setLiveScreen] = useState<LiveScreenState>({
+    pending: false,
+    enabled: false,
+    mode: "",
+    intervalS: 10,
+    lastCaptureTs: 0,
+    lastError: "",
+    lastRefreshAt: null,
+  });
   const [stats, setStats] = useState<StatsState>({
     summaryText: "",
     recordCount: 0,
@@ -298,7 +306,15 @@ export function useEventRouter({
     setLogs([]);
     setRawEvents([]);
     setRawEventFilter("all");
-    setLiveScreen({ pending: false, lastRefreshAt: null });
+    setLiveScreen({
+      pending: false,
+      enabled: false,
+      mode: "",
+      intervalS: 10,
+      lastCaptureTs: 0,
+      lastError: "",
+      lastRefreshAt: null,
+    });
     setStats({ summaryText: "", recordCount: 0, turnNumbers: [], totalMs: [], receivedAt: null });
     setCodeOutput([]);
     setCodeStatus("idle");
@@ -486,9 +502,24 @@ export function useEventRouter({
         }
 
         case "screen.refresh": {
-          const p = payload as { pending?: boolean };
-          setLiveScreen({ pending: Boolean(p.pending), lastRefreshAt: Date.now() });
-          appendActivity(`Screen refresh: ${p.pending ? "pending" : "idle"}`);
+          const p = payload as {
+            pending?: boolean;
+            enabled?: boolean;
+            mode?: string;
+            interval_s?: number;
+            last_capture_ts?: number;
+            last_error?: string;
+          };
+          setLiveScreen({
+            pending: Boolean(p.pending),
+            enabled: Boolean(p.enabled),
+            mode: String(p.mode || ""),
+            intervalS: Number(p.interval_s || 10),
+            lastCaptureTs: Number(p.last_capture_ts || 0),
+            lastError: String(p.last_error || ""),
+            lastRefreshAt: Date.now(),
+          });
+          appendActivity(`Screen refresh: ${p.pending ? "pending" : p.enabled ? "live" : "idle"}`);
           break;
         }
 

@@ -411,6 +411,62 @@ label {
   padding: 4px 0;
 }
 
+/* Capture toggle */
+.capture-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.capture-toggle {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.capture-toggle:hover:not(:disabled) {
+  background: var(--border-light);
+  border-color: var(--text-dim);
+}
+
+.capture-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.capture-toggle.start {
+  color: var(--badge-connected);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.capture-toggle.start:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.capture-toggle.stop {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.capture-toggle.stop:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.capture-error {
+  font-size: 10px;
+  color: var(--danger);
+  padding: 2px 0;
+}
+
 /* Capture status (merged into Capture card) */
 .capture-status {
   padding: 8px 10px;
