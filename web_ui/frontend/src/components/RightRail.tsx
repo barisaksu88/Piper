@@ -1,7 +1,5 @@
 import RailCard from "./RailCard";
-import LiveScreenPanel from "./LiveScreenPanel";
-import StatsPanel from "./StatsPanel";
-import type { LiveScreenState, RailPanelId, RawEventFilter, StatsState } from "../types";
+import type { RailPanelId, RawEventFilter } from "../types";
 
 const EVENT_SPEECH_MODES = ["off", "noisy", "all"];
 const LIVE_SCREEN_MODES = ["display", "window", "pointer"];
@@ -35,8 +33,8 @@ interface RightRailProps {
   }>;
   rawEventFilter: RawEventFilter;
   onRawEventFilterChange: (filter: RawEventFilter) => void;
-  liveScreen: LiveScreenState;
-  stats: StatsState;
+  liveScreenPending: boolean;
+  liveScreenLastRefreshAt: number | null;
 }
 
 export default function RightRail({
@@ -61,8 +59,8 @@ export default function RightRail({
   rawEvents,
   rawEventFilter,
   onRawEventFilterChange,
-  liveScreen,
-  stats,
+  liveScreenPending,
+  liveScreenLastRefreshAt,
 }: RightRailProps) {
   return (
     <aside className="right-rail">
@@ -81,6 +79,11 @@ export default function RightRail({
         collapsible
         expanded={expandedPanels.capture}
         onToggle={() => onTogglePanel("capture")}
+        badge={
+          <span className={`rail-badge ${liveScreenPending ? "active" : ""}`}>
+            {liveScreenPending ? "Pending" : "Idle"}
+          </span>
+        }
       >
         <div className="settings-row">
           <label className="setting-label">
@@ -120,29 +123,21 @@ export default function RightRail({
             </select>
           </label>
         </div>
-      </RailCard>
-
-      <RailCard
-        title="Live Screen"
-        collapsible
-        expanded={expandedPanels.liveScreen}
-        onToggle={() => onTogglePanel("liveScreen")}
-        badge={
-          <span className={`rail-badge ${liveScreen.pending ? "active" : ""}`}>
-            {liveScreen.pending ? "Pending" : "Idle"}
-          </span>
-        }
-      >
-        <LiveScreenPanel liveScreen={liveScreen} />
-      </RailCard>
-
-      <RailCard
-        title="Stats"
-        collapsible
-        expanded={expandedPanels.stats}
-        onToggle={() => onTogglePanel("stats")}
-      >
-        <StatsPanel stats={stats} />
+        <div className="capture-status">
+          <div className="capture-status-row">
+            <span className={`live-screen-dot ${liveScreenPending ? "pending" : "idle"}`} />
+            <span className="capture-status-label">
+              {liveScreenPending ? "Capture pending" : "Idle"}
+            </span>
+          </div>
+          {liveScreenLastRefreshAt ? (
+            <div className="capture-status-meta">
+              Last refresh: {new Date(liveScreenLastRefreshAt).toLocaleTimeString()}
+            </div>
+          ) : (
+            <div className="capture-status-meta empty">No refresh yet</div>
+          )}
+        </div>
       </RailCard>
 
       <RailCard

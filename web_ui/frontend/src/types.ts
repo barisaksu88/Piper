@@ -60,7 +60,9 @@ export interface UiError {
 
 export type MicState = "idle" | "requesting_permission" | "listening" | "transcribing" | "error";
 
-export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture" | "liveScreen" | "stats";
+export type RailPanelId = "code" | "documents" | "system" | "activity" | "raw" | "capture";
+
+export type AppView = "chat" | "stats";
 
 export interface LiveScreenState {
   pending: boolean;
