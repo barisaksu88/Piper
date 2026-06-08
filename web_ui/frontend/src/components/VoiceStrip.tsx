@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { MicState, MicStatus } from "../types";
 
 interface VoiceStripProps {
@@ -13,7 +14,7 @@ interface VoiceStripProps {
   isSpeaking?: boolean;
 }
 
-export default function VoiceStrip({
+function VoiceStrip({
   micState,
   micButtonLabel,
   micButtonClass,
@@ -128,3 +129,5 @@ export default function VoiceStrip({
     </div>
   );
 }
+
+export default memo(VoiceStrip);

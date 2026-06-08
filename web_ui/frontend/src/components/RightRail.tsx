@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import RailCard from "./RailCard";
 import type { LiveScreenState, RailPanelId, RawEventFilter } from "../types";
 
@@ -79,7 +79,7 @@ function CaptureAnalyze({
   );
 }
 
-export default function RightRail({
+function RightRail({
   expandedPanels,
   onTogglePanel,
   workspaceOpen,
@@ -304,3 +304,5 @@ export default function RightRail({
     </aside>
   );
 }
+
+export default memo(RightRail);

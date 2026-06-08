@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 interface AvatarStageProps {
   state: "idle" | "listening" | "transcribing" | "thinking" | "generating" | "speaking";
 }
@@ -38,7 +40,7 @@ const STATE_META: Record<
   },
 };
 
-export default function AvatarStage({ state }: AvatarStageProps) {
+function AvatarStage({ state }: AvatarStageProps) {
   const meta = STATE_META[state] || STATE_META.idle;
   return (
     <div className={`avatar-stage ${state}`}>
@@ -72,3 +74,5 @@ export default function AvatarStage({ state }: AvatarStageProps) {
     </div>
   );
 }
+
+export default memo(AvatarStage);
